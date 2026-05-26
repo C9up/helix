@@ -1,0 +1,23 @@
+[package]
+name = "ream-test-napi"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", features = ["napi4", "tokio_rt"] }
+napi-derive = "2"
+ream-test-core = { path = "../ream-test-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "sync", "time", "macros", "rt-multi-thread"] }
+futures = "0.3"
+num_cpus = "1"
+
+[build-dependencies]
+napi-build = "2"
