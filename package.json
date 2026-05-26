@@ -1,0 +1,86 @@
+{
+	"name": "@c9up/helix",
+	"version": "0.1.0",
+	"description": "Helix — unified testing toolkit for the Ream ecosystem (bus + http + db fakes, fluent assertions, container overrides, time-travel)",
+	"license": "MIT",
+	"type": "module",
+	"main": "src/index.ts",
+	"types": "src/index.ts",
+	"bin": {
+		"helix": "bin/helix.js"
+	},
+	"exports": {
+		".": {
+			"import": "./src/index.ts",
+			"types": "./src/index.ts"
+		},
+		"./bus": {
+			"import": "./src/bus/index.ts",
+			"types": "./src/bus/index.ts"
+		},
+		"./http": {
+			"import": "./src/http/index.ts",
+			"types": "./src/http/index.ts"
+		},
+		"./logger": {
+			"import": "./src/logger/index.ts",
+			"types": "./src/logger/index.ts"
+		},
+		"./mail": {
+			"import": "./src/mail/index.ts",
+			"types": "./src/mail/index.ts"
+		},
+		"./nova": {
+			"import": "./src/nova/index.ts",
+			"types": "./src/nova/index.ts"
+		},
+		"./queue": {
+			"import": "./src/queue/index.ts",
+			"types": "./src/queue/index.ts"
+		},
+		"./relay": {
+			"import": "./src/relay/index.ts",
+			"types": "./src/relay/index.ts"
+		},
+		"./storage": {
+			"import": "./src/storage/index.ts",
+			"types": "./src/storage/index.ts"
+		},
+		"./db": {
+			"import": "./src/db/index.ts",
+			"types": "./src/db/index.ts"
+		},
+		"./container": {
+			"import": "./src/container/index.ts",
+			"types": "./src/container/index.ts"
+		},
+		"./time": {
+			"import": "./src/time/index.ts",
+			"types": "./src/time/index.ts"
+		},
+		"./runtime": {
+			"import": "./src/runtime/index.ts",
+			"types": "./src/runtime/index.ts"
+		},
+		"./runtime/worker": {
+			"import": "./src/runtime/worker.ts",
+			"types": "./src/runtime/worker.ts"
+		},
+		"./bin/helix.js": "./bin/helix.js"
+	},
+	"scripts": {
+		"build": "tsc --noEmit",
+		"test": "vitest run",
+		"test:self": "node bin/helix.js test tests/selftest --timeout=30000",
+		"lint": "biome check src/",
+		"test:coverage": "vitest run --coverage"
+	},
+	"devDependencies": {
+		"@types/node": "*"
+	},
+	"peerDependencies": {
+		"@c9up/atlas": "workspace:*",
+		"@c9up/pulsar": "workspace:*",
+		"@c9up/ream": "workspace:*"
+	}
+}
