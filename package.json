@@ -4,83 +4,105 @@
 	"description": "Helix — unified testing toolkit for the Ream ecosystem (bus + http + db fakes, fluent assertions, container overrides, time-travel)",
 	"license": "MIT",
 	"type": "module",
-	"main": "src/index.ts",
-	"types": "src/index.ts",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
 	"bin": {
 		"helix": "bin/helix.js"
 	},
 	"exports": {
 		".": {
-			"import": "./src/index.ts",
-			"types": "./src/index.ts"
+			"types": "./dist/index.d.ts",
+			"development": "./src/index.ts",
+			"import": "./dist/index.js"
 		},
 		"./bus": {
-			"import": "./src/bus/index.ts",
-			"types": "./src/bus/index.ts"
+			"types": "./dist/bus/index.d.ts",
+			"development": "./src/bus/index.ts",
+			"import": "./dist/bus/index.js"
 		},
 		"./http": {
-			"import": "./src/http/index.ts",
-			"types": "./src/http/index.ts"
+			"types": "./dist/http/index.d.ts",
+			"development": "./src/http/index.ts",
+			"import": "./dist/http/index.js"
 		},
 		"./logger": {
-			"import": "./src/logger/index.ts",
-			"types": "./src/logger/index.ts"
+			"types": "./dist/logger/index.d.ts",
+			"development": "./src/logger/index.ts",
+			"import": "./dist/logger/index.js"
 		},
 		"./mail": {
-			"import": "./src/mail/index.ts",
-			"types": "./src/mail/index.ts"
+			"types": "./dist/mail/index.d.ts",
+			"development": "./src/mail/index.ts",
+			"import": "./dist/mail/index.js"
 		},
 		"./nova": {
-			"import": "./src/nova/index.ts",
-			"types": "./src/nova/index.ts"
+			"types": "./dist/nova/index.d.ts",
+			"development": "./src/nova/index.ts",
+			"import": "./dist/nova/index.js"
 		},
 		"./queue": {
-			"import": "./src/queue/index.ts",
-			"types": "./src/queue/index.ts"
+			"types": "./dist/queue/index.d.ts",
+			"development": "./src/queue/index.ts",
+			"import": "./dist/queue/index.js"
 		},
 		"./relay": {
-			"import": "./src/relay/index.ts",
-			"types": "./src/relay/index.ts"
+			"types": "./dist/relay/index.d.ts",
+			"development": "./src/relay/index.ts",
+			"import": "./dist/relay/index.js"
 		},
 		"./storage": {
-			"import": "./src/storage/index.ts",
-			"types": "./src/storage/index.ts"
+			"types": "./dist/storage/index.d.ts",
+			"development": "./src/storage/index.ts",
+			"import": "./dist/storage/index.js"
 		},
 		"./db": {
-			"import": "./src/db/index.ts",
-			"types": "./src/db/index.ts"
+			"types": "./dist/db/index.d.ts",
+			"development": "./src/db/index.ts",
+			"import": "./dist/db/index.js"
 		},
 		"./container": {
-			"import": "./src/container/index.ts",
-			"types": "./src/container/index.ts"
+			"types": "./dist/container/index.d.ts",
+			"development": "./src/container/index.ts",
+			"import": "./dist/container/index.js"
 		},
 		"./time": {
-			"import": "./src/time/index.ts",
-			"types": "./src/time/index.ts"
+			"types": "./dist/time/index.d.ts",
+			"development": "./src/time/index.ts",
+			"import": "./dist/time/index.js"
 		},
 		"./runtime": {
-			"import": "./src/runtime/index.ts",
-			"types": "./src/runtime/index.ts"
+			"types": "./dist/runtime/index.d.ts",
+			"development": "./src/runtime/index.ts",
+			"import": "./dist/runtime/index.js"
 		},
 		"./runtime/worker": {
-			"import": "./src/runtime/worker.ts",
-			"types": "./src/runtime/worker.ts"
+			"types": "./dist/runtime/worker.d.ts",
+			"development": "./src/runtime/worker.ts",
+			"import": "./dist/runtime/worker.js"
 		},
 		"./bin/helix.js": "./bin/helix.js"
 	},
 	"scripts": {
-		"build": "tsc --noEmit",
+		"build": "tsc -p tsconfig.build.json",
 		"test": "vitest run",
 		"test:self": "node bin/helix.js test tests/selftest --timeout=30000",
 		"lint": "biome check src/",
-		"test:coverage": "vitest run --coverage"
+		"test:coverage": "vitest run --coverage",
+		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
-		"@types/node": "*"
+		"@types/node": "*",
+		"typescript": "^6.0.2"
 	},
 	"peerDependencies": {
 		"@c9up/atlas": "workspace:*",
 		"@c9up/pulsar": "workspace:*",
 		"@c9up/ream": "workspace:*"
-	}
+	},
+	"files": [
+		"src",
+		"dist",
+		"README.md",
+		"LICENSE"
+	]
 }
