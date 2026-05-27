@@ -268,15 +268,25 @@ async function main() {
 		}
 	}
 
-	// Import the TS orchestrator. This fails with ERR_UNKNOWN_FILE_EXTENSION
-	// if no TS loader is active in this process — in that case we re-exec
-	// ourselves with the tsx loader, matching what we'd pass to workers.
-	const runModule = pathToFileURL(path.resolve(here, "../src/cli/run.ts")).href;
+	// Import the TS orchestrator. Prefer the COMPILED `dist/cli/*.js`
+	// when present (the published tarball ships it via `pnpm build` at
+	// prepublish) so a standalone `npx helix` runs plain JS — no TS
+	// loader needed for the orchestrator itself. Fall back to the
+	// `src/cli/*.ts` sources in the workspace (dev) where dist isn't
+	// built; that path fails with ERR_UNKNOWN_FILE_EXTENSION when no TS
+	// loader is active, which triggers the tsx re-exec below.
+	const distRun = path.resolve(here, "../dist/cli/run.js");
+	const useDist = existsSync(distRun);
+	const runModule = pathToFileURL(
+		useDist ? distRun : path.resolve(here, "../src/cli/run.ts"),
+	).href;
 	try {
 		// Probe by resolving through dynamic import; Node throws synchronously.
 		const { run } = await import(runModule);
 		const discoverModule = pathToFileURL(
-			path.resolve(here, "../src/cli/discover.ts"),
+			useDist
+				? path.resolve(here, "../dist/cli/discover.js")
+				: path.resolve(here, "../src/cli/discover.ts"),
 		).href;
 		const { discover } = await import(discoverModule);
 

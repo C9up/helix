@@ -76,6 +76,9 @@
 		"test:coverage": "vitest run --coverage",
 		"typecheck": "tsc --noEmit"
 	},
+	"dependencies": {
+		"tsx": "^4.21.0"
+	},
 	"devDependencies": {
 		"@types/node": "*",
 		"typescript": "^6.0.2"
@@ -86,6 +89,7 @@
 		"@c9up/ream": "workspace:*"
 	},
 	"files": [
+		"bin",
 		"src",
 		"dist",
 		"README.md",
