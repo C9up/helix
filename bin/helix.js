@@ -275,8 +275,16 @@ async function main() {
 	// `src/cli/*.ts` sources in the workspace (dev) where dist isn't
 	// built; that path fails with ERR_UNKNOWN_FILE_EXTENSION when no TS
 	// loader is active, which triggers the tsx re-exec below.
+	// Prefer SRC when it exists (= workspace dev) — the package.json `exports`
+	// resolves `@c9up/helix` to src/ in the working tree (publishConfig swaps
+	// to dist at publish). If we ran from dist while test files import the src
+	// build, the worker's helix runtime and the test's helix runtime are two
+	// DIFFERENT module instances with separate `describe`/`it` registries —
+	// tests register on one side, the worker reads the other → 0 tests found.
+	// Falling back to dist when src is absent covers the published-install case.
+	const srcRun = path.resolve(here, "../src/cli/run.ts");
 	const distRun = path.resolve(here, "../dist/cli/run.js");
-	const useDist = existsSync(distRun);
+	const useDist = !existsSync(srcRun) && existsSync(distRun);
 	const runModule = pathToFileURL(
 		useDist ? distRun : path.resolve(here, "../src/cli/run.ts"),
 	).href;

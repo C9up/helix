@@ -14,6 +14,7 @@
  */
 
 import { rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,7 +100,15 @@ export interface RunOutcome {
 }
 
 function defaultWorkerEntry(): string {
+	// Resolve relative to THIS module's directory so it works whether we run
+	// from `src/cli/run.ts` (dev: src sibling is `.ts`) or from the compiled
+	// `dist/cli/run.js` (publish: sibling is `.js`). Hardcoding `.ts` made
+	// the spawned worker open a non-existent `dist/runtime/cli-worker.ts`
+	// when consumed via the dist tarball, dying silently before the pool's
+	// frame handler could observe anything.
 	const here = path.dirname(fileURLToPath(import.meta.url));
+	const compiled = path.resolve(here, "../runtime/cli-worker.js");
+	if (existsSync(compiled)) return compiled;
 	return path.resolve(here, "../runtime/cli-worker.ts");
 }
 

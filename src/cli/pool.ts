@@ -299,7 +299,12 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		let stderrBuffer = "";
 
 		const processLine = (line: string): void => {
-			if (!line.startsWith(FRAME_PREFIX)) return;
+			if (!line.startsWith(FRAME_PREFIX)) {
+				if (process.env.HELIX_DEBUG_POOL) {
+					process.stderr.write(`[helix-debug] worker stderr: ${line}\n`);
+				}
+				return;
+			}
 			const payload = line.slice(FRAME_PREFIX.length);
 			let msg: unknown;
 			try {
