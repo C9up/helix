@@ -70,6 +70,7 @@
 	},
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json",
+		"build:napi": "cargo build --release -p ream-test-napi && node scripts/copy-napi.mjs",
 		"test": "vitest run",
 		"test:self": "node bin/helix.js test tests/selftest --timeout=30000",
 		"lint": "biome check src/",

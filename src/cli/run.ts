@@ -13,8 +13,8 @@
  * the same `Summary`.
  */
 
-import { rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,9 +33,15 @@ import {
 	violationSummary,
 } from "./coverage/index.js";
 import { type DiscoveryOptions, discover } from "./discover.js";
+import { getNative } from "./native.js";
 import { runPool } from "./pool.js";
 import { makeReporter, type Reporter } from "./reporter.js";
-import { buildSummary, exitCode, type Summary } from "./summary.js";
+import {
+	buildSummary,
+	exitCode,
+	type Summary,
+	type Totals,
+} from "./summary.js";
 import { runWatch } from "./watch/loop.js";
 import type { WatchOptions } from "./watch/types.js";
 
@@ -112,6 +118,47 @@ function defaultWorkerEntry(): string {
 	return path.resolve(here, "../runtime/cli-worker.ts");
 }
 
+/**
+ * Plain-path execution via the native `ream-test-napi` engine: it discovers
+ * (skipped here — we pass the resolved `files`), spawns the worker pool, drives
+ * the reporter, and returns aggregated totals. Per-file detail is carried in
+ * `payload.json` (same shape as `Summary`) for callers that need it; the CLI
+ * only consumes `exitCode`, and the Rust reporter already streamed per-file
+ * output, so the reconstructed `Summary` keeps the detail arrays empty.
+ */
+async function runNative(
+	config: RunConfig,
+	root: string,
+	files: string[],
+): Promise<RunOutcome> {
+	const { run: nativeRun } = getNative();
+	const payload = await nativeRun({
+		root,
+		files,
+		threads: config.threads,
+		timeoutMs: config.timeoutMs,
+		reporter: config.reporter,
+		workerEntry: config.workerEntry ?? defaultWorkerEntry(),
+		nodeBin: config.nodeBin ?? process.execPath,
+		nodeArgs: config.nodeArgs,
+		useColors: config.useColors ?? process.stdout.isTTY === true,
+	});
+	const totals: Totals = {
+		pass: payload.pass,
+		fail: payload.fail,
+		skip: payload.skip,
+		todo: payload.todo,
+		fileErrors: payload.fileErrors,
+	};
+	const summary: Summary = {
+		totals,
+		files: [],
+		fileErrors: [],
+		durationMs: payload.durationMs,
+	};
+	return { summary, exitCode: payload.exitCode };
+}
+
 export async function run(config: RunConfig): Promise<RunOutcome> {
 	if (!config.watch?.enabled) return runOnce(config);
 	const root = path.isAbsolute(config.root)
@@ -157,6 +204,19 @@ async function runOnce(config: RunConfig): Promise<RunOutcome> {
 		process.stderr.write(
 			`helix: no test files found under ${root} — check your include/exclude patterns.\n`,
 		);
+	}
+
+	// Cutover: the Rust NAPI engine owns the plain discovery + worker-pool +
+	// reporter + summary path (42-N-orchestrator). Delegate unless a TS-only
+	// layer is active — a pluggable reporter instance, coverage, or diff-cov,
+	// none of which the Rust `run` exposes yet. Watch is already unwrapped by
+	// `run()` above, so it never reaches here.
+	if (
+		!config.reporterInstance &&
+		config.coverage?.enabled !== true &&
+		config.diffCoverage?.enabled !== true
+	) {
+		return runNative(config, root, files);
 	}
 
 	const reporter =
