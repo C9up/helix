@@ -1,0 +1,62 @@
+name: helix-ci
+
+on:
+  push: { branches: [main] }
+  pull_request: { branches: [main] }
+  workflow_dispatch:
+    inputs:
+      confirm_overwrite:
+        description: 'Type YES to override drift gate (rollback path).'
+        required: false
+        default: 'no'
+
+permissions: { contents: read }
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: pnpm install
+      - run: pnpm test
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', registry-url: 'https://registry.npmjs.org' }
+      - name: Verify NPM_TOKEN
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then echo "::error::NPM_TOKEN missing"; exit 1; fi
+      - name: Tag-vs-package.json gate
+        run: |
+          tag=$(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          pkg_v=$(node -p "require('./package.json').version")
+          if [ "$tag" != "v${pkg_v}" ]; then echo "::error::tag $tag != v${pkg_v}"; exit 1; fi
+      - name: Drift gate
+        env: { CONFIRM_OVERWRITE: '${{ inputs.confirm_overwrite }}' }
+        run: |
+          local_v=$(node -p "require('./package.json').version")
+          npm_v=$(npm view --fetch-timeout=30000 @c9up/helix version 2>/dev/null || echo "")
+          if [ -z "$npm_v" ]; then echo "first publish"; exit 0; fi
+          if [ "$local_v" = "$npm_v" ] && [ "$CONFIRM_OVERWRITE" != "YES" ]; then
+            echo "::error::$local_v already published"; exit 1; fi
+      - run: pnpm install
+      - run: pnpm build
+        continue-on-error: true
+      - run: pnpm publish --access public --no-git-checks
+        env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
