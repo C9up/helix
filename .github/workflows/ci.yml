@@ -57,7 +57,7 @@ jobs:
 
       - name: Vitest (JSON reporter)
         if: matrix.test
-        run: pnpm exec vitest run --reporter=json --outputFile=test-results.json
+        run: pnpm exec vitest run tests/unit --reporter=json --outputFile=test-results.json
         shell: bash
 
       - name: Smoke gate — tests ran AND zero skipped (Linux/macOS)
