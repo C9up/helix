@@ -14,6 +14,10 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+// Only the `#[cfg(unix)]` `fill_os_random` uses `Read::read_exact` (on
+// `/dev/urandom`); gating the import keeps the Windows build warning-clean
+// under `-D warnings`.
+#[cfg(unix)]
 use std::io::Read as _;
 use tokio::process::Command;
 use tokio::sync::Mutex;
