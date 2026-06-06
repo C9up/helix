@@ -1,13 +1,14 @@
 /**
- * Integration tests for `helix.override` (Story 42-3, FR69).
+ * Tests for `helix.override` (Story 42-3, FR69) — value-based override,
+ * manual + auto restore, and the `withTestContext` cleanup lifecycle.
  *
- * Covers value-based override, class/string/symbol tokens, manual
- * restore, and auto-restore through `withTestContext` (the runtime
- * lifecycle helix uses to wrap each test file).
+ * helix's override facade operates on a duck-typed `HelixContainer`
+ * (`override` + `restore`), so this suite drives it with a minimal in-test
+ * container — helix stays dependency-free. The real pairing with
+ * `@c9up/ream`'s Container lives in the kitchen-sink integration app.
  */
 
-import { Container } from "@c9up/ream";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	clearActiveContainer,
 	override,
@@ -16,76 +17,31 @@ import {
 } from "../../src/container/override.js";
 import { withTestContext } from "../../src/runtime/test-context.js";
 
-describe("container.override — token shapes", () => {
-	let container: InstanceType<typeof Container>;
-
-	beforeEach(() => {
-		container = new Container();
-	});
-
-	afterEach(() => {
-		container.restore();
-	});
-
-	it("string token: override returns the value", () => {
-		container.singleton("mail", () => ({ send: () => "real" }));
-		expect(container.resolve<{ send: () => string }>("mail").send()).toBe(
-			"real",
-		);
-
-		container.override("mail", { send: () => "fake" });
-		expect(container.resolve<{ send: () => string }>("mail").send()).toBe(
-			"fake",
-		);
-	});
-
-	it("class token: override replaces the auto-construct path", () => {
-		class MailService {
-			send(): string {
-				return "real";
-			}
-		}
-		const fake = { send: (): string => "fake" };
-		container.override(MailService, fake);
-		expect(container.resolve<MailService>(MailService).send()).toBe("fake");
-	});
-
-	it("symbol token (Symbol.for): override resolves to the value", () => {
-		const MailToken = Symbol.for("helix-test/mail");
-		container.singleton(MailToken, () => ({ kind: "real" }));
-		expect(container.resolve<{ kind: string }>(MailToken).kind).toBe("real");
-
-		container.override(MailToken, { kind: "fake" });
-		expect(container.resolve<{ kind: string }>(MailToken).kind).toBe("fake");
-	});
-
-	it("unique Symbol(): rejected at registration", () => {
-		const unique = Symbol("not-interned");
-		expect(() => container.override(unique, "v")).toThrow(/Symbol\.for/);
-	});
-
-	it("restore(token) removes a single override", () => {
-		container.singleton("a", () => "real-a");
-		container.singleton("b", () => "real-b");
-		container.override("a", "fake-a");
-		container.override("b", "fake-b");
-
-		container.restore("a");
-		expect(container.resolve("a")).toBe("real-a");
-		expect(container.resolve("b")).toBe("fake-b");
-	});
-
-	it("restore() with no args removes ALL overrides", () => {
-		container.singleton("a", () => "real-a");
-		container.singleton("b", () => "real-b");
-		container.override("a", "fake-a");
-		container.override("b", "fake-b");
-
-		container.restore();
-		expect(container.resolve("a")).toBe("real-a");
-		expect(container.resolve("b")).toBe("real-b");
-	});
-});
+/**
+ * Minimal container implementing the surface helix's override facade drives
+ * (`singleton` / `resolve` / `override` / `restore`). Mirrors the relevant
+ * slice of `@c9up/ream`'s Container so the facade is tested in isolation.
+ */
+class StubContainer {
+	readonly #factories = new Map<unknown, () => unknown>();
+	readonly #overrides = new Map<unknown, unknown>();
+	singleton(token: unknown, factory: () => unknown): void {
+		this.#factories.set(token, factory);
+	}
+	resolve(token: unknown): unknown {
+		if (this.#overrides.has(token)) return this.#overrides.get(token);
+		const factory = this.#factories.get(token);
+		if (!factory) throw new Error(`no binding for ${String(token)}`);
+		return factory();
+	}
+	override(token: unknown, value: unknown): void {
+		this.#overrides.set(token, value);
+	}
+	restore(token?: unknown): void {
+		if (token === undefined) this.#overrides.clear();
+		else this.#overrides.delete(token);
+	}
+}
 
 describe("helix.override — facade auto-restore", () => {
 	afterEach(() => {
@@ -100,7 +56,7 @@ describe("helix.override — facade auto-restore", () => {
 	});
 
 	it("override() registers cleanup on the active container", async () => {
-		const container = new Container();
+		const container = new StubContainer();
 		container.singleton("svc", () => "real");
 		useContainer(container);
 
@@ -114,8 +70,8 @@ describe("helix.override — facade auto-restore", () => {
 	});
 
 	it("overrideOn() targets a specific container instance", async () => {
-		const c1 = new Container();
-		const c2 = new Container();
+		const c1 = new StubContainer();
+		const c2 = new StubContainer();
 		c1.singleton("svc", () => "c1-real");
 		c2.singleton("svc", () => "c2-real");
 
@@ -130,14 +86,14 @@ describe("helix.override — facade auto-restore", () => {
 	});
 
 	it("auto-restore unwinds in reverse insertion order", async () => {
-		const container = new Container();
+		const container = new StubContainer();
 		const restoreOrder: string[] = [];
 		// Spy on restore so we observe the cleanup order without a custom
 		// container subclass.
 		const realRestore = container.restore.bind(container);
 		container.restore = ((token?: unknown) => {
 			restoreOrder.push(String(token));
-			return realRestore(token as never);
+			return realRestore(token);
 		}) as typeof container.restore;
 		container.singleton("a", () => "real-a");
 		container.singleton("b", () => "real-b");
@@ -152,7 +108,7 @@ describe("helix.override — facade auto-restore", () => {
 	});
 
 	it("override() outside a test frame throws (M1)", () => {
-		const container = new Container();
+		const container = new StubContainer();
 		container.singleton("svc", () => "real");
 		useContainer(container);
 		// No `withTestContext` wrapping — direct call.
@@ -162,8 +118,8 @@ describe("helix.override — facade auto-restore", () => {
 	});
 
 	it("useContainer auto-restores the previous active container at frame end (M3)", async () => {
-		const c1 = new Container();
-		const c2 = new Container();
+		const c1 = new StubContainer();
+		const c2 = new StubContainer();
 		c1.singleton("svc", () => "c1-real");
 		c2.singleton("svc", () => "c2-real");
 		useContainer(c1);
@@ -186,7 +142,7 @@ describe("helix.override — facade auto-restore", () => {
 	});
 
 	it("async cleanup is awaited before the frame returns (M4)", async () => {
-		const container = new Container();
+		const container = new StubContainer();
 		container.singleton("svc", () => "real");
 		useContainer(container);
 		// Custom token whose restore is async — proves the cleanup queue
@@ -196,8 +152,8 @@ describe("helix.override — facade auto-restore", () => {
 		container.restore = (async (token?: unknown) => {
 			await new Promise((r) => setTimeout(r, 5));
 			restoreLog.push(String(token));
-			return realRestore(token as never);
-		}) as unknown as typeof container.restore;
+			return realRestore(token);
+		}) as typeof container.restore;
 
 		await withTestContext(async () => {
 			override("svc", "fake");

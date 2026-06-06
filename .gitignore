@@ -1,7 +1,7 @@
 node_modules/
 target/
 dist/
-coverage/
+/coverage/
 *.node
 .env
 .env.local
