@@ -328,7 +328,7 @@ export function createFakeTimerController(): FakeTimerController {
 			// Advance clock to target BEFORE firing: if the callback throws,
 			// the wall clock has already been moved so subsequent drains see
 			// the state the user asked for.
-			const _latestDue = timer.dueMs;
+			const latestDue = timer.dueMs;
 			try {
 				timer.callback(...timer.args);
 			} catch (err) {
