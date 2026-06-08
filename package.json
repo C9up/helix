@@ -1,0 +1,91 @@
+{
+  "name": "@c9up/helix",
+  "version": "0.1.3",
+  "description": "Helix — framework-agnostic test runtime for the Ream ecosystem (Vitest-compatible runner, spies, container overrides, time-travel). Per-package fakes live in each package's /testing.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "helix": "bin/helix.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./container": {
+      "types": "./src/container/index.ts",
+      "import": "./src/container/index.ts"
+    },
+    "./time": {
+      "types": "./src/time/index.ts",
+      "import": "./src/time/index.ts"
+    },
+    "./runtime": {
+      "types": "./src/runtime/index.ts",
+      "import": "./src/runtime/index.ts"
+    },
+    "./runtime/worker": {
+      "types": "./src/runtime/worker.ts",
+      "import": "./src/runtime/worker.ts"
+    },
+    "./bin/helix.js": "./bin/helix.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:napi": "cargo build --release -p ream-test-napi && node scripts/copy-napi.mjs",
+    "test": "vitest run",
+    "test:self": "node bin/helix.js test tests/selftest --timeout=30000",
+    "lint": "biome check src/",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "tsx": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "*",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
+  },
+  "files": [
+    "bin",
+    "src",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./container": {
+        "types": "./dist/container/index.d.ts",
+        "import": "./dist/container/index.js"
+      },
+      "./time": {
+        "types": "./dist/time/index.d.ts",
+        "import": "./dist/time/index.js"
+      },
+      "./runtime": {
+        "types": "./dist/runtime/index.d.ts",
+        "import": "./dist/runtime/index.js"
+      },
+      "./runtime/worker": {
+        "types": "./dist/runtime/worker.d.ts",
+        "import": "./dist/runtime/worker.js"
+      },
+      "./bin/helix.js": "./bin/helix.js"
+    },
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/C9up/helix.git"
+  }
+}
