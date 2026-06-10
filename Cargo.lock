@@ -361,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "ream-test-core"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "ignore",
  "num_cpus",
@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "ream-test-napi"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "futures",
  "napi",

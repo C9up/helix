@@ -52,8 +52,8 @@
   },
   "files": [
     "bin",
-    "src",
     "dist",
+    "index.*.node",
     "README.md",
     "LICENSE"
   ],

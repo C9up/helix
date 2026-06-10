@@ -60,29 +60,55 @@ function makeSuite(
 }
 
 /**
- * Scoped collection context. Each `runTestFile` invocation opens its own
- * store so concurrent runs never see each other's registrations.
+ * Collection registry. Holds the `AsyncLocalStorage` scope used per test-file
+ * run plus a fallback root for direct DSL use.
+ *
+ * CRITICAL (H5): this state is pinned to `globalThis`, NOT held as module-local
+ * variables. A consumer's test does `import { describe } from '@c9up/helix'`
+ * while the runner drives collection via `@c9up/helix/runtime/worker`. If those
+ * two specifiers resolve to DISTINCT module instances of this file (src vs dist,
+ * or an ESM/CJS dual instance under the tsx loader), a module-local registry
+ * means the test's `describe`/`test` register into one instance while the worker
+ * opens its collection scope on the other — so the worker collects 0 tests.
+ * A single globalThis-backed registry removes that hazard entirely.
  */
-const storage = new AsyncLocalStorage<CollectionContext>();
+interface CollectionRegistry {
+	storage: AsyncLocalStorage<CollectionContext>;
+	fallbackRoot: SuiteNode;
+	fallbackStack: SuiteNode[];
+}
 
-/**
- * Fallback context used when the DSL is called outside `runTestFile` (e.g.,
- * unit tests that drive `describe`/`test` directly). `resetRoot` replaces
- * this; `getRoot` returns it.
- */
-let fallbackRoot: SuiteNode = makeSuite("", "run", undefined);
-let fallbackStack: SuiteNode[] = [fallbackRoot];
+declare global {
+	// eslint-disable-next-line no-var
+	var __helixCollectionRegistry: CollectionRegistry | undefined;
+}
+
+function registry(): CollectionRegistry {
+	let r = globalThis.__helixCollectionRegistry;
+	if (!r) {
+		const root = makeSuite("", "run", undefined);
+		r = {
+			storage: new AsyncLocalStorage<CollectionContext>(),
+			fallbackRoot: root,
+			fallbackStack: [root],
+		};
+		globalThis.__helixCollectionRegistry = r;
+	}
+	return r;
+}
 
 function currentContext(): CollectionContext {
-	const scoped = storage.getStore();
+	const r = registry();
+	const scoped = r.storage.getStore();
 	if (scoped) return scoped;
-	return { root: fallbackRoot, stack: fallbackStack };
+	return { root: r.fallbackRoot, stack: r.fallbackStack };
 }
 
 export function resetRoot(): SuiteNode {
-	fallbackRoot = makeSuite("", "run", undefined);
-	fallbackStack = [fallbackRoot];
-	return fallbackRoot;
+	const r = registry();
+	r.fallbackRoot = makeSuite("", "run", undefined);
+	r.fallbackStack = [r.fallbackRoot];
+	return r.fallbackRoot;
 }
 
 export function getRoot(): SuiteNode {
@@ -98,7 +124,7 @@ export async function withCollection(
 ): Promise<SuiteNode> {
 	const root = makeSuite("", "run", undefined);
 	const ctx: CollectionContext = { root, stack: [root] };
-	await storage.run(ctx, async () => {
+	await registry().storage.run(ctx, async () => {
 		await body();
 	});
 	return root;
