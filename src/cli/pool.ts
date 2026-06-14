@@ -281,6 +281,16 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		};
 
 		const watchdog = setTimeout(() => {
+			// The worker already emitted a valid result/error frame and we're
+			// only waiting on its (slow) exit to flush coverage — kill it to
+			// reclaim the slot but settle the REAL outcome. Without this guard
+			// the still-armed watchdog would overwrite a passing file with a
+			// spurious timeout failure.
+			if (pendingOutcome !== undefined) {
+				killChild(child, killGraceMs);
+				settle(pendingOutcome);
+				return;
+			}
 			finish(
 				{
 					kind: "error",

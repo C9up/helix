@@ -181,10 +181,14 @@ function compareMap(
 	for (const [kA, vA] of a) {
 		// Fast path: identity/primitive key hit.
 		if (b.has(kA) && eq(vA, b.get(kA), opts, seen)) continue;
-		// Structural search across remaining entries.
+		// Structural search across remaining entries. Each candidate gets a
+		// fresh cycle scope (like compareSet) — sharing `seen` let a failed
+		// candidate's in-progress markSeen marks leak forward, so a later
+		// candidate could short-circuit via seenPair on an unproven pair and
+		// report a false match (audit 2026-06-13).
 		let matched = false;
 		for (const [kB, vB] of b) {
-			if (eq(kA, kB, opts, seen) && eq(vA, vB, opts, seen)) {
+			if (eq(kA, kB, opts, new WeakMap()) && eq(vA, vB, opts, new WeakMap())) {
 				matched = true;
 				break;
 			}

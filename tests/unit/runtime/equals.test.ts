@@ -63,6 +63,38 @@ describe("equals — edge-case fixes", () => {
 		).toBe(true);
 	});
 
+	it("Map structural search does not poison the cycle cache across candidates", () => {
+		// Object keys force the structural-candidate search; cyclic values
+		// exercise the cycle cache. Sharing `seen` across candidates let a
+		// failed candidate's markSeen marks make a later candidate short-circuit
+		// on an unproven pair, falsely reporting unequal maps as equal
+		// (audit 2026-06-13). Fresh per-candidate scope fixes it.
+		interface Node {
+			tag: string;
+			self?: Node;
+		}
+		const mk = (tag: string): Node => {
+			const o: Node = { tag };
+			o.self = o;
+			return o;
+		};
+		const a = new Map<{ id: number }, Node>([
+			[{ id: 1 }, mk("a1")],
+			[{ id: 2 }, mk("a2")],
+		]);
+		const differs = new Map<{ id: number }, Node>([
+			[{ id: 1 }, mk("a1")],
+			[{ id: 2 }, mk("DIFFERENT")],
+		]);
+		expect(equals(a, differs)).toBe(false);
+
+		const same = new Map<{ id: number }, Node>([
+			[{ id: 1 }, mk("a1")],
+			[{ id: 2 }, mk("a2")],
+		]);
+		expect(equals(a, same)).toBe(true);
+	});
+
 	it("Set with object elements matches structurally", () => {
 		expect(equals(new Set([{ a: 1 }]), new Set([{ a: 1 }]))).toBe(true);
 		expect(equals(new Set([{ a: 1 }]), new Set([{ a: 2 }]))).toBe(false);
