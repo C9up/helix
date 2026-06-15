@@ -156,6 +156,38 @@ describe("diff coverage — overlay", () => {
 		expect(result.total.pct).toBeCloseTo(66.67, 1);
 	});
 
+	it("excludes non-executable added lines (absent from coverage) from the denominator", () => {
+		const summary: CoverageSummary = {
+			files: [
+				{
+					file: "/repo/src/a.ts",
+					lines: { covered: 1, total: 2 },
+					statements: { covered: 1, total: 2 },
+					functions: { covered: 0, total: 0 },
+					branches: { covered: 0, total: 0 },
+					lineHits: [
+						{ line: 10, count: 3 }, // executable, covered
+						{ line: 12, count: 0 }, // executable, uncovered
+					],
+					functionHits: [],
+				},
+			],
+			total: {
+				lines: { covered: 1, total: 2, pct: 50 },
+				statements: { covered: 1, total: 2, pct: 50 },
+				functions: { covered: 0, total: 0, pct: 100 },
+				branches: { covered: 0, total: 0, pct: 100 },
+			},
+		};
+		// Added 11 & 13 are comment/blank — absent from coverage. They must NOT
+		// count: added=2 (10,12), covered=1 → 50%, not 25% (audit 2026-06-13).
+		const diffMap = new Map([["/repo/src/a.ts", new Set([10, 11, 12, 13])]]);
+		const result = overlay(summary, diffMap);
+		expect(result.files[0].added).toBe(2);
+		expect(result.files[0].covered).toBe(1);
+		expect(result.total.pct).toBeCloseTo(50, 1);
+	});
+
 	it("file in diff but absent from coverage shows 0 covered", () => {
 		const summary: CoverageSummary = {
 			files: [],

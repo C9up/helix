@@ -35,18 +35,30 @@ export function overlay(coverage: CoverageSummary, diff: DiffMap): DiffSummary {
 			? new Map(cov.lineHits.map((h) => [h.line, h.count]))
 			: undefined;
 		const sortedAdded = [...addedLines].sort((a, b) => a - b);
-		const lineHits: DiffFileSummary["lineHits"] = sortedAdded.map((line) => {
-			const count = hitsByLine?.get(line);
-			return { line, covered: typeof count === "number" && count > 0 };
-		});
+		let lineHits: DiffFileSummary["lineHits"];
+		if (hitsByLine) {
+			// Only EXECUTABLE added lines count toward diff coverage. The coverage
+			// map lists every instrumented line (count >= 0, incl. count-0 unrun
+			// lines), so an added line absent from it is non-executable (comment /
+			// blank / type-only). Scoring those uncovered inflated the denominator
+			// and understated diff-% (audit 2026-06-13).
+			lineHits = sortedAdded
+				.filter((line) => hitsByLine.has(line))
+				.map((line) => ({ line, covered: (hitsByLine.get(line) ?? 0) > 0 }));
+		} else {
+			// No coverage entry for this file — a freshly-added, untested module.
+			// Keep every added line as uncovered so it shows red.
+			lineHits = sortedAdded.map((line) => ({ line, covered: false }));
+		}
 		const covered = lineHits.filter((h) => h.covered).length;
+		const added = lineHits.length;
 		files.push({
 			file,
-			added: addedLines.size,
+			added,
 			covered,
 			lineHits,
 		});
-		totalAdded += addedLines.size;
+		totalAdded += added;
 		totalCovered += covered;
 	}
 
