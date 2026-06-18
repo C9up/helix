@@ -14,10 +14,23 @@ Vitest-compatible test runner CLI.
 ## CLI
 
 ```sh
-helix test [paths...]            # run a one-shot suite
+helix test [paths...]            # run a one-shot suite (e.g. `helix test app`)
 helix test --watch               # re-run on file changes
 helix test --coverage            # V8 coverage + LCOV + thresholds
 helix test --diff-cov            # diff coverage vs main branch
+```
+
+In `package.json`, call the `helix` bin directly — in npm scripts it resolves to
+`node_modules/.bin/helix` and bootstraps the TS loader itself, so the verbose
+`node --import tsx node_modules/@c9up/helix/bin/helix.js …` form is unnecessary:
+
+```json
+{
+  "scripts": {
+    "test": "helix test app --threads=1",
+    "test:coverage": "helix test app --threads=1 --coverage"
+  }
+}
 ```
 
 ## Self-testing (Stage 2a — coexistence)
