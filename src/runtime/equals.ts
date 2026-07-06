@@ -17,6 +17,25 @@ export interface EqualsOptions {
 
 type Seen = WeakMap<object, WeakSet<object>>;
 
+interface AsymmetricLike {
+	asymmetricMatch(actual: unknown): boolean;
+}
+
+/**
+ * Duck-type an asymmetric matcher (`expect.objectContaining`, `expect.any`, …).
+ * Checked inline rather than importing `./asymmetric.js` to avoid a module
+ * cycle (asymmetric.ts imports this file).
+ */
+function isAsymmetric(value: unknown): value is AsymmetricLike {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		(value as { __helixAsymmetricMatcher?: unknown })
+			.__helixAsymmetricMatcher === true &&
+		typeof (value as AsymmetricLike).asymmetricMatch === "function"
+	);
+}
+
 export function equals(
 	a: unknown,
 	b: unknown,
@@ -238,6 +257,11 @@ const STRUCTURAL_COMPARATORS: readonly Comparator[] = [
 function eq(a: unknown, b: unknown, opts: EqualsOptions, seen: Seen): boolean {
 	// Identity / NaN (Object.is). In non-strict mode, ±0 are also equal.
 	if (Object.is(a, b)) return true;
+	// Asymmetric matchers short-circuit structural comparison — they may match
+	// primitives (`expect.any(Number)` vs `5`), so this must run before the
+	// typeof / null bailouts below. Either side can carry the matcher.
+	if (isAsymmetric(b)) return b.asymmetricMatch(a);
+	if (isAsymmetric(a)) return a.asymmetricMatch(b);
 	if (!opts.strict && a === b) return true;
 	if (a === null || b === null) return false;
 	if (typeof a !== typeof b) return false;
@@ -354,6 +378,7 @@ export function partialEquals(actual: unknown, expected: unknown): boolean {
 
 function partial(actual: unknown, expected: unknown, seen: Seen): boolean {
 	if (Object.is(actual, expected)) return true;
+	if (isAsymmetric(expected)) return expected.asymmetricMatch(actual);
 	if (expected === null || expected === undefined) {
 		return actual === expected;
 	}

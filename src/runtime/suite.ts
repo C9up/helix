@@ -12,11 +12,16 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export type TestFn = () => void | Promise<void>;
 export type SuiteFn = () => void;
 
+/** Teardown function a hook may return (Vitest/Japa parity). */
+export type CleanupFn = () => void | Promise<void>;
+/** A lifecycle hook: may return nothing or a cleanup function. */
+export type HookFn = () => void | CleanupFn | Promise<void | CleanupFn>;
+
 export type HookType = "beforeAll" | "afterAll" | "beforeEach" | "afterEach";
 
 export interface Hook {
 	type: HookType;
-	fn: TestFn;
+	fn: HookFn;
 }
 
 export type RunMode = "run" | "skip" | "only" | "todo";
@@ -28,6 +33,39 @@ export interface TestNode {
 	mode: RunMode;
 	parent: SuiteNode;
 	location?: string;
+	/** Extra attempts on failure (`0` = run once). `test.retry(n)` / `{ retry }`. */
+	retries?: number;
+	/** Per-test timeout in ms. `0` disables. `test.timeout(ms)` / `{ timeout }`. */
+	timeoutMs?: number;
+	/** Tags for `--tags` filtering. `test.tags(...)` / `{ tags }`. */
+	tags?: string[];
+	/** When `true`, the test is expected to throw — `test.fails()`. */
+	failing?: boolean;
+}
+
+/** Vitest-style per-test options (3rd argument to `test`). */
+export interface TestOptions {
+	/** Extra attempts on failure. */
+	retry?: number;
+	/** Per-test timeout in ms (`0` disables). */
+	timeout?: number;
+	/** Tags for `--tags` filtering. */
+	tags?: string[];
+	/** Expect the test to fail. */
+	fails?: boolean;
+}
+
+/**
+ * Chainable handle returned by `test(...)` — Japa-style fluent modifiers that
+ * mutate the just-registered node. Ignoring the return keeps Vitest's
+ * `test(name, fn)` ergonomics; chaining adds `@japa/runner` parity.
+ */
+export interface TestHandle {
+	retry(n: number): TestHandle;
+	timeout(ms: number): TestHandle;
+	disableTimeout(): TestHandle;
+	tags(...tags: string[]): TestHandle;
+	fails(): TestHandle;
 }
 
 export interface SuiteNode {
@@ -141,15 +179,60 @@ function registerTest(
 	name: string,
 	mode: RunMode,
 	fn: TestFn | undefined,
-): void {
+	options?: TestOptions,
+): TestNode {
 	const parent = current();
-	parent.children.push({
+	const node: TestNode = {
 		kind: "test",
 		name,
 		fn,
 		mode,
 		parent,
-	});
+		retries: options?.retry,
+		timeoutMs: options?.timeout,
+		tags: options?.tags,
+		failing: options?.fails,
+	};
+	parent.children.push(node);
+	return node;
+}
+
+/** Wrap a registered node in the chainable Japa-style handle. */
+function makeHandle(node: TestNode): TestHandle {
+	const handle: TestHandle = {
+		retry(n: number) {
+			node.retries = n;
+			return handle;
+		},
+		timeout(ms: number) {
+			node.timeoutMs = ms;
+			return handle;
+		},
+		disableTimeout() {
+			node.timeoutMs = 0;
+			return handle;
+		},
+		tags(...tags: string[]) {
+			node.tags = [...(node.tags ?? []), ...tags];
+			return handle;
+		},
+		fails() {
+			node.failing = true;
+			return handle;
+		},
+	};
+	return handle;
+}
+
+/** Normalise the optional 3rd arg: a bare number is a timeout (Vitest). */
+function normaliseTestOptions(
+	optionsOrTimeout: TestOptions | number | undefined,
+): TestOptions | undefined {
+	if (optionsOrTimeout === undefined) return undefined;
+	if (typeof optionsOrTimeout === "number") {
+		return { timeout: optionsOrTimeout };
+	}
+	return optionsOrTimeout;
 }
 
 function registerSuite(name: string, mode: RunMode, body: SuiteFn): void {
@@ -194,13 +277,16 @@ type EachRow =
 	| bigint
 	| symbol;
 
+/** Source of `each` rows: a static array or a (sync) function returning one. */
+type EachRows<Row extends EachRow> = readonly Row[] | (() => readonly Row[]);
+
 type TestApi = {
-	(name: string, fn: TestFn): void;
+	(name: string, fn: TestFn, options?: TestOptions | number): TestHandle;
 	skip(name: string, fn?: TestFn): void;
-	only(name: string, fn: TestFn): void;
+	only(name: string, fn: TestFn, options?: TestOptions | number): TestHandle;
 	todo(name: string): void;
 	each<Row extends EachRow>(
-		rows: readonly Row[],
+		rows: EachRows<Row>,
 	): (name: string, fn: (row: Row) => void | Promise<void>) => void;
 };
 
@@ -308,14 +394,24 @@ describeFn.skip = (name, fn) => registerSuite(name, "skip", fn);
 describeFn.only = (name, fn) => registerSuite(name, "only", fn);
 describeFn.todo = (name) => registerSuite(name, "todo", () => {});
 
-const testFn = ((name: string, fn: TestFn) =>
-	registerTest(name, "run", fn)) as TestApi;
-testFn.skip = (name, fn) => registerTest(name, "skip", fn);
-testFn.only = (name, fn) => registerTest(name, "only", fn);
-testFn.todo = (name) => registerTest(name, "todo", undefined);
-testFn.each = <Row extends EachRow>(rows: readonly Row[]) => {
+const testFn = ((name: string, fn: TestFn, options?: TestOptions | number) =>
+	makeHandle(
+		registerTest(name, "run", fn, normaliseTestOptions(options)),
+	)) as TestApi;
+testFn.skip = (name, fn) => {
+	registerTest(name, "skip", fn);
+};
+testFn.only = (name, fn, options?: TestOptions | number) =>
+	makeHandle(registerTest(name, "only", fn, normaliseTestOptions(options)));
+testFn.todo = (name) => {
+	registerTest(name, "todo", undefined);
+};
+testFn.each = <Row extends EachRow>(rows: EachRows<Row>) => {
 	return (name: string, fn: (row: Row) => void | Promise<void>) => {
-		rows.forEach((row, index) => {
+		// A function source (`test.each(() => rows)`) is resolved eagerly at
+		// collection time — per-row nodes need concrete rows to register.
+		const resolved = typeof rows === "function" ? rows() : rows;
+		resolved.forEach((row, index) => {
 			const resolvedName = interpolateEach(name, row, index);
 			registerTest(resolvedName, "run", () => fn(row));
 		});
@@ -326,11 +422,11 @@ export const describe: SuiteApi = describeFn;
 export const test: TestApi = testFn;
 export const it: TestApi = testFn;
 
-export function addHook(type: HookType, fn: TestFn): void {
+export function addHook(type: HookType, fn: HookFn): void {
 	current().hooks.push({ type, fn });
 }
 
-export const beforeAll = (fn: TestFn): void => addHook("beforeAll", fn);
-export const afterAll = (fn: TestFn): void => addHook("afterAll", fn);
-export const beforeEach = (fn: TestFn): void => addHook("beforeEach", fn);
-export const afterEach = (fn: TestFn): void => addHook("afterEach", fn);
+export const beforeAll = (fn: HookFn): void => addHook("beforeAll", fn);
+export const afterAll = (fn: HookFn): void => addHook("afterAll", fn);
+export const beforeEach = (fn: HookFn): void => addHook("beforeEach", fn);
+export const afterEach = (fn: HookFn): void => addHook("afterEach", fn);

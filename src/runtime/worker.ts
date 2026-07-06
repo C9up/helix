@@ -130,11 +130,36 @@ export async function runTestFile(
 		const root = await withCollection(async () => {
 			await import(url);
 		});
+		// Retries / grep / tags are per-test runtime filters. They're carried via
+		// env vars (set by the CLI) so they reach the worker through ANY
+		// orchestrator — the Rust native engine forwards a fixed instruction
+		// shape, but child processes still inherit the CLI process env.
+		// Explicit options always win over the env fallback.
 		const raw = await executeRoot(root, absolutePath, {
 			timeoutMs: options.timeoutMs,
+			retries: options.retries ?? envRetries(),
+			grep: options.grep ?? process.env.HELIX_GREP,
+			tags: options.tags ?? envTags(),
 		});
 		return sanitize(raw);
 	});
+}
+
+function envRetries(): number | undefined {
+	const raw = process.env.HELIX_RETRIES;
+	if (raw === undefined || raw === "") return undefined;
+	const n = Number.parseInt(raw, 10);
+	return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+function envTags(): string[] | undefined {
+	const raw = process.env.HELIX_TAGS;
+	if (raw === undefined || raw === "") return undefined;
+	const tags = raw
+		.split(",")
+		.map((t) => t.trim())
+		.filter((t) => t.length > 0);
+	return tags.length > 0 ? tags : undefined;
 }
 
 interface WorkerIncoming {

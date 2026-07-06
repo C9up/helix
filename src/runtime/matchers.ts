@@ -78,6 +78,17 @@ export const matchers = {
 		};
 	},
 
+	toStrictEqual(received: unknown, expected: unknown): MatcherResult {
+		// Strict: prototypes matched + `undefined` values distinguished from
+		// missing keys + sparse-array holes preserved (Vitest/Jest semantics).
+		const pass = equals(received, expected, { strict: true });
+		return {
+			pass,
+			message: () =>
+				`expected ${repr(received)} to strictly deep-equal ${repr(expected)}`,
+		};
+	},
+
 	toMatchObject(received: unknown, expected: unknown): MatcherResult {
 		const pass = partialEquals(received, expected);
 		return {
@@ -274,6 +285,62 @@ export const matchers = {
 		};
 	},
 
+	toBeCloseTo(
+		received: unknown,
+		expected: number,
+		numDigits = 2,
+	): MatcherResult {
+		if (typeof received !== "number") {
+			return {
+				pass: false,
+				message: () => `expected a number, got ${typeof received}`,
+			};
+		}
+		// Vitest/Jest semantics: pass when |a-b| < 10^-numDigits / 2. Infinities
+		// are equal only when identical.
+		let pass: boolean;
+		if (!Number.isFinite(received) || !Number.isFinite(expected)) {
+			pass = received === expected;
+		} else {
+			pass = Math.abs(received - expected) < 0.5 * 10 ** -numDigits;
+		}
+		return {
+			pass,
+			message: () =>
+				`expected ${received} to be close to ${expected} (±${0.5 * 10 ** -numDigits}, ${numDigits} digits)`,
+		};
+	},
+
+	toHaveProperty(
+		received: unknown,
+		path: string | Array<string | number>,
+		...rest: unknown[]
+	): MatcherResult {
+		const keys = Array.isArray(path) ? path : parsePropertyPath(path);
+		const hasValue = rest.length > 0;
+		const expectedValue = rest[0];
+		const found = resolvePath(received, keys);
+		if (!found.exists) {
+			return {
+				pass: false,
+				message: () =>
+					`expected ${repr(received)} to have property "${formatPath(keys)}"`,
+			};
+		}
+		if (!hasValue) {
+			return {
+				pass: true,
+				message: () =>
+					`expected ${repr(received)} not to have property "${formatPath(keys)}"`,
+			};
+		}
+		return {
+			pass: equals(found.value, expectedValue),
+			message: () =>
+				`expected property "${formatPath(keys)}" to equal ${repr(expectedValue)}, got ${repr(found.value)}`,
+		};
+	},
+
 	toThrow(
 		received: unknown,
 		expected?: string | RegExp | Error | (new (...args: unknown[]) => Error),
@@ -386,7 +453,89 @@ export const matchers = {
 				`expected spy to have been called exactly once, got ${received.callCount} calls`,
 		};
 	},
+
+	toHaveBeenLastCalledWith(
+		received: unknown,
+		...expectedArgs: unknown[]
+	): MatcherResult {
+		if (!isSpy(received)) {
+			return {
+				pass: false,
+				message: () =>
+					`toHaveBeenLastCalledWith requires a spy; got ${repr(received)}`,
+			};
+		}
+		const last = received.calls[received.calls.length - 1];
+		return {
+			pass: last !== undefined && equals(last, expectedArgs),
+			message: () =>
+				`expected spy's last call to be ${repr(expectedArgs)}\nLast call: ${repr(last)}`,
+		};
+	},
+
+	toHaveBeenNthCalledWith(
+		received: unknown,
+		nth: number,
+		...expectedArgs: unknown[]
+	): MatcherResult {
+		if (!isSpy(received)) {
+			return {
+				pass: false,
+				message: () =>
+					`toHaveBeenNthCalledWith requires a spy; got ${repr(received)}`,
+			};
+		}
+		// `nth` is 1-based to mirror Vitest/Jest.
+		const call = nth >= 1 ? received.calls[nth - 1] : undefined;
+		return {
+			pass: call !== undefined && equals(call, expectedArgs),
+			message: () =>
+				`expected spy's call #${nth} to be ${repr(expectedArgs)}\nActual: ${repr(call)}`,
+		};
+	},
 };
+
+/** Split a dot/bracket property path (`a.b[0].c`) into segments. */
+function parsePropertyPath(path: string): Array<string | number> {
+	const out: Array<string | number> = [];
+	// Matches `foo`, `[0]`, `["key"]` segments.
+	const re = /[^.[\]]+|\[(\d+)\]/g;
+	let match: RegExpExecArray | null = re.exec(path);
+	while (match !== null) {
+		const bracketIndex = match[1];
+		if (bracketIndex !== undefined) {
+			out.push(Number.parseInt(bracketIndex, 10));
+		} else {
+			out.push(match[0]);
+		}
+		match = re.exec(path);
+	}
+	return out;
+}
+
+function formatPath(keys: Array<string | number>): string {
+	return keys.join(".");
+}
+
+/** Walk `keys` into `obj`, reporting whether the leaf exists and its value. */
+function resolvePath(
+	obj: unknown,
+	keys: Array<string | number>,
+): { exists: boolean; value: unknown } {
+	let cursor = obj;
+	for (const key of keys) {
+		if (cursor === null || cursor === undefined) {
+			return { exists: false, value: undefined };
+		}
+		if (typeof cursor !== "object" && typeof cursor !== "function") {
+			return { exists: false, value: undefined };
+		}
+		const k = String(key);
+		if (!(k in (cursor as object))) return { exists: false, value: undefined };
+		cursor = Reflect.get(cursor as object, k);
+	}
+	return { exists: true, value: cursor };
+}
 
 /**
  * Cross-type numeric comparison: JS's `>` / `>=` operators accept mixed

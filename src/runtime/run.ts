@@ -8,8 +8,13 @@
  */
 
 import { AssertionError } from "./assertion-error.js";
-import type { SuiteNode, TestFn, TestNode } from "./suite.js";
-import { withTestContext } from "./test-context.js";
+import type { Hook, SuiteNode, TestFn, TestNode } from "./suite.js";
+import {
+	drainTestOutcomeHooks,
+	getAssertionState,
+	registerTestCleanup,
+	withTestContext,
+} from "./test-context.js";
 
 export interface TestResult {
 	name: string;
@@ -55,9 +60,61 @@ export interface ExecuteOptions {
 	/**
 	 * Per-test timeout in ms. `0` disables (default). When exceeded, the
 	 * test is marked failed with a timeout error; the hanging promise is not
-	 * awaited further.
+	 * awaited further. A per-test `test.timeout(ms)` overrides this.
 	 */
 	timeoutMs?: number;
+	/**
+	 * Default extra attempts on failure. `test.retry(n)` / `{ retry }` override
+	 * per test. `0` (default) runs each test once.
+	 */
+	retries?: number;
+	/**
+	 * Only run tests whose full name matches this pattern (regex source or a
+	 * plain substring). Mirrors `--grep` / Vitest `-t`.
+	 */
+	grep?: string;
+	/**
+	 * Tag filter expressions (`@fast`, `!@slow`). A test runs when it carries
+	 * every required tag and none of the excluded ones. Mirrors `--tags`.
+	 */
+	tags?: string[];
+}
+
+/** Compiled tag filter: a test must have all `required` and none `excluded`. */
+interface TagFilter {
+	required: string[];
+	excluded: string[];
+}
+
+function compileTagFilter(tags: string[] | undefined): TagFilter | undefined {
+	if (!tags || tags.length === 0) return undefined;
+	const required: string[] = [];
+	const excluded: string[] = [];
+	for (const raw of tags) {
+		const t = raw.trim();
+		if (!t) continue;
+		if (t.startsWith("!")) excluded.push(t.slice(1));
+		else required.push(t);
+	}
+	if (required.length === 0 && excluded.length === 0) return undefined;
+	return { required, excluded };
+}
+
+function compileGrep(grep: string | undefined): RegExp | undefined {
+	if (!grep) return undefined;
+	try {
+		return new RegExp(grep);
+	} catch {
+		// A malformed regex falls back to a literal substring match.
+		return new RegExp(grep.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+	}
+}
+
+function tagMatches(node: TestNode, filter: TagFilter): boolean {
+	const have = new Set(node.tags ?? []);
+	for (const r of filter.required) if (!have.has(r)) return false;
+	for (const e of filter.excluded) if (have.has(e)) return false;
+	return true;
 }
 
 function serializeError(err: unknown): SerializedError {
@@ -104,7 +161,7 @@ function pathLeadsToOnly(node: SuiteNode | TestNode): boolean {
 function collectHookChain(
 	leaf: SuiteNode,
 	type: "beforeEach" | "afterEach",
-): TestFn[] {
+): Hook["fn"][] {
 	// beforeEach: outermost first; afterEach: innermost first.
 	const suites: SuiteNode[] = [];
 	let cursor: SuiteNode | undefined = leaf;
@@ -113,7 +170,7 @@ function collectHookChain(
 		cursor = cursor.parent;
 	}
 	const ordered = type === "beforeEach" ? [...suites].reverse() : suites;
-	const chain: TestFn[] = [];
+	const chain: Hook["fn"][] = [];
 	for (const s of ordered) {
 		for (const h of s.hooks) {
 			if (h.type === type) chain.push(h.fn);
@@ -122,10 +179,18 @@ function collectHookChain(
 	return chain;
 }
 
-async function runHooks(hooks: TestFn[]): Promise<SerializedError | undefined> {
+async function runHooks(
+	hooks: Hook["fn"][],
+	registerCleanups = false,
+): Promise<SerializedError | undefined> {
 	for (const h of hooks) {
 		try {
-			await h();
+			const ret = await h();
+			// A `beforeEach` returning a function registers it as a test-scoped
+			// cleanup (Vitest/Japa parity). Ignored for `afterEach`.
+			if (registerCleanups && typeof ret === "function") {
+				registerTestCleanup(ret as () => void | Promise<void>);
+			}
 		} catch (err) {
 			return serializeError(err);
 		}
@@ -180,6 +245,9 @@ interface RunCtx {
 	onlyActive: boolean;
 	flatTests: TestResult[];
 	timeoutMs: number;
+	retries: number;
+	grep: RegExp | undefined;
+	tagFilter: TagFilter | undefined;
 }
 
 async function runTest(
@@ -198,7 +266,14 @@ async function runTest(
 		ctx.flatTests.push(r);
 		return r;
 	}
-	if (node.mode === "skip" || (ctx.onlyActive && !pathLeadsToOnly(node))) {
+	const filteredOut =
+		(ctx.grep !== undefined && !ctx.grep.test(fullName)) ||
+		(ctx.tagFilter !== undefined && !tagMatches(node, ctx.tagFilter));
+	if (
+		node.mode === "skip" ||
+		filteredOut ||
+		(ctx.onlyActive && !pathLeadsToOnly(node))
+	) {
 		const r: TestResult = {
 			name: node.name,
 			fullName,
@@ -208,53 +283,108 @@ async function runTest(
 		ctx.flatTests.push(r);
 		return r;
 	}
+
 	const before = collectHookChain(node.parent, "beforeEach");
 	const after = collectHookChain(node.parent, "afterEach");
+	const perTestTimeout = node.timeoutMs ?? ctx.timeoutMs;
+	const attempts = 1 + Math.max(0, node.retries ?? ctx.retries);
 	const start = Date.now();
-	// Wrap the whole cycle (beforeEach + body + afterEach) in a per-test
-	// frame so test-scoped cleanups (e.g. container overrides registered
-	// via `helix.override`) drain at the right time. Frame closes AFTER
-	// afterEach so user teardown can still observe test-scoped state.
-	const r = await withTestContext<TestResult>(async () => {
-		const beforeErr = await runHooks(before);
-		if (beforeErr) {
-			const afterErrBE = await runHooks(after);
-			return {
-				name: node.name,
-				fullName,
-				status: "fail",
-				durationMs: Date.now() - start,
-				error: combineErrors(beforeErr, afterErrBE),
-			};
-		}
-		let testErr: SerializedError | undefined;
-		try {
-			const result = node.fn?.();
-			if (
-				result &&
-				typeof (result as PromiseLike<unknown>).then === "function"
-			) {
-				await withTimeout(
-					result as Promise<unknown>,
-					ctx.timeoutMs,
-					`test "${fullName}"`,
-				);
-			}
-		} catch (err) {
-			testErr = serializeError(err);
-		}
-		const afterErr = await runHooks(after);
-		const finalErr = combineErrors(testErr, afterErr);
+
+	// Retry loop: each attempt runs the FULL cycle (beforeEach + body +
+	// afterEach) inside its own per-test frame so cleanups / outcome hooks /
+	// assertion counters reset between attempts. Passes on the first success.
+	let last!: TestResult;
+	for (let attempt = 0; attempt < attempts; attempt += 1) {
+		last = await withTestContext<TestResult>(() =>
+			runAttempt(node, fullName, before, after, perTestTimeout, start),
+		);
+		if (last.status === "pass") break;
+	}
+	ctx.flatTests.push(last);
+	return last;
+}
+
+/** Run one full attempt of a test inside the active per-test frame. */
+async function runAttempt(
+	node: TestNode,
+	fullName: string,
+	before: Hook["fn"][],
+	after: Hook["fn"][],
+	timeoutMs: number,
+	start: number,
+): Promise<TestResult> {
+	const beforeErr = await runHooks(before, true);
+	if (beforeErr) {
+		const afterErrBE = await runHooks(after);
+		await drainTestOutcomeHooks(true);
 		return {
 			name: node.name,
 			fullName,
-			status: finalErr ? "fail" : "pass",
+			status: "fail",
 			durationMs: Date.now() - start,
-			error: finalErr,
+			error: combineErrors(beforeErr, afterErrBE),
 		};
-	});
-	ctx.flatTests.push(r);
-	return r;
+	}
+
+	let testErr: SerializedError | undefined;
+	try {
+		const result = node.fn?.();
+		if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+			await withTimeout(
+				result as Promise<unknown>,
+				timeoutMs,
+				`test "${fullName}"`,
+			);
+		}
+	} catch (err) {
+		testErr = serializeError(err);
+	}
+
+	// `test.fails()` inverts the body outcome: a throw is success, a clean
+	// run is a failure. Applied before assertion-count checks.
+	if (node.failing) {
+		testErr = testErr
+			? undefined
+			: {
+					name: "AssertionError",
+					message: `test "${fullName}" was expected to fail (test.fails) but passed`,
+				};
+	}
+
+	// Assertion-count enforcement (`expect.assertions(n)` / `hasAssertions()`).
+	if (!testErr) {
+		testErr = checkAssertionCount(fullName);
+	}
+
+	const afterErr = await runHooks(after);
+	const finalErr = combineErrors(testErr, afterErr);
+	await drainTestOutcomeHooks(finalErr !== undefined);
+	return {
+		name: node.name,
+		fullName,
+		status: finalErr ? "fail" : "pass",
+		durationMs: Date.now() - start,
+		error: finalErr,
+	};
+}
+
+/** Verify `expect.assertions(n)` / `hasAssertions()` for the active frame. */
+function checkAssertionCount(fullName: string): SerializedError | undefined {
+	const state = getAssertionState();
+	if (!state) return undefined;
+	if (state.expected !== undefined && state.count !== state.expected) {
+		return {
+			name: "AssertionError",
+			message: `test "${fullName}" expected ${state.expected} assertion(s) but ran ${state.count}`,
+		};
+	}
+	if (state.hasAssertions && state.count === 0) {
+		return {
+			name: "AssertionError",
+			message: `test "${fullName}" expected at least one assertion but ran none`,
+		};
+	}
+	return undefined;
 }
 
 /**
@@ -491,6 +621,9 @@ export async function executeRoot(
 		onlyActive,
 		flatTests: [],
 		timeoutMs: options.timeoutMs ?? 0,
+		retries: options.retries ?? 0,
+		grep: compileGrep(options.grep),
+		tagFilter: compileTagFilter(options.tags),
 	};
 	const suites: SuiteResult[] = [];
 

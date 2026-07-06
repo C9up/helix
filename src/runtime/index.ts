@@ -8,9 +8,10 @@
 
 export type { AssertionErrorInit } from "./assertion-error.js";
 export { AssertionError, isAssertionError } from "./assertion-error.js";
+export type { AsymmetricMatcher, Constructor } from "./asymmetric.js";
 export type { EqualsOptions } from "./equals.js";
 export { equals, partialEquals } from "./equals.js";
-export type { Assertion } from "./expect.js";
+export type { Assertion, ExpectStatic } from "./expect.js";
 export { expect } from "./expect.js";
 export type { Hook, HookType } from "./lifecycle.js";
 export {
@@ -29,7 +30,16 @@ export type {
 	TestResult,
 } from "./run.js";
 export { executeRoot } from "./run.js";
-export type { RunMode, SuiteNode, TestFn, TestNode } from "./suite.js";
+export type {
+	CleanupFn,
+	HookFn,
+	RunMode,
+	SuiteNode,
+	TestFn,
+	TestHandle,
+	TestNode,
+	TestOptions,
+} from "./suite.js";
 export {
 	describe,
 	getRoot,
@@ -37,6 +47,7 @@ export {
 	resetRoot,
 	test,
 } from "./suite.js";
+export { onTestFailed, onTestFinished } from "./test-context.js";
 export type { Vi } from "./vi/index.js";
 export { vi, withViContext } from "./vi/index.js";
 export type {

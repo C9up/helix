@@ -17,13 +17,19 @@
 export * from "./container/index.js";
 export type {
 	Assertion,
+	AsymmetricMatcher,
+	CleanupFn,
+	ExpectStatic,
 	FileResult,
 	Hook,
+	HookFn,
 	HookType,
 	MatcherName,
 	MatcherResult,
 	Spy,
 	SuiteResult,
+	TestHandle,
+	TestOptions,
 	TestResult,
 	Vi,
 } from "./runtime/index.js";
@@ -36,6 +42,8 @@ export {
 	describe,
 	expect,
 	it,
+	onTestFailed,
+	onTestFinished,
 	test,
 	vi,
 } from "./runtime/index.js";

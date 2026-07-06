@@ -38,7 +38,12 @@ const FLAG_SPEC = {
 	tsx: { kind: "boolean", help: "Use tsx loader for workers (default: true)" },
 	include: { kind: "string[]", help: "Glob patterns to include" },
 	exclude: { kind: "string[]", help: "Glob patterns to exclude" },
-	grep: { kind: "string", help: "Filter tests by name (not yet implemented)" },
+	grep: {
+		kind: "string",
+		help: "Only run tests whose full name matches (regex or substring)",
+	},
+	retries: { kind: "number", help: "Extra attempts on failure (default 0)" },
+	tags: { kind: "string", help: "Comma-separated tag filter (@fast, !@slow)" },
 	watch: { kind: "boolean", help: "Watch mode — re-run on file changes" },
 	"watch-debounce": {
 		kind: "number",
@@ -373,6 +378,18 @@ async function main() {
 					}
 				: undefined,
 		};
+		// Per-test runtime filters travel to workers via env so they survive
+		// BOTH the TS pool and the Rust native orchestrator (child processes
+		// inherit this process's env; see runtime/worker.ts).
+		if (parsed.flags.grep !== undefined) {
+			process.env.HELIX_GREP = String(parsed.flags.grep);
+		}
+		if (parsed.flags.retries !== undefined) {
+			process.env.HELIX_RETRIES = String(parsed.flags.retries);
+		}
+		if (parsed.flags.tags !== undefined) {
+			process.env.HELIX_TAGS = String(parsed.flags.tags);
+		}
 		const outcome = await run(cfg);
 		return outcome.exitCode;
 	} catch (err) {

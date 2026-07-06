@@ -9,7 +9,22 @@
  */
 
 import { AssertionError } from "./assertion-error.js";
+import {
+	type AsymmetricMatcher,
+	any,
+	anything,
+	arrayContaining,
+	type Constructor,
+	objectContaining,
+	stringContaining,
+	stringMatching,
+} from "./asymmetric.js";
 import { type MatcherName, matchers } from "./matchers.js";
+import {
+	recordAssertion,
+	setExpectedAssertions,
+	setHasAssertions,
+} from "./test-context.js";
 
 type MatcherArgs<Name extends MatcherName> = (typeof matchers)[Name] extends (
 	received: unknown,
@@ -49,6 +64,8 @@ type MatcherInvoker = (
 };
 
 function evaluate(ctx: EvalContext, name: MatcherName, args: unknown[]): void {
+	// Every matcher invocation is one assertion (drives `expect.assertions`).
+	recordAssertion();
 	const matcher = matchers[name] as MatcherInvoker;
 	let result: { pass: boolean; message(): string };
 	try {
@@ -147,7 +164,28 @@ function buildAsync(
 	return api;
 }
 
-export function expect(received: unknown): Assertion {
+/** The callable `expect(...)` plus its static asymmetric matchers + assertion controls. */
+export interface ExpectStatic {
+	(received: unknown): Assertion;
+	/** Matches an object that contains (superset of) `subset`. */
+	objectContaining(subset: Record<string, unknown>): AsymmetricMatcher;
+	/** Matches an array that contains every item in `items`. */
+	arrayContaining(items: readonly unknown[]): AsymmetricMatcher;
+	/** Matches a string containing `sub`. */
+	stringContaining(sub: string): AsymmetricMatcher;
+	/** Matches a string against a substring or regexp. */
+	stringMatching(pattern: string | RegExp): AsymmetricMatcher;
+	/** Matches any value of the given type/constructor. */
+	any(ctor: Constructor): AsymmetricMatcher;
+	/** Matches any value except `null`/`undefined`. */
+	anything(): AsymmetricMatcher;
+	/** Require the current test to make exactly `n` assertions. */
+	assertions(n: number): void;
+	/** Require the current test to make at least one assertion. */
+	hasAssertions(): void;
+}
+
+function expectImpl(received: unknown): Assertion {
 	const base = buildSync(received, false);
 
 	// `.not` returns a chain that negates every matcher. It also exposes
@@ -171,3 +209,14 @@ export function expect(received: unknown): Assertion {
 		rejects,
 	});
 }
+
+export const expect: ExpectStatic = Object.assign(expectImpl, {
+	objectContaining,
+	arrayContaining,
+	stringContaining,
+	stringMatching,
+	any,
+	anything,
+	assertions: (n: number): void => setExpectedAssertions(n),
+	hasAssertions: (): void => setHasAssertions(),
+});
