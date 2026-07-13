@@ -20,6 +20,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
+  # Typecheck + lint quality gate — one ubuntu run (no matrix). Mirrors the
+  # aggregate `verify:all` gate at the ream-dev root so a standalone clone of
+  # this package enforces the same bar.
+  quality:
+    name: Typecheck & lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with: { version: 9 }
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
   # 5-platform NAPI matrix. helix is fully self-contained: its runtime and
   # test suite have zero @c9up dependencies, so it builds and tests standalone
   # with no workspace stub. darwin-x64 is cross-compiled on an arm64 runner
@@ -98,6 +115,16 @@ jobs:
             exit 1
           }
         shell: pwsh
+
+      # Quality gate the unit smoke did not cover — a broken build or a failing
+      # agnostic self-test must block the pipeline before publish (typecheck + lint
+      # run in the standalone `quality` job).
+      - name: Build (clean dist + tsc)
+        if: matrix.test
+        run: pnpm build
+      - name: Self-test (helix's own runner, framework-agnostic)
+        if: matrix.test
+        run: pnpm test:self
 
       - name: Upload artefact
         uses: actions/upload-artifact@v7

@@ -33,6 +33,7 @@
     "./bin/helix.js": "./bin/helix.js"
   },
   "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc -p tsconfig.build.json",
     "build:napi": "cargo build --release -p ream-test-napi && node scripts/copy-napi.mjs",
     "test": "vitest run",
@@ -40,7 +41,7 @@
     "lint": "biome check src/",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "tsc -p tsconfig.build.json"
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "tsx": "^4.21.0"

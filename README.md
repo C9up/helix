@@ -1,15 +1,17 @@
 # `@c9up/helix`
 
-Unified testing toolkit for the Ream ecosystem — bus, HTTP, and DB
-fakes, fluent assertions, container overrides, time-travel, plus a
-Vitest-compatible test runner CLI.
+Framework-agnostic testing toolkit for the Ream ecosystem — a
+Vitest-compatible test runner CLI with fluent assertions, container
+overrides, and time-travel. Host-specific fakes (bus / HTTP / DB) live in
+their own integration packages, not here — helix stays dependency-light.
 
 ## Sub-barrels
 
-- `@c9up/helix/bus` — Event bus assertions (emitted events, ack chains)
-- `@c9up/helix/http` — fluent HTTP TestClient with assertions + auth
-- `@c9up/helix/db` — factory, useTransaction, truncateAll, in-memory SQLite
+- `@c9up/helix` — assertions + `expect`, the test entry point
 - `@c9up/helix/runtime` — Vitest-compatible DSL (`test`, `describe`, `expect`, `vi`, lifecycle hooks)
+- `@c9up/helix/runtime/worker` — worker entry for the parallel runner
+- `@c9up/helix/container` — `useContainer` / `override` / `overrideOn` / `spy`
+- `@c9up/helix/time` — time-travel helpers
 
 ## CLI
 

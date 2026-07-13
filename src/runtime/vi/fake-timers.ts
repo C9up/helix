@@ -325,10 +325,9 @@ export function createFakeTimerController(): FakeTimerController {
 			if (timer.intervalMs !== null) {
 				s.queue.push({ ...timer, dueMs: timer.dueMs + timer.intervalMs });
 			}
-			// Advance clock to target BEFORE firing: if the callback throws,
-			// the wall clock has already been moved so subsequent drains see
-			// the state the user asked for.
-			const latestDue = timer.dueMs;
+			// The clock was advanced to `timer.dueMs` above (BEFORE firing): if the
+			// callback throws, the wall clock has already moved so subsequent drains
+			// see the state the user asked for.
 			try {
 				timer.callback(...timer.args);
 			} catch (err) {

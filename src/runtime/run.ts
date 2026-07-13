@@ -8,7 +8,7 @@
  */
 
 import { AssertionError } from "./assertion-error.js";
-import type { Hook, SuiteNode, TestFn, TestNode } from "./suite.js";
+import type { Hook, SuiteNode, TestNode } from "./suite.js";
 import {
 	drainTestOutcomeHooks,
 	getAssertionState,

@@ -19,7 +19,29 @@ import {
 	test,
 	useContainer,
 } from "@c9up/helix";
-import { Container } from "@c9up/ream";
+// Helix is framework-agnostic — its self-tests must NOT depend on @c9up/ream.
+// This minimal structural container implements exactly the `HelixContainer`
+// override seam (singleton / resolve / override / restore) that the runtime
+// drives, so the self-test proves helix's own behaviour without a host binding.
+class Container {
+	readonly #bindings = new Map<unknown, () => unknown>();
+	readonly #overrides = new Map<unknown, unknown>();
+	singleton(token: unknown, factory: () => unknown): void {
+		this.#bindings.set(token, factory);
+	}
+	resolve<T = unknown>(token: unknown): T {
+		if (this.#overrides.has(token)) return this.#overrides.get(token) as T;
+		const factory = this.#bindings.get(token);
+		if (!factory) throw new Error(`Container: no binding for ${String(token)}`);
+		return factory() as T;
+	}
+	override(token: unknown, value: unknown): void {
+		this.#overrides.set(token, value);
+	}
+	restore(token: unknown): void {
+		this.#overrides.delete(token);
+	}
+}
 
 // `useContainer` auto-restores the previous active container at the end
 // of each test (via the per-test `withTestContext` frame). The explicit
