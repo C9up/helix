@@ -9,7 +9,13 @@
 
 import { AssertionError } from "./assertion-error.js";
 import { buildTestContext } from "./context.js";
-import type { Hook, SuiteNode, TestInstance, TestNode } from "./suite.js";
+import type {
+	DoneFn,
+	Hook,
+	SuiteNode,
+	TestInstance,
+	TestNode,
+} from "./suite.js";
 import {
 	drainTestOutcomeHooks,
 	getAssertionState,
@@ -312,6 +318,17 @@ async function runTest(
 	return last;
 }
 
+function noop(): void {}
+
+/** Narrow an unknown value to a thenable without a cast. */
+function isThenable(v: unknown): v is PromiseLike<unknown> {
+	return (
+		v !== null &&
+		(typeof v === "object" || typeof v === "function") &&
+		typeof Reflect.get(v, "then") === "function"
+	);
+}
+
 /** Nearest ancestor group's `each.timeout`/`each.retry` default for a test. */
 function inheritedEach(
 	node: TestNode,
@@ -377,16 +394,42 @@ async function runAttempt(
 			// Build the injected context INSIDE the per-test frame so `ctx.cleanup`
 			// and any getter-registered per-test resources bind to this attempt.
 			const context = buildTestContext(testInstance);
-			const result = node.fn?.(context);
-			if (
-				result &&
-				typeof (result as PromiseLike<unknown>).then === "function"
-			) {
+
+			// `done` callback (Japa `waitForDone`): the test completes when the
+			// body calls done()/done(error). Built even when unused (harmless).
+			let doneResolve: () => void = noop;
+			let doneReject: (error: unknown) => void = noop;
+			const donePromise = new Promise<void>((resolve, reject) => {
+				doneResolve = resolve;
+				doneReject = reject;
+			});
+			let doneCalled = false;
+			const done: DoneFn = (error?: unknown) => {
+				if (doneCalled) return;
+				doneCalled = true;
+				if (error !== undefined) doneReject(error);
+				else doneResolve();
+			};
+
+			const result = node.fn?.(context, done);
+
+			if (node.waitForDone) {
+				// Complete on done(); a body rejection still fails fast, but a body
+				// that merely RESOLVES does not complete the test (it must call done).
+				const body = isThenable(result) ? result : Promise.resolve();
+				const bodyRejectsOnly = body.then(
+					() => new Promise<void>(noop),
+					(err) => {
+						throw err;
+					},
+				);
 				await withTimeout(
-					result as Promise<unknown>,
+					Promise.race([donePromise, bodyRejectsOnly]),
 					timeoutMs,
 					`test "${fullName}"`,
 				);
+			} else if (isThenable(result)) {
+				await withTimeout(result, timeoutMs, `test "${fullName}"`);
 			}
 		} catch (err) {
 			testErr = serializeError(err);

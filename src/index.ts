@@ -20,6 +20,7 @@ export type {
 	Assertion,
 	AsymmetricMatcher,
 	CleanupFn,
+	DoneFn,
 	ExpectStatic,
 	FileResult,
 	Group,

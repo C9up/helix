@@ -11,11 +11,17 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { TestContext } from "./context.js";
 
 /**
- * A test body. Receives the injected {@link TestContext} as its first argument
- * (Japa parity). Existing zero-argument bodies stay valid — they simply ignore
- * the context.
+ * Signals completion of a `waitForDone()` test. Call `done()` to pass, or
+ * `done(error)` to fail (Japa parity). Ignored unless `test.waitForDone()`.
  */
-export type TestFn = (ctx: TestContext) => void | Promise<void>;
+export type DoneFn = (error?: unknown) => void;
+
+/**
+ * A test body. Receives the injected {@link TestContext} as its first argument
+ * and a `done` callback as its second (Japa parity). Existing zero/one-argument
+ * bodies stay valid — they simply ignore the extra parameters.
+ */
+export type TestFn = (ctx: TestContext, done: DoneFn) => void | Promise<void>;
 export type SuiteFn = () => void;
 
 /** Teardown function a hook may return (Vitest/Japa parity). */
@@ -57,6 +63,8 @@ export interface TestNode {
 	teardowns?: HookFn[];
 	/** Dataset rows backing this test — `test.with(rows).run(...)` (Japa `ctx.test.dataset`). */
 	dataset?: readonly unknown[];
+	/** Wait for the `done()` callback before completing — `test.waitForDone()`. */
+	waitForDone?: boolean;
 }
 
 /**
@@ -112,6 +120,8 @@ export interface TestHandle {
 	pin(): TestHandle;
 	/** Skip the test, optionally only when `condition` is true, with a `reason`. */
 	skip(condition?: boolean, reason?: string): TestHandle;
+	/** Complete only once the body calls its `done` callback (Japa `waitForDone`). */
+	waitForDone(): TestHandle;
 }
 
 export interface SuiteNode {
@@ -293,6 +303,10 @@ function makeHandle(node: TestNode): TestHandle {
 				node.mode = "skip";
 				if (reason !== undefined) node.reason = reason;
 			}
+			return handle;
+		},
+		waitForDone() {
+			node.waitForDone = true;
 			return handle;
 		},
 	};

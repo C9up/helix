@@ -36,6 +36,7 @@ export type {
 export { executeRoot } from "./run.js";
 export type {
 	CleanupFn,
+	DoneFn,
 	Group,
 	HookFn,
 	RunMode,
