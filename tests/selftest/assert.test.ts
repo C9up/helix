@@ -67,6 +67,24 @@ test("assert negation + numeric/object-state matchers", ({ assert }) => {
 	expect(() => assert.isFrozen({})).toThrow();
 });
 
+test("assert members/subset/deep-property + fail overload", ({ assert }) => {
+	assert.deepPropertyVal({ a: { x: 1 } }, "a", { x: 1 });
+	assert.notDeepPropertyVal({ a: { x: 1 } }, "a", { x: 2 });
+	assert.includeMembers([1, 2, 3], [3, 1]);
+	assert.sameMembers([1, 2, 3], [3, 2, 1]);
+	assert.containSubset({ a: 1, b: { c: 2, d: 3 } }, { b: { c: 2 } });
+	assert.notTypeOf(1, "string");
+	assert.isNotFunction(1);
+	assert.isNotNaN(1);
+	assert.frozen(Object.freeze({}));
+	assert.notFrozen({});
+	expect(() => assert.sameMembers([1, 2], [1, 2, 3])).toThrow();
+	expect(() => assert.containSubset({ a: 1 }, { b: 2 })).toThrow();
+	// fail overloads: message-only and actual/expected/operator.
+	expect(() => assert.fail("boom")).toThrow(/boom/);
+	expect(() => assert.fail(1, 2, "mismatch", "==")).toThrow(/mismatch/);
+});
+
 test("assert.rejects handles async throws", async ({ assert }) => {
 	await assert.rejects(async () => {
 		throw new Error("nope");

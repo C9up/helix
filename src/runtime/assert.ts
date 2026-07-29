@@ -76,6 +76,20 @@ function matchesError(err: unknown, matcher?: ErrorMatcher): boolean {
 	return err instanceof matcher;
 }
 
+/** Deep partial containment: every leaf of `subset` is present + equal in `obj`. */
+function deepSubset(obj: unknown, subset: unknown): boolean {
+	if (equals(obj, subset)) return true;
+	if (subset === null || typeof subset !== "object") return false;
+	if (Array.isArray(subset)) {
+		if (!Array.isArray(obj)) return false;
+		return subset.every((want) => obj.some((have) => deepSubset(have, want)));
+	}
+	if (obj === null || typeof obj !== "object") return false;
+	return Object.keys(subset).every((k) =>
+		deepSubset(prop(obj, k), prop(subset, k)),
+	);
+}
+
 /** Loose equality (chai `assert.equal` semantics). Isolated so the `==` is deliberate. */
 function looseEqual(a: unknown, b: unknown): boolean {
 	// biome-ignore lint/suspicious/noDoubleEquals: chai/@japa `assert.equal` is intentionally non-strict (`==`); `strictEqual` covers `===`.
@@ -212,6 +226,44 @@ export interface Assert {
 	/** Length/size is NOT `length`. */
 	notLengthOf(value: unknown, length: number, message?: string): void;
 
+	/** Object's `key` deeply equals `value` (explicit deep form of propertyVal). */
+	deepPropertyVal(
+		object: unknown,
+		key: string,
+		value: unknown,
+		message?: string,
+	): void;
+	/** Negation of {@link deepPropertyVal}. */
+	notDeepPropertyVal(
+		object: unknown,
+		key: string,
+		value: unknown,
+		message?: string,
+	): void;
+	/** `superset` array deep-contains every member of `subset`. */
+	includeMembers(
+		superset: readonly unknown[],
+		subset: readonly unknown[],
+		message?: string,
+	): void;
+	/** Two arrays have the SAME members, order-independent (deep). */
+	sameMembers(
+		a: readonly unknown[],
+		b: readonly unknown[],
+		message?: string,
+	): void;
+	/** `object` deep-contains `subset` (nested partial match). */
+	containSubset(object: unknown, subset: unknown, message?: string): void;
+	/** `typeof`/type name is NOT `type`. */
+	notTypeOf(value: unknown, type: string, message?: string): void;
+	isNotFunction(value: unknown, message?: string): void;
+	/** Value is NOT NaN. */
+	isNotNaN(value: unknown, message?: string): void;
+	/** Alias of {@link isFrozen}. */
+	frozen(value: unknown, message?: string): void;
+	/** Alias of {@link isNotFrozen}. */
+	notFrozen(value: unknown, message?: string): void;
+
 	throws(fn: () => unknown, matcher?: ErrorMatcher, message?: string): void;
 	doesNotThrow(fn: () => unknown, message?: string): void;
 	rejects(
@@ -221,8 +273,15 @@ export interface Assert {
 	): Promise<void>;
 	doesNotReject(fn: () => Promise<unknown>, message?: string): Promise<void>;
 
-	/** Force a failure. */
+	/** Force a failure with a message. */
 	fail(message?: string): never;
+	/** Force a failure carrying actual/expected/operator (chai/@japa parity). */
+	fail(
+		actual: unknown,
+		expected: unknown,
+		message?: string,
+		operator?: string,
+	): never;
 	/** Declare the exact number of assertions this test must make (Japa parity). */
 	plan(count: number): void;
 }
@@ -688,6 +747,90 @@ export function createAssert(): Assert {
 				message ?? `expected length not to be ${length}`,
 			);
 		},
+		deepPropertyVal(
+			object: unknown,
+			key: string,
+			value: unknown,
+			message?: string,
+		): void {
+			const has =
+				object !== null && typeof object === "object" && key in object;
+			ok(
+				has && equals(prop(object, key), value),
+				message ??
+					`expected property ${stringify(key)} to deep-equal ${stringify(value)}`,
+			);
+		},
+		notDeepPropertyVal(
+			object: unknown,
+			key: string,
+			value: unknown,
+			message?: string,
+		): void {
+			const has =
+				object !== null && typeof object === "object" && key in object;
+			ok(
+				!(has && equals(prop(object, key), value)),
+				message ??
+					`expected property ${stringify(key)} not to deep-equal ${stringify(value)}`,
+			);
+		},
+		includeMembers(
+			superset: readonly unknown[],
+			subset: readonly unknown[],
+			message?: string,
+		): void {
+			const all = subset.every((want) => superset.some((s) => equals(s, want)));
+			ok(
+				all,
+				message ??
+					`expected ${stringify(superset)} to include members ${stringify(subset)}`,
+			);
+		},
+		sameMembers(
+			a: readonly unknown[],
+			b: readonly unknown[],
+			message?: string,
+		): void {
+			const aInB = a.every((x) => b.some((y) => equals(x, y)));
+			const bInA = b.every((y) => a.some((x) => equals(x, y)));
+			ok(
+				a.length === b.length && aInB && bInA,
+				message ??
+					`expected ${stringify(a)} to have the same members as ${stringify(b)}`,
+			);
+		},
+		containSubset(object: unknown, subset: unknown, message?: string): void {
+			ok(
+				deepSubset(object, subset),
+				message ??
+					`expected ${stringify(object)} to contain subset ${stringify(subset)}`,
+			);
+		},
+		notTypeOf(value: unknown, type: string, message?: string): void {
+			ok(
+				typeName(value) !== type,
+				message ?? `expected type not to be ${type}`,
+			);
+		},
+		isNotFunction(value: unknown, message?: string): void {
+			ok(
+				typeof value !== "function",
+				message ?? "expected value not to be a function",
+			);
+		},
+		isNotNaN(value: unknown, message?: string): void {
+			ok(
+				!(typeof value === "number" && Number.isNaN(value)),
+				message ?? "expected value not to be NaN",
+			);
+		},
+		frozen(value: unknown, message?: string): void {
+			ok(Object.isFrozen(value), message ?? "expected value to be frozen");
+		},
+		notFrozen(value: unknown, message?: string): void {
+			ok(!Object.isFrozen(value), message ?? "expected value not to be frozen");
+		},
 		throws(fn: () => unknown, matcher?: ErrorMatcher, message?: string): void {
 			let thrown: unknown;
 			let didThrow = false;
@@ -743,9 +886,28 @@ export function createAssert(): Assert {
 			}
 			ok(!didReject, message ?? "expected promise not to reject");
 		},
-		fail(message?: string): never {
+		fail(
+			actualOrMessage?: unknown,
+			expected?: unknown,
+			message?: string,
+			operator?: string,
+		): never {
 			recordAssertion();
-			raise(message ?? "assert.fail()");
+			// Single-string form: `fail("message")`.
+			if (
+				expected === undefined &&
+				message === undefined &&
+				operator === undefined &&
+				(actualOrMessage === undefined || typeof actualOrMessage === "string")
+			) {
+				raise(actualOrMessage ?? "assert.fail()");
+			}
+			throw new AssertionError({
+				message: message ?? "assert.fail()",
+				actual: actualOrMessage,
+				expected,
+				operator,
+			});
 		},
 		plan(count: number): void {
 			setExpectedAssertions(count);
