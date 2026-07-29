@@ -5,13 +5,14 @@
  * spies/lifecycle), the container facade, and time-travel — none of which import
  * an ecosystem package. It is fully agnostic: usable in any project.
  *
- * Per-package test fakes/helpers live in EACH package's own `/testing` subpath
- * (a package owns its test surface, not helix): `@c9up/ream/testing`
- * (TestClient, FakeBus, assertEmitted), `@c9up/atlas/testing` (factory,
- * useTransaction), `@c9up/rover/testing` (FakeMail), `@c9up/bay/testing`
- * (FakeQueue), `@c9up/spectrum/testing` (FakeLogger), `@c9up/nova/testing`
- * (FakeNova), `@c9up/relay/testing` (FakeRelay), `@c9up/archive/testing`
- * (FakeStorage). Install a package → you get its testing surface.
+ * Capabilities ship as PLUGINS (the Japa/AdonisJS topology): each package's
+ * `/testing` subpath exports plugins that extend the injected test context via
+ * `configure({ plugins: [...] })` — `@c9up/ream/testing` (apiClient → `client`,
+ * FakeBus), `@c9up/atlas/testing` (factory, useTransaction, db), `@c9up/rover/
+ * testing` (FakeMail), `@c9up/bay/testing` (FakeQueue), `@c9up/spectrum/testing`
+ * (FakeLogger), `@c9up/nova/testing` (FakeNova), `@c9up/relay/testing`
+ * (FakeRelay), `@c9up/archive/testing` (FakeStorage). The plugins depend on
+ * helix, never the other way round — the core stays agnostic.
  */
 
 export * from "./container/index.js";
@@ -20,6 +21,7 @@ export type {
 	Assertion,
 	AsymmetricMatcher,
 	CleanupFn,
+	ConfigureOptions,
 	DoneFn,
 	ExpectStatic,
 	FileResult,
@@ -29,6 +31,9 @@ export type {
 	HookType,
 	MatcherName,
 	MatcherResult,
+	Plugin,
+	PluginApi,
+	PluginContext,
 	Spy,
 	SuiteResult,
 	TestContext,
@@ -45,6 +50,7 @@ export {
 	beforeAll,
 	beforeEach,
 	buildTestContext,
+	configure,
 	createAssert,
 	describe,
 	expect,

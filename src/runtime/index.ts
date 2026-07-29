@@ -11,6 +11,13 @@ export { createAssert } from "./assert.js";
 export type { AssertionErrorInit } from "./assertion-error.js";
 export { AssertionError, isAssertionError } from "./assertion-error.js";
 export type { AsymmetricMatcher, Constructor } from "./asymmetric.js";
+export type {
+	ConfigureOptions,
+	Plugin,
+	PluginApi,
+	PluginContext,
+} from "./configure.js";
+export { configure } from "./configure.js";
 export type { TestContext } from "./context.js";
 export { buildTestContext, TestContextRegistry } from "./context.js";
 export type { EqualsOptions } from "./equals.js";
