@@ -234,25 +234,46 @@ function combineErrors(
 	};
 }
 
-async function withTimeout<T>(
-	p: Promise<T> | T,
-	ms: number,
-	label: string,
-): Promise<T> {
-	if (ms <= 0) return await p;
+/** A test-body timeout that can be re-armed mid-flight (`ctx.test.resetTimeout`). */
+interface TimeoutController {
+	/** Race `work` against the current deadline. */
+	race<T>(work: Promise<T> | T): Promise<T>;
+	/** Restart the timer (optionally with a new duration). */
+	reset(ms?: number): void;
+}
+
+function makeTimeoutController(ms: number, label: string): TimeoutController {
 	let timer: NodeJS.Timeout | undefined;
-	const timeout = new Promise<T>((_, reject) => {
+	let rejectTimeout: ((err: unknown) => void) | undefined;
+	let current = ms;
+	const arm = () => {
+		if (current <= 0) return;
 		timer = setTimeout(() => {
-			reject(new Error(`${label} exceeded ${ms}ms timeout`));
-		}, ms);
-		// Don't keep the event loop alive just for this watchdog.
+			rejectTimeout?.(new Error(`${label} exceeded ${current}ms timeout`));
+		}, current);
 		timer.unref?.();
-	});
-	try {
-		return await Promise.race([Promise.resolve(p), timeout]);
-	} finally {
-		if (timer) clearTimeout(timer);
-	}
+	};
+	return {
+		race<T>(work: Promise<T> | T): Promise<T> {
+			if (current <= 0) return Promise.resolve(work);
+			const timeout = new Promise<T>((_, reject) => {
+				rejectTimeout = reject;
+				arm();
+			});
+			return Promise.race([
+				Promise.resolve(work).then((v) => {
+					if (timer) clearTimeout(timer);
+					return v;
+				}),
+				timeout,
+			]);
+		},
+		reset(newMs?: number): void {
+			if (timer) clearTimeout(timer);
+			if (newMs !== undefined) current = newMs;
+			arm();
+		},
+	};
 }
 
 interface RunCtx {
@@ -368,6 +389,9 @@ async function runAttempt(
 	retries: number,
 	start: number,
 ): Promise<TestResult> {
+	// A re-armable body timeout so `ctx.test.resetTimeout()` can push the deadline.
+	const timeoutCtl = makeTimeoutController(timeoutMs, `test "${fullName}"`);
+
 	// The running test's instance — injected as `ctx.test`, passed to the test
 	// hooks (Japa parity), and threaded into the frame so cleanups receive it.
 	const testInstance: TestInstance = {
@@ -380,6 +404,7 @@ async function runAttempt(
 		},
 		dataset: node.dataset,
 		isPinned: node.pinned === true,
+		resetTimeout: (ms?: number) => timeoutCtl.reset(ms),
 	};
 	setFrameTest(testInstance);
 
@@ -437,13 +462,9 @@ async function runAttempt(
 						throw err;
 					},
 				);
-				await withTimeout(
-					Promise.race([donePromise, bodyRejectsOnly]),
-					timeoutMs,
-					`test "${fullName}"`,
-				);
+				await timeoutCtl.race(Promise.race([donePromise, bodyRejectsOnly]));
 			} else if (isThenable(result)) {
-				await withTimeout(result, timeoutMs, `test "${fullName}"`);
+				await timeoutCtl.race(result);
 			}
 		} catch (err) {
 			testErr = serializeError(err);

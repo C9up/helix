@@ -107,6 +107,12 @@ export interface TestInstance {
 	dataset?: readonly unknown[];
 	/** Whether the test was pinned via `test.pin()`. */
 	isPinned: boolean;
+	/**
+	 * Re-arm the running test's timeout (Japa `ctx.test.resetTimeout`). With no
+	 * argument, restarts the current timeout; with `ms`, sets a new one. Useful
+	 * for long polling steps that shouldn't count against a single deadline.
+	 */
+	resetTimeout(ms?: number): void;
 }
 
 /** Vitest-style per-test options (3rd argument to `test`). */
@@ -449,9 +455,11 @@ type TestApi = {
 	/**
 	 * Japa dataset API: `test.with(rows).run((ctx, row) => …)`. Registers one
 	 * test per row; the body receives the injected context AND the row. The full
-	 * dataset is available as `ctx.test.dataset`.
+	 * dataset is available as `ctx.test.dataset`. `rows` may be an array OR a
+	 * function returning one (lazy dataset — Japa parity), resolved eagerly at
+	 * collection time.
 	 */
-	with<Row>(rows: readonly Row[]): {
+	with<Row>(rows: readonly Row[] | (() => readonly Row[])): {
 		run(
 			name: string,
 			fn: (ctx: TestContext, row: Row) => void | Promise<void>,
@@ -588,20 +596,23 @@ testFn.each = <Row extends EachRow>(rows: EachRows<Row>) => {
 		});
 	};
 };
-testFn.with = <Row>(rows: readonly Row[]) => ({
+testFn.with = <Row>(rows: readonly Row[] | (() => readonly Row[])) => ({
 	run(
 		name: string,
 		fn: (ctx: TestContext, row: Row) => void | Promise<void>,
 	): void {
+		// A lazy dataset (`with(() => rows)`) is resolved eagerly at collection
+		// time — per-row nodes need concrete rows to register.
+		const resolved = typeof rows === "function" ? rows() : rows;
 		// One test per row, Japa-style. The body gets the injected context AND the
 		// row; the full dataset is stamped on each node → `ctx.test.dataset`.
-		rows.forEach((row, index) => {
+		resolved.forEach((row, index) => {
 			// Dataset rows are arbitrary (not `EachRow`), so name by index rather
 			// than interpolating placeholders the way `.each` does.
 			const resolvedName =
-				rows.length > 1 ? `${name} (row ${index + 1})` : name;
+				resolved.length > 1 ? `${name} (row ${index + 1})` : name;
 			const node = registerTest(resolvedName, "run", (ctx) => fn(ctx, row));
-			node.dataset = rows;
+			node.dataset = resolved;
 		});
 	},
 });
