@@ -121,6 +121,10 @@ export interface SuiteNode {
 	parent: SuiteNode | undefined;
 	children: Array<SuiteNode | TestNode>;
 	hooks: Hook[];
+	/** Default per-test timeout for tests in this group — `group.each.timeout(ms)`. */
+	eachTimeout?: number;
+	/** Default per-test retries for tests in this group — `group.each.retry(n)`. */
+	eachRetries?: number;
 }
 
 interface CollectionContext {
@@ -361,11 +365,22 @@ export interface Group {
 	setup(fn: HookFn): void;
 	/** Run once after all tests in the group (≈ `afterAll`). */
 	teardown(fn: HookFn): void;
-	/** Per-test hooks for this group (≈ `beforeEach`/`afterEach`). */
+	/** Per-test hooks + defaults for this group (≈ `beforeEach`/`afterEach`). */
 	each: {
 		setup(fn: HookFn): void;
 		teardown(fn: HookFn): void;
+		/** Default timeout (ms) for every test in the group — `group.each.timeout(ms)`. */
+		timeout(ms: number): void;
+		/** Disable the timeout for every test in the group. */
+		disableTimeout(): void;
+		/** Default retries for every test in the group — `group.each.retry(n)`. */
+		retry(n: number): void;
 	};
+	/**
+	 * Configure every test in the group via its handle — `group.tap(t =>
+	 * t.tags('@slow'))`. Applied to all tests registered in the group body.
+	 */
+	tap(fn: (test: TestHandle) => void): void;
 }
 
 type TestApi = {
@@ -539,15 +554,37 @@ testFn.group = (name: string, fn: (group: Group) => void) => {
 	// A group IS a suite: open one, then run the body with a `group` handle whose
 	// hook methods attach to THIS active suite via `addHook`.
 	registerSuite(name, "run", () => {
+		const suite = current();
+		const taps: Array<(test: TestHandle) => void> = [];
 		const group: Group = {
 			setup: (hookFn) => addHook("beforeAll", hookFn),
 			teardown: (hookFn) => addHook("afterAll", hookFn),
 			each: {
 				setup: (hookFn) => addHook("beforeEach", hookFn),
 				teardown: (hookFn) => addHook("afterEach", hookFn),
+				timeout: (ms) => {
+					suite.eachTimeout = ms;
+				},
+				disableTimeout: () => {
+					suite.eachTimeout = 0;
+				},
+				retry: (n) => {
+					suite.eachRetries = n;
+				},
 			},
+			tap: (tapFn) => taps.push(tapFn),
 		};
 		fn(group);
+		// Apply `tap` callbacks to every test registered directly in this group,
+		// regardless of whether tap() was called before or after them.
+		if (taps.length > 0) {
+			for (const child of suite.children) {
+				if (child.kind === "test") {
+					const handle = makeHandle(child);
+					for (const tapFn of taps) tapFn(handle);
+				}
+			}
+		}
 	});
 };
 

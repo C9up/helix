@@ -289,8 +289,13 @@ async function runTest(
 
 	const before = collectHookChain(node.parent, "beforeEach");
 	const after = collectHookChain(node.parent, "afterEach");
-	const perTestTimeout = node.timeoutMs ?? ctx.timeoutMs;
-	const attempts = 1 + Math.max(0, node.retries ?? ctx.retries);
+	// Resolution order: per-test override → nearest group `each.timeout`/`retry`
+	// → run-wide default.
+	const perTestTimeout =
+		node.timeoutMs ?? inheritedEach(node, "eachTimeout") ?? ctx.timeoutMs;
+	const perTestRetries =
+		node.retries ?? inheritedEach(node, "eachRetries") ?? ctx.retries;
+	const attempts = 1 + Math.max(0, perTestRetries);
 	const start = Date.now();
 
 	// Retry loop: each attempt runs the FULL cycle (beforeEach + body +
@@ -305,6 +310,22 @@ async function runTest(
 	}
 	ctx.flatTests.push(last);
 	return last;
+}
+
+/** Nearest ancestor group's `each.timeout`/`each.retry` default for a test. */
+function inheritedEach(
+	node: TestNode,
+	key: "eachTimeout" | "eachRetries",
+): number | undefined {
+	for (
+		let suite: SuiteNode | undefined = node.parent;
+		suite !== undefined;
+		suite = suite.parent
+	) {
+		const value = suite[key];
+		if (value !== undefined) return value;
+	}
+	return undefined;
 }
 
 /** Run one full attempt of a test inside the active per-test frame. */
