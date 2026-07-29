@@ -161,6 +161,15 @@ async function runNative(
 }
 
 export async function run(config: RunConfig): Promise<RunOutcome> {
+	// Adonis/Japa parity: a test run executes in the `test` environment. Set it
+	// on the orchestrator BEFORE any worker spawns — both the native (Rust) and
+	// TS pools inherit the parent process env, so every worker (where the app +
+	// test code is actually loaded) starts with NODE_ENV=test. Mirrors AdonisJS
+	// `bin/test.ts`, which sets it UNCONDITIONALLY: a stray `NODE_ENV` from the
+	// shell or CI must not leak a non-test env into the suite (the whole point of
+	// letting app code gate on `NODE_ENV === 'test'`).
+	process.env.NODE_ENV = "test";
+
 	if (!config.watch?.enabled) return runOnce(config);
 	const root = path.isAbsolute(config.root)
 		? config.root
