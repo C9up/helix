@@ -35,6 +35,21 @@ test("assert core matchers pass on valid input", ({ assert }) => {
 	assert.doesNotThrow(() => 1);
 });
 
+test("assert @japa aliases + property-set matchers", ({ assert }) => {
+	assert.ok(1);
+	assert.notOk(0);
+	assert.empty([]);
+	assert.notEmpty([1]);
+	assert.deepInclude([{ id: 1 }], { id: 1 });
+	assert.notDeepInclude([{ id: 1 }], { id: 2 });
+	assert.properties({ a: 1, b: 2, c: 3 }, ["a", "b"]);
+	assert.notAllProperties({ a: 1 }, ["a", "z"]);
+	assert.onlyProperties({ a: 1, b: 2 }, ["a", "b"]);
+	assert.notAnyProperties({ a: 1 }, ["x", "y"]);
+	expect(() => assert.onlyProperties({ a: 1, b: 2 }, ["a"])).toThrow();
+	expect(() => assert.properties({ a: 1 }, ["a", "b"])).toThrow();
+});
+
 test("assert.rejects handles async throws", async ({ assert }) => {
 	await assert.rejects(async () => {
 		throw new Error("nope");

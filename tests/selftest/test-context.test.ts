@@ -10,6 +10,15 @@
 
 import { expect, test, TestContextRegistry } from "@c9up/helix";
 
+// Typing side: plugins pair a runtime registration with a declaration-merge so
+// `ctx.answer` / `ctx.lazy` are fully typed (the Japa pattern).
+declare module "@c9up/helix" {
+	interface TestContext {
+		answer: number;
+		lazy: string;
+	}
+}
+
 // Registered during the collection phase (module load), before any test runs.
 TestContextRegistry.macro("answer", 42);
 

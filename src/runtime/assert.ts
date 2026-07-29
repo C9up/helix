@@ -148,6 +148,39 @@ export interface Assert {
 	notMatch(value: string, regex: RegExp, message?: string): void;
 	oneOf(value: unknown, list: readonly unknown[], message?: string): void;
 
+	/** Alias of `isOk` — value is truthy (@japa/assert). */
+	ok(value: unknown, message?: string): void;
+	/** Alias of `isNotOk` — value is falsy (@japa/assert). */
+	notOk(value: unknown, message?: string): void;
+	/** Alias of `isEmpty` (@japa/assert). */
+	empty(value: unknown, message?: string): void;
+	/** Alias of `isNotEmpty` (@japa/assert). */
+	notEmpty(value: unknown, message?: string): void;
+	/** Deep membership: array contains a deeply-equal element, or object contains the subset. */
+	deepInclude(haystack: unknown, needle: unknown, message?: string): void;
+	/** Negation of {@link deepInclude}. */
+	notDeepInclude(haystack: unknown, needle: unknown, message?: string): void;
+	/** Object owns ALL of `keys` (@japa/assert `properties`). */
+	properties(object: unknown, keys: readonly string[], message?: string): void;
+	/** Object is MISSING at least one of `keys` (@japa/assert `notAllProperties`). */
+	notAllProperties(
+		object: unknown,
+		keys: readonly string[],
+		message?: string,
+	): void;
+	/** Object's own keys are EXACTLY `keys` (@japa/assert `onlyProperties`). */
+	onlyProperties(
+		object: unknown,
+		keys: readonly string[],
+		message?: string,
+	): void;
+	/** Object owns NONE of `keys` (@japa/assert `notAnyProperties`). */
+	notAnyProperties(
+		object: unknown,
+		keys: readonly string[],
+		message?: string,
+	): void;
+
 	throws(fn: () => unknown, matcher?: ErrorMatcher, message?: string): void;
 	doesNotThrow(fn: () => unknown, message?: string): void;
 	rejects(
@@ -425,6 +458,114 @@ export function createAssert(): Assert {
 				list.some((el) => equals(el, value)),
 				message ??
 					`expected ${stringify(value)} to be one of ${stringify(list)}`,
+			);
+		},
+		ok(value: unknown, message?: string): void {
+			ok(
+				Boolean(value),
+				message ?? `expected ${stringify(value)} to be truthy`,
+			);
+		},
+		notOk(value: unknown, message?: string): void {
+			ok(!value, message ?? `expected ${stringify(value)} to be falsy`);
+		},
+		empty(value: unknown, message?: string): void {
+			ok(
+				isEmptyValue(value),
+				message ?? `expected ${stringify(value)} to be empty`,
+			);
+		},
+		notEmpty(value: unknown, message?: string): void {
+			ok(!isEmptyValue(value), message ?? "expected value not to be empty");
+		},
+		deepInclude(haystack: unknown, needle: unknown, message?: string): void {
+			let found = false;
+			if (Array.isArray(haystack))
+				found = haystack.some((el) => equals(el, needle));
+			else if (needle !== null && typeof needle === "object") {
+				found = Object.entries(needle).every(([k, v]) =>
+					equals(prop(haystack, k), v),
+				);
+			}
+			ok(
+				found,
+				message ??
+					`expected ${stringify(haystack)} to deep-include ${stringify(needle)}`,
+			);
+		},
+		notDeepInclude(haystack: unknown, needle: unknown, message?: string): void {
+			let found = false;
+			if (Array.isArray(haystack))
+				found = haystack.some((el) => equals(el, needle));
+			else if (needle !== null && typeof needle === "object") {
+				found = Object.entries(needle).every(([k, v]) =>
+					equals(prop(haystack, k), v),
+				);
+			}
+			ok(
+				!found,
+				message ??
+					`expected ${stringify(haystack)} not to deep-include ${stringify(needle)}`,
+			);
+		},
+		properties(
+			object: unknown,
+			keys: readonly string[],
+			message?: string,
+		): void {
+			const has =
+				object !== null &&
+				typeof object === "object" &&
+				keys.every((k) => k in object);
+			ok(
+				has,
+				message ?? `expected object to have properties ${stringify(keys)}`,
+			);
+		},
+		notAllProperties(
+			object: unknown,
+			keys: readonly string[],
+			message?: string,
+		): void {
+			const hasAll =
+				object !== null &&
+				typeof object === "object" &&
+				keys.every((k) => k in object);
+			ok(
+				!hasAll,
+				message ??
+					`expected object to be missing at least one of ${stringify(keys)}`,
+			);
+		},
+		onlyProperties(
+			object: unknown,
+			keys: readonly string[],
+			message?: string,
+		): void {
+			const own =
+				object !== null && typeof object === "object"
+					? Object.keys(object)
+					: [];
+			const want = new Set(keys);
+			const exact = own.length === want.size && own.every((k) => want.has(k));
+			ok(
+				exact,
+				message ??
+					`expected object keys to be exactly ${stringify(keys)}, got ${stringify(own)}`,
+			);
+		},
+		notAnyProperties(
+			object: unknown,
+			keys: readonly string[],
+			message?: string,
+		): void {
+			const hasAny =
+				object !== null &&
+				typeof object === "object" &&
+				keys.some((k) => k in object);
+			ok(
+				!hasAny,
+				message ?? `expected object to own none of ${stringify(keys)}`,
 			);
 		},
 		throws(fn: () => unknown, matcher?: ErrorMatcher, message?: string): void {
