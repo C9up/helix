@@ -28,16 +28,33 @@ import { registerTestCleanup, type TestCleanup } from "./test-context.js";
  * `assert`, `client`, `db`, … by augmenting this interface (declaration
  * merging) alongside a matching {@link TestContextRegistry} registration.
  */
-export interface TestContext {
+/**
+ * A CLASS (not an interface) so plugins can add REQUIRED properties via
+ * declaration merging — `declare module "@c9up/helix" { interface TestContext {
+ * client: ApiClient } }` — without breaking the core's construction (an external
+ * augmentation is not subject to helix's `strictPropertyInitialization`). This
+ * is exactly how Japa's `TestContext` works.
+ */
+export class TestContext {
+	/** Chai-flavored assertions (`@japa/assert` parity), alongside `expect`. */
+	readonly assert: Assert;
+	/** The running test's own instance — name, options, dataset (Japa `ctx.test`). */
+	readonly test: TestInstance;
+
+	constructor(test: TestInstance) {
+		this.assert = createAssert();
+		this.test = test;
+	}
+
 	/**
 	 * Register a teardown that runs at the end of THIS test, regardless of
 	 * outcome (Japa `ctx.cleanup`). Reverse-insertion order, isolated failures.
 	 */
-	cleanup(fn: TestCleanup): void;
-	/** Chai-flavored assertions (`@japa/assert` parity), alongside `expect`. */
-	assert: Assert;
-	/** The running test's own instance — name, options, dataset (Japa `ctx.test`). */
-	test: TestInstance;
+	cleanup(fn: TestCleanup): void {
+		// Falls through to the active per-test frame; a false return means we were
+		// called outside a frame (defensive — the runner always wraps).
+		registerTestCleanup(fn);
+	}
 }
 
 type Getter = (ctx: TestContext) => unknown;
@@ -87,18 +104,11 @@ export const TestContextRegistry = {
  * override and no cast are needed.
  */
 export function buildTestContext(test: TestInstance): TestContext {
-	const ctx: TestContext = {
-		cleanup(fn: TestCleanup): void {
-			// Falls through to the active per-test frame; a false return means we
-			// were called outside a frame (defensive — the runner always wraps).
-			registerTestCleanup(fn);
-		},
-		assert: createAssert(),
-		test,
-	};
+	const ctx = new TestContext(test);
+	const reserved = new Set(["cleanup", "assert", "test"]);
 
 	for (const [name, value] of macros) {
-		if (name === "cleanup") continue;
+		if (reserved.has(name)) continue;
 		Object.defineProperty(ctx, name, {
 			value,
 			enumerable: true,
@@ -108,7 +118,7 @@ export function buildTestContext(test: TestInstance): TestContext {
 	}
 
 	for (const [name, fn] of getters) {
-		if (name === "cleanup") continue;
+		if (reserved.has(name)) continue;
 		let computed = false;
 		let cached: unknown;
 		Object.defineProperty(ctx, name, {
