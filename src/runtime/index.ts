@@ -42,6 +42,7 @@ export type {
 	SuiteNode,
 	TestFn,
 	TestHandle,
+	TestInstance,
 	TestNode,
 	TestOptions,
 } from "./suite.js";

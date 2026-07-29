@@ -14,8 +14,17 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { TestInstance } from "./suite.js";
 
-export type TestCleanup = () => void | Promise<void>;
+/**
+ * A per-test teardown. Receives `(hasError, test)` (Japa parity): whether the
+ * test failed, and the running test's instance. Both params are optional so
+ * plain `() => …` cleanups stay valid.
+ */
+export type TestCleanup = (
+	hasError?: boolean,
+	test?: TestInstance,
+) => void | Promise<void>;
 
 /** Per-test assertion bookkeeping (drives `expect.assertions`/`hasAssertions`). */
 export interface AssertionState {
@@ -34,6 +43,10 @@ interface TestFrame {
 	/** `onTestFailed` callbacks — run after the test only when it failed. */
 	onFailed: TestCleanup[];
 	assertions: AssertionState;
+	/** The running test's instance (Japa `ctx.test`), threaded into cleanups. */
+	test: TestInstance | undefined;
+	/** Whether the test body/hooks errored — passed to cleanups as `hasError`. */
+	hadError: boolean;
 }
 
 const storage = new AsyncLocalStorage<TestFrame>();
@@ -44,13 +57,15 @@ export async function withTestContext<T>(body: () => Promise<T>): Promise<T> {
 		onFinished: [],
 		onFailed: [],
 		assertions: { count: 0, expected: undefined, hasAssertions: false },
+		test: undefined,
+		hadError: false,
 	};
 	try {
 		return await storage.run(frame, body);
 	} finally {
 		for (let i = frame.cleanups.length - 1; i >= 0; i -= 1) {
 			try {
-				await frame.cleanups[i]();
+				await frame.cleanups[i](frame.hadError, frame.test);
 			} catch (err) {
 				// One cleanup failing must not block the others — but log it
 				// so silent leaks become noisy. `console.error` matches what
@@ -76,6 +91,18 @@ export function registerTestCleanup(cleanup: TestCleanup): boolean {
 
 export function inTestContext(): boolean {
 	return storage.getStore() !== undefined;
+}
+
+/** Attach the running test's instance to the active frame (for `ctx.test` + cleanups). */
+export function setFrameTest(test: TestInstance): void {
+	const frame = storage.getStore();
+	if (frame) frame.test = test;
+}
+
+/** Record whether the test errored — read by the cleanup/outcome drains. */
+export function setFrameOutcome(hadError: boolean): void {
+	const frame = storage.getStore();
+	if (frame) frame.hadError = hadError;
 }
 
 /**
@@ -126,7 +153,7 @@ export async function drainTestOutcomeHooks(failed: boolean): Promise<void> {
 	if (failed) {
 		for (let i = frame.onFailed.length - 1; i >= 0; i -= 1) {
 			try {
-				await frame.onFailed[i]();
+				await frame.onFailed[i](failed, frame.test);
 			} catch (err) {
 				console.error("[helix] onTestFailed callback threw:", err);
 			}
@@ -134,7 +161,7 @@ export async function drainTestOutcomeHooks(failed: boolean): Promise<void> {
 	}
 	for (let i = frame.onFinished.length - 1; i >= 0; i -= 1) {
 		try {
-			await frame.onFinished[i]();
+			await frame.onFinished[i](failed, frame.test);
 		} catch (err) {
 			console.error("[helix] onTestFinished callback threw:", err);
 		}

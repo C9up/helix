@@ -47,6 +47,37 @@ export interface TestNode {
 	tags?: string[];
 	/** When `true`, the test is expected to throw — `test.fails()`. */
 	failing?: boolean;
+	/** Reason attached to `test.fails(reason)` / `test.skip(cond, reason)`. */
+	reason?: string;
+	/** Marked via `test.pin()` — reported as pinned; runs like `.only`. */
+	pinned?: boolean;
+	/** Per-test setup hooks — `test.setup(fn)` (run just before this test). */
+	setups?: HookFn[];
+	/** Per-test teardown hooks — `test.teardown(fn)` (run just after this test). */
+	teardowns?: HookFn[];
+	/** Dataset rows backing this test — `test.with(rows).run(...)` (Japa `ctx.test.dataset`). */
+	dataset?: readonly unknown[];
+}
+
+/**
+ * The running test's own instance, injected as `ctx.test` (Japa parity). Read
+ * access to the test's identity + resolved options + dataset.
+ */
+export interface TestInstance {
+	/** The test's own name (leaf). */
+	title: string;
+	/** Fully-qualified dotted name (suite path + title). */
+	fullName: string;
+	/** Resolved options in effect for this run. */
+	options: {
+		timeout: number;
+		retries: number;
+		tags: readonly string[];
+	};
+	/** The full dataset when created via `test.with(rows).run(...)`, else undefined. */
+	dataset?: readonly unknown[];
+	/** Whether the test was pinned via `test.pin()`. */
+	isPinned: boolean;
 }
 
 /** Vitest-style per-test options (3rd argument to `test`). */
@@ -71,7 +102,16 @@ export interface TestHandle {
 	timeout(ms: number): TestHandle;
 	disableTimeout(): TestHandle;
 	tags(...tags: string[]): TestHandle;
-	fails(): TestHandle;
+	/** Expect the test to throw. Optional `reason` documents why (Japa parity). */
+	fails(reason?: string): TestHandle;
+	/** Run a hook just before THIS test (Japa `test.setup`). */
+	setup(fn: HookFn): TestHandle;
+	/** Run a hook just after THIS test (Japa `test.teardown`). */
+	teardown(fn: HookFn): TestHandle;
+	/** Pin the test: when any test is pinned, only pinned tests run (Japa `test.pin`). */
+	pin(): TestHandle;
+	/** Skip the test, optionally only when `condition` is true, with a `reason`. */
+	skip(condition?: boolean, reason?: string): TestHandle;
 }
 
 export interface SuiteNode {
@@ -222,8 +262,33 @@ function makeHandle(node: TestNode): TestHandle {
 			node.tags = [...(node.tags ?? []), ...tags];
 			return handle;
 		},
-		fails() {
+		fails(reason?: string) {
 			node.failing = true;
+			if (reason !== undefined) node.reason = reason;
+			return handle;
+		},
+		setup(fn: HookFn) {
+			if (!node.setups) node.setups = [];
+			node.setups.push(fn);
+			return handle;
+		},
+		teardown(fn: HookFn) {
+			if (!node.teardowns) node.teardowns = [];
+			node.teardowns.push(fn);
+			return handle;
+		},
+		pin() {
+			node.pinned = true;
+			// A pinned test runs like `.only` — the runner already restricts the
+			// tree to `only` nodes when any exist.
+			if (node.mode === "run") node.mode = "only";
+			return handle;
+		},
+		skip(condition = true, reason?: string) {
+			if (condition) {
+				node.mode = "skip";
+				if (reason !== undefined) node.reason = reason;
+			}
 			return handle;
 		},
 	};
@@ -311,6 +376,17 @@ type TestApi = {
 	each<Row extends EachRow>(
 		rows: EachRows<Row>,
 	): (name: string, fn: (row: Row) => void | Promise<void>) => void;
+	/**
+	 * Japa dataset API: `test.with(rows).run((ctx, row) => …)`. Registers one
+	 * test per row; the body receives the injected context AND the row. The full
+	 * dataset is available as `ctx.test.dataset`.
+	 */
+	with<Row>(rows: readonly Row[]): {
+		run(
+			name: string,
+			fn: (ctx: TestContext, row: Row) => void | Promise<void>,
+		): void;
+	};
 	/** Japa-style grouping: `test.group(name, (group) => { … })`. */
 	group(name: string, fn: (group: Group) => void): void;
 };
@@ -442,6 +518,23 @@ testFn.each = <Row extends EachRow>(rows: EachRows<Row>) => {
 		});
 	};
 };
+testFn.with = <Row>(rows: readonly Row[]) => ({
+	run(
+		name: string,
+		fn: (ctx: TestContext, row: Row) => void | Promise<void>,
+	): void {
+		// One test per row, Japa-style. The body gets the injected context AND the
+		// row; the full dataset is stamped on each node → `ctx.test.dataset`.
+		rows.forEach((row, index) => {
+			// Dataset rows are arbitrary (not `EachRow`), so name by index rather
+			// than interpolating placeholders the way `.each` does.
+			const resolvedName =
+				rows.length > 1 ? `${name} (row ${index + 1})` : name;
+			const node = registerTest(resolvedName, "run", (ctx) => fn(ctx, row));
+			node.dataset = rows;
+		});
+	},
+});
 testFn.group = (name: string, fn: (group: Group) => void) => {
 	// A group IS a suite: open one, then run the body with a `group` handle whose
 	// hook methods attach to THIS active suite via `addHook`.

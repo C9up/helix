@@ -20,6 +20,7 @@
  */
 
 import { type Assert, createAssert } from "./assert.js";
+import type { TestInstance } from "./suite.js";
 import { registerTestCleanup, type TestCleanup } from "./test-context.js";
 
 /**
@@ -35,6 +36,8 @@ export interface TestContext {
 	cleanup(fn: TestCleanup): void;
 	/** Chai-flavored assertions (`@japa/assert` parity), alongside `expect`. */
 	assert: Assert;
+	/** The running test's own instance — name, options, dataset (Japa `ctx.test`). */
+	test: TestInstance;
 }
 
 type Getter = (ctx: TestContext) => unknown;
@@ -83,7 +86,7 @@ export const TestContextRegistry = {
  * context). Dynamic props are attached via `defineProperty` so no `cleanup`
  * override and no cast are needed.
  */
-export function buildTestContext(): TestContext {
+export function buildTestContext(test: TestInstance): TestContext {
 	const ctx: TestContext = {
 		cleanup(fn: TestCleanup): void {
 			// Falls through to the active per-test frame; a false return means we
@@ -91,6 +94,7 @@ export function buildTestContext(): TestContext {
 			registerTestCleanup(fn);
 		},
 		assert: createAssert(),
+		test,
 	};
 
 	for (const [name, value] of macros) {

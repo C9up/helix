@@ -32,6 +32,7 @@ export type {
 	SuiteResult,
 	TestContext,
 	TestHandle,
+	TestInstance,
 	TestOptions,
 	TestResult,
 	Vi,

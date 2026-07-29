@@ -9,11 +9,13 @@
 
 import { AssertionError } from "./assertion-error.js";
 import { buildTestContext } from "./context.js";
-import type { Hook, SuiteNode, TestNode } from "./suite.js";
+import type { Hook, SuiteNode, TestInstance, TestNode } from "./suite.js";
 import {
 	drainTestOutcomeHooks,
 	getAssertionState,
 	registerTestCleanup,
+	setFrameOutcome,
+	setFrameTest,
 	withTestContext,
 } from "./test-context.js";
 
@@ -327,41 +329,73 @@ async function runAttempt(
 		};
 	}
 
+	// The running test's instance — injected as `ctx.test` and threaded into the
+	// frame so cleanups receive it.
+	const testInstance: TestInstance = {
+		title: node.name,
+		fullName,
+		options: {
+			timeout: timeoutMs,
+			retries: node.retries ?? 0,
+			tags: node.tags ?? [],
+		},
+		dataset: node.dataset,
+		isPinned: node.pinned === true,
+	};
+	setFrameTest(testInstance);
+
 	let testErr: SerializedError | undefined;
-	try {
-		// Build the injected context INSIDE the per-test frame so `ctx.cleanup`
-		// and any getter-registered per-test resources bind to this attempt.
-		const context = buildTestContext();
-		const result = node.fn?.(context);
-		if (result && typeof (result as PromiseLike<unknown>).then === "function") {
-			await withTimeout(
-				result as Promise<unknown>,
-				timeoutMs,
-				`test "${fullName}"`,
-			);
+
+	// Per-test setup hooks (`test.setup`) run after the group `each.setup` chain,
+	// just before the body. A failing setup fails the test without running it.
+	const setupErr = await runHooks(node.setups ?? [], true);
+	if (setupErr) {
+		testErr = setupErr;
+	} else {
+		try {
+			// Build the injected context INSIDE the per-test frame so `ctx.cleanup`
+			// and any getter-registered per-test resources bind to this attempt.
+			const context = buildTestContext(testInstance);
+			const result = node.fn?.(context);
+			if (
+				result &&
+				typeof (result as PromiseLike<unknown>).then === "function"
+			) {
+				await withTimeout(
+					result as Promise<unknown>,
+					timeoutMs,
+					`test "${fullName}"`,
+				);
+			}
+		} catch (err) {
+			testErr = serializeError(err);
 		}
-	} catch (err) {
-		testErr = serializeError(err);
+
+		// `test.fails()` inverts the body outcome: a throw is success, a clean
+		// run is a failure. Applied before assertion-count checks. Only when the
+		// body actually ran (a setup error is a hard failure, not an expected one).
+		if (node.failing) {
+			testErr = testErr
+				? undefined
+				: {
+						name: "AssertionError",
+						message: `test "${fullName}" was expected to fail (test.fails) but passed`,
+					};
+		}
+
+		// Assertion-count enforcement (`expect.assertions(n)` / `hasAssertions()`).
+		if (!testErr) {
+			testErr = checkAssertionCount(fullName);
+		}
 	}
 
-	// `test.fails()` inverts the body outcome: a throw is success, a clean
-	// run is a failure. Applied before assertion-count checks.
-	if (node.failing) {
-		testErr = testErr
-			? undefined
-			: {
-					name: "AssertionError",
-					message: `test "${fullName}" was expected to fail (test.fails) but passed`,
-				};
-	}
-
-	// Assertion-count enforcement (`expect.assertions(n)` / `hasAssertions()`).
-	if (!testErr) {
-		testErr = checkAssertionCount(fullName);
-	}
-
+	// Per-test teardown hooks (`test.teardown`) run before the group `each.teardown`.
+	const teardownErr = await runHooks(node.teardowns ?? []);
 	const afterErr = await runHooks(after);
-	const finalErr = combineErrors(testErr, afterErr);
+	const finalErr = combineErrors(combineErrors(testErr, teardownErr), afterErr);
+	// Record the outcome BEFORE the frame's cleanup drain (finally) fires, so
+	// `ctx.cleanup((hasError, test) => …)` sees the right `hasError`.
+	setFrameOutcome(finalErr !== undefined);
 	await drainTestOutcomeHooks(finalErr !== undefined);
 	return {
 		name: node.name,
