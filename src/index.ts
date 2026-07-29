@@ -16,11 +16,13 @@
 
 export * from "./container/index.js";
 export type {
+	Assert,
 	Assertion,
 	AsymmetricMatcher,
 	CleanupFn,
 	ExpectStatic,
 	FileResult,
+	Group,
 	Hook,
 	HookFn,
 	HookType,
@@ -28,6 +30,7 @@ export type {
 	MatcherResult,
 	Spy,
 	SuiteResult,
+	TestContext,
 	TestHandle,
 	TestOptions,
 	TestResult,
@@ -39,11 +42,14 @@ export {
 	afterEach,
 	beforeAll,
 	beforeEach,
+	buildTestContext,
+	createAssert,
 	describe,
 	expect,
 	it,
 	onTestFailed,
 	onTestFinished,
+	TestContextRegistry,
 	test,
 	vi,
 } from "./runtime/index.js";

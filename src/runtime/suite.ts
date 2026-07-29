@@ -8,8 +8,14 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { TestContext } from "./context.js";
 
-export type TestFn = () => void | Promise<void>;
+/**
+ * A test body. Receives the injected {@link TestContext} as its first argument
+ * (Japa parity). Existing zero-argument bodies stay valid — they simply ignore
+ * the context.
+ */
+export type TestFn = (ctx: TestContext) => void | Promise<void>;
 export type SuiteFn = () => void;
 
 /** Teardown function a hook may return (Vitest/Japa parity). */
@@ -280,6 +286,23 @@ type EachRow =
 /** Source of `each` rows: a static array or a (sync) function returning one. */
 type EachRows<Row extends EachRow> = readonly Row[] | (() => readonly Row[]);
 
+/**
+ * The `group` handle passed to `test.group(name, (group) => …)` (Japa parity).
+ * `setup`/`teardown` run once for the whole group; `each.setup`/`each.teardown`
+ * run around every test in it. Hook bodies may return a cleanup function.
+ */
+export interface Group {
+	/** Run once before all tests in the group (≈ `beforeAll`). */
+	setup(fn: HookFn): void;
+	/** Run once after all tests in the group (≈ `afterAll`). */
+	teardown(fn: HookFn): void;
+	/** Per-test hooks for this group (≈ `beforeEach`/`afterEach`). */
+	each: {
+		setup(fn: HookFn): void;
+		teardown(fn: HookFn): void;
+	};
+}
+
 type TestApi = {
 	(name: string, fn: TestFn, options?: TestOptions | number): TestHandle;
 	skip(name: string, fn?: TestFn): void;
@@ -288,6 +311,8 @@ type TestApi = {
 	each<Row extends EachRow>(
 		rows: EachRows<Row>,
 	): (name: string, fn: (row: Row) => void | Promise<void>) => void;
+	/** Japa-style grouping: `test.group(name, (group) => { … })`. */
+	group(name: string, fn: (group: Group) => void): void;
 };
 
 function safeStringify(v: unknown): string {
@@ -416,6 +441,21 @@ testFn.each = <Row extends EachRow>(rows: EachRows<Row>) => {
 			registerTest(resolvedName, "run", () => fn(row));
 		});
 	};
+};
+testFn.group = (name: string, fn: (group: Group) => void) => {
+	// A group IS a suite: open one, then run the body with a `group` handle whose
+	// hook methods attach to THIS active suite via `addHook`.
+	registerSuite(name, "run", () => {
+		const group: Group = {
+			setup: (hookFn) => addHook("beforeAll", hookFn),
+			teardown: (hookFn) => addHook("afterAll", hookFn),
+			each: {
+				setup: (hookFn) => addHook("beforeEach", hookFn),
+				teardown: (hookFn) => addHook("afterEach", hookFn),
+			},
+		};
+		fn(group);
+	});
 };
 
 export const describe: SuiteApi = describeFn;

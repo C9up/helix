@@ -8,6 +8,7 @@
  */
 
 import { AssertionError } from "./assertion-error.js";
+import { buildTestContext } from "./context.js";
 import type { Hook, SuiteNode, TestNode } from "./suite.js";
 import {
 	drainTestOutcomeHooks,
@@ -328,7 +329,10 @@ async function runAttempt(
 
 	let testErr: SerializedError | undefined;
 	try {
-		const result = node.fn?.();
+		// Build the injected context INSIDE the per-test frame so `ctx.cleanup`
+		// and any getter-registered per-test resources bind to this attempt.
+		const context = buildTestContext();
+		const result = node.fn?.(context);
 		if (result && typeof (result as PromiseLike<unknown>).then === "function") {
 			await withTimeout(
 				result as Promise<unknown>,

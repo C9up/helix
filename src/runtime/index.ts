@@ -6,9 +6,13 @@
  * process, a Bun worker, or a Rust-spawned worker all load the same module.
  */
 
+export type { Assert } from "./assert.js";
+export { createAssert } from "./assert.js";
 export type { AssertionErrorInit } from "./assertion-error.js";
 export { AssertionError, isAssertionError } from "./assertion-error.js";
 export type { AsymmetricMatcher, Constructor } from "./asymmetric.js";
+export type { TestContext } from "./context.js";
+export { buildTestContext, TestContextRegistry } from "./context.js";
 export type { EqualsOptions } from "./equals.js";
 export { equals, partialEquals } from "./equals.js";
 export type { Assertion, ExpectStatic } from "./expect.js";
@@ -32,6 +36,7 @@ export type {
 export { executeRoot } from "./run.js";
 export type {
 	CleanupFn,
+	Group,
 	HookFn,
 	RunMode,
 	SuiteNode,
