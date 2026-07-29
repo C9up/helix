@@ -24,10 +24,23 @@ export type DoneFn = (error?: unknown) => void;
 export type TestFn = (ctx: TestContext, done: DoneFn) => void | Promise<void>;
 export type SuiteFn = () => void;
 
-/** Teardown function a hook may return (Vitest/Japa parity). */
-export type CleanupFn = () => void | Promise<void>;
-/** A lifecycle hook: may return nothing or a cleanup function. */
-export type HookFn = () => void | CleanupFn | Promise<void | CleanupFn>;
+/**
+ * Teardown a hook may return (Vitest/Japa parity). Receives `(hasError, subject)`
+ * — whether the test/group errored, and the Test or Group instance. Both params
+ * are optional so plain `() => …` cleanups stay valid.
+ */
+export type CleanupFn = (
+	hasError?: boolean,
+	subject?: TestInstance | GroupInstance,
+) => void | Promise<void>;
+/**
+ * A lifecycle hook. Receives the Test instance (test hooks) or Group instance
+ * (group hooks) as its argument (Japa parity); may return a {@link CleanupFn}.
+ * Existing zero-argument hooks stay valid.
+ */
+export type HookFn = (
+	subject?: TestInstance | GroupInstance,
+) => void | CleanupFn | Promise<void | CleanupFn>;
 
 export type HookType = "beforeAll" | "afterAll" | "beforeEach" | "afterEach";
 
@@ -65,6 +78,14 @@ export interface TestNode {
 	dataset?: readonly unknown[];
 	/** Wait for the `done()` callback before completing — `test.waitForDone()`. */
 	waitForDone?: boolean;
+}
+
+/** A group's instance, passed to `group.setup`/`teardown` hooks (Japa parity). */
+export interface GroupInstance {
+	/** The group's own name. */
+	title: string;
+	/** Fully-qualified dotted name (suite path). */
+	fullName: string;
 }
 
 /**

@@ -10,7 +10,9 @@
 import { AssertionError } from "./assertion-error.js";
 import { buildTestContext } from "./context.js";
 import type {
+	CleanupFn,
 	DoneFn,
+	GroupInstance,
 	Hook,
 	SuiteNode,
 	TestInstance,
@@ -191,14 +193,17 @@ function collectHookChain(
 async function runHooks(
 	hooks: Hook["fn"][],
 	registerCleanups = false,
+	subject?: TestInstance | GroupInstance,
 ): Promise<SerializedError | undefined> {
 	for (const h of hooks) {
 		try {
-			const ret = await h();
+			// Japa parity: test hooks receive the Test instance, group hooks the
+			// Group instance. Zero-arg hooks simply ignore it.
+			const ret = await h(subject);
 			// A `beforeEach` returning a function registers it as a test-scoped
 			// cleanup (Vitest/Japa parity). Ignored for `afterEach`.
 			if (registerCleanups && typeof ret === "function") {
-				registerTestCleanup(ret as () => void | Promise<void>);
+				registerTestCleanup(ret);
 			}
 		} catch (err) {
 			return serializeError(err);
@@ -363,21 +368,8 @@ async function runAttempt(
 	retries: number,
 	start: number,
 ): Promise<TestResult> {
-	const beforeErr = await runHooks(before, true);
-	if (beforeErr) {
-		const afterErrBE = await runHooks(after);
-		await drainTestOutcomeHooks(true);
-		return {
-			name: node.name,
-			fullName,
-			status: "fail",
-			durationMs: Date.now() - start,
-			error: combineErrors(beforeErr, afterErrBE),
-		};
-	}
-
-	// The running test's instance — injected as `ctx.test` and threaded into the
-	// frame so cleanups receive it.
+	// The running test's instance — injected as `ctx.test`, passed to the test
+	// hooks (Japa parity), and threaded into the frame so cleanups receive it.
 	const testInstance: TestInstance = {
 		title: node.name,
 		fullName,
@@ -391,11 +383,24 @@ async function runAttempt(
 	};
 	setFrameTest(testInstance);
 
+	const beforeErr = await runHooks(before, true, testInstance);
+	if (beforeErr) {
+		const afterErrBE = await runHooks(after, false, testInstance);
+		await drainTestOutcomeHooks(true);
+		return {
+			name: node.name,
+			fullName,
+			status: "fail",
+			durationMs: Date.now() - start,
+			error: combineErrors(beforeErr, afterErrBE),
+		};
+	}
+
 	let testErr: SerializedError | undefined;
 
 	// Per-test setup hooks (`test.setup`) run after the group `each.setup` chain,
 	// just before the body. A failing setup fails the test without running it.
-	const setupErr = await runHooks(node.setups ?? [], true);
+	const setupErr = await runHooks(node.setups ?? [], true, testInstance);
 	if (setupErr) {
 		testErr = setupErr;
 	} else {
@@ -463,8 +468,8 @@ async function runAttempt(
 	}
 
 	// Per-test teardown hooks (`test.teardown`) run before the group `each.teardown`.
-	const teardownErr = await runHooks(node.teardowns ?? []);
-	const afterErr = await runHooks(after);
+	const teardownErr = await runHooks(node.teardowns ?? [], false, testInstance);
+	const afterErr = await runHooks(after, false, testInstance);
 	const finalErr = combineErrors(combineErrors(testErr, teardownErr), afterErr);
 	// Record the outcome BEFORE the frame's cleanup drain (finally) fires, so
 	// `ctx.cleanup((hasError, test) => …)` sees the right `hasError`.
@@ -554,6 +559,10 @@ async function runSuite(
 	if (skipEntire) return runSkippedSuite(node, fullName, ctx);
 
 	const hookErrors: SerializedError[] = [];
+	// The group's instance (Japa parity) passed to group hooks, and cleanups a
+	// `group.setup()` returns — run in the afterAll phase with `(hadError, group)`.
+	const group: GroupInstance = { title: node.name, fullName };
+	const groupCleanups: CleanupFn[] = [];
 
 	// beforeAll: when one throws, every descendant test inherits the failure
 	// and the children list is replaced with those attributed results.
@@ -562,6 +571,8 @@ async function runSuite(
 		parentFullName,
 		ctx,
 		hookErrors,
+		group,
+		groupCleanups,
 	);
 	const beforeAllFailed = attributed !== null;
 	const children: Array<SuiteResult | TestResult> = attributed ?? [];
@@ -576,7 +587,9 @@ async function runSuite(
 		}
 	}
 
-	await runAfterAllHooks(node, hookErrors);
+	const groupHadError =
+		hookErrors.length > 0 || children.some((c) => c.status === "fail");
+	await runAfterAllHooks(node, hookErrors, group, groupCleanups, groupHadError);
 
 	// Surface afterAll failures as a synthetic test so `totals.fail` reflects
 	// them and CI exits nonzero.
@@ -643,11 +656,16 @@ async function runBeforeAllHooks(
 	parentFullName: string,
 	ctx: RunCtx,
 	hookErrors: SerializedError[],
+	group: GroupInstance,
+	groupCleanups: CleanupFn[],
 ): Promise<Array<SuiteResult | TestResult> | null> {
 	for (const h of node.hooks) {
 		if (h.type !== "beforeAll") continue;
 		try {
-			await h.fn();
+			// Japa parity: group hooks receive the Group instance; a returned
+			// function becomes a group-scoped cleanup (run in the afterAll phase).
+			const ret = await h.fn(group);
+			if (typeof ret === "function") groupCleanups.push(ret);
 		} catch (err) {
 			const serialized = serializeError(err);
 			hookErrors.push(serialized);
@@ -665,11 +683,23 @@ async function runBeforeAllHooks(
 async function runAfterAllHooks(
 	node: SuiteNode,
 	hookErrors: SerializedError[],
+	group: GroupInstance,
+	groupCleanups: CleanupFn[],
+	hadError: boolean,
 ): Promise<void> {
+	// Group-scoped cleanups (returned by `group.setup()`) run first, in reverse
+	// insertion order, receiving `(hadError, group)` — Japa lifecycle parity.
+	for (let i = groupCleanups.length - 1; i >= 0; i -= 1) {
+		try {
+			await groupCleanups[i](hadError, group);
+		} catch (err) {
+			hookErrors.push(serializeError(err));
+		}
+	}
 	for (const h of node.hooks) {
 		if (h.type !== "afterAll") continue;
 		try {
-			await h.fn();
+			await h.fn(group);
 		} catch (err) {
 			hookErrors.push(serializeError(err));
 		}
