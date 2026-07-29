@@ -50,6 +50,23 @@ test("assert @japa aliases + property-set matchers", ({ assert }) => {
 	expect(() => assert.properties({ a: 1 }, ["a", "b"])).toThrow();
 });
 
+test("assert negation + numeric/object-state matchers", ({ assert }) => {
+	assert.isNotTrue(1);
+	assert.isNotFalse(0);
+	assert.isNotArray({});
+	assert.isNotString(1);
+	assert.isFinite(42);
+	assert.closeTo(1.0001, 1, 0.001);
+	assert.isFrozen(Object.freeze({}));
+	assert.isNotFrozen({});
+	assert.isSealed(Object.seal({}));
+	assert.notPropertyVal({ a: 1 }, "a", 2);
+	assert.notLengthOf([1, 2], 3);
+	expect(() => assert.isFinite(Number.POSITIVE_INFINITY)).toThrow();
+	expect(() => assert.closeTo(1, 5, 0.1)).toThrow();
+	expect(() => assert.isFrozen({})).toThrow();
+});
+
 test("assert.rejects handles async throws", async ({ assert }) => {
 	await assert.rejects(async () => {
 		throw new Error("nope");

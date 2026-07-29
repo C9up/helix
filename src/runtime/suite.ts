@@ -105,11 +105,18 @@ export interface TestOptions {
  * mutate the just-registered node. Ignoring the return keeps Vitest's
  * `test(name, fn)` ergonomics; chaining adds `@japa/runner` parity.
  */
+/** How `tags()` merges with any tags already on the test (Japa parity). */
+export type TagStrategy = "replace" | "append" | "prepend";
+
 export interface TestHandle {
 	retry(n: number): TestHandle;
 	timeout(ms: number): TestHandle;
 	disableTimeout(): TestHandle;
-	tags(...tags: string[]): TestHandle;
+	/**
+	 * Attach tags. Japa parity: `tags(['@slow'], 'append')`. `strategy` defaults
+	 * to `'replace'`. A single string is accepted as a shorthand.
+	 */
+	tags(tags: string | string[], strategy?: TagStrategy): TestHandle;
 	/** Expect the test to throw. Optional `reason` documents why (Japa parity). */
 	fails(reason?: string): TestHandle;
 	/** Run a hook just before THIS test (Japa `test.setup`). */
@@ -118,8 +125,11 @@ export interface TestHandle {
 	teardown(fn: HookFn): TestHandle;
 	/** Pin the test: when any test is pinned, only pinned tests run (Japa `test.pin`). */
 	pin(): TestHandle;
-	/** Skip the test, optionally only when `condition` is true, with a `reason`. */
-	skip(condition?: boolean, reason?: string): TestHandle;
+	/**
+	 * Skip the test, optionally only when `condition` (a boolean OR a function
+	 * returning one — Japa parity) is true, with a `reason`.
+	 */
+	skip(condition?: boolean | (() => boolean), reason?: string): TestHandle;
 	/** Complete only once the body calls its `done` callback (Japa `waitForDone`). */
 	waitForDone(): TestHandle;
 }
@@ -135,6 +145,8 @@ export interface SuiteNode {
 	eachTimeout?: number;
 	/** Default per-test retries for tests in this group — `group.each.retry(n)`. */
 	eachRetries?: number;
+	/** Opened via `test.group()` (vs `describe`) — Japa forbids nesting these. */
+	isGroup?: boolean;
 }
 
 interface CollectionContext {
@@ -272,8 +284,15 @@ function makeHandle(node: TestNode): TestHandle {
 			node.timeoutMs = 0;
 			return handle;
 		},
-		tags(...tags: string[]) {
-			node.tags = [...(node.tags ?? []), ...tags];
+		tags(tags: string | string[], strategy: TagStrategy = "replace") {
+			const incoming = Array.isArray(tags) ? tags : [tags];
+			const existing = node.tags ?? [];
+			node.tags =
+				strategy === "append"
+					? [...existing, ...incoming]
+					: strategy === "prepend"
+						? [...incoming, ...existing]
+						: [...incoming];
 			return handle;
 		},
 		fails(reason?: string) {
@@ -298,8 +317,9 @@ function makeHandle(node: TestNode): TestHandle {
 			if (node.mode === "run") node.mode = "only";
 			return handle;
 		},
-		skip(condition = true, reason?: string) {
-			if (condition) {
+		skip(condition: boolean | (() => boolean) = true, reason?: string) {
+			const skipIt = typeof condition === "function" ? condition() : condition;
+			if (skipIt) {
 				node.mode = "skip";
 				if (reason !== undefined) node.reason = reason;
 			}
@@ -565,10 +585,24 @@ testFn.with = <Row>(rows: readonly Row[]) => ({
 	},
 });
 testFn.group = (name: string, fn: (group: Group) => void) => {
+	// Japa forbids nested groups (grouping-tests docs) — a group inside a group
+	// is a structural error, not a supported nesting.
+	for (
+		let ancestor: SuiteNode | undefined = current();
+		ancestor !== undefined;
+		ancestor = ancestor.parent
+	) {
+		if (ancestor.isGroup) {
+			throw new Error(
+				`test.group("${name}") cannot be nested inside group "${ancestor.name}" — Japa does not allow nested groups.`,
+			);
+		}
+	}
 	// A group IS a suite: open one, then run the body with a `group` handle whose
 	// hook methods attach to THIS active suite via `addHook`.
 	registerSuite(name, "run", () => {
 		const suite = current();
+		suite.isGroup = true;
 		const taps: Array<(test: TestHandle) => void> = [];
 		const group: Group = {
 			setup: (hookFn) => addHook("beforeAll", hookFn),

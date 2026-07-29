@@ -310,7 +310,15 @@ async function runTest(
 	let last!: TestResult;
 	for (let attempt = 0; attempt < attempts; attempt += 1) {
 		last = await withTestContext<TestResult>(() =>
-			runAttempt(node, fullName, before, after, perTestTimeout, start),
+			runAttempt(
+				node,
+				fullName,
+				before,
+				after,
+				perTestTimeout,
+				perTestRetries,
+				start,
+			),
 		);
 		if (last.status === "pass") break;
 	}
@@ -352,6 +360,7 @@ async function runAttempt(
 	before: Hook["fn"][],
 	after: Hook["fn"][],
 	timeoutMs: number,
+	retries: number,
 	start: number,
 ): Promise<TestResult> {
 	const beforeErr = await runHooks(before, true);
@@ -374,7 +383,7 @@ async function runAttempt(
 		fullName,
 		options: {
 			timeout: timeoutMs,
-			retries: node.retries ?? 0,
+			retries,
 			tags: node.tags ?? [],
 		},
 		dataset: node.dataset,

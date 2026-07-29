@@ -181,6 +181,37 @@ export interface Assert {
 		message?: string,
 	): void;
 
+	/** Negation helpers + numeric/object-state matchers (chai / @japa/assert). */
+	isNotTrue(value: unknown, message?: string): void;
+	isNotFalse(value: unknown, message?: string): void;
+	isNotArray(value: unknown, message?: string): void;
+	isNotObject(value: unknown, message?: string): void;
+	isNotString(value: unknown, message?: string): void;
+	isNotNumber(value: unknown, message?: string): void;
+	isNotBoolean(value: unknown, message?: string): void;
+	/** Value is a finite number (not NaN/±Infinity). */
+	isFinite(value: unknown, message?: string): void;
+	/** `|actual - expected| <= delta`. */
+	closeTo(
+		actual: number,
+		expected: number,
+		delta: number,
+		message?: string,
+	): void;
+	isFrozen(value: unknown, message?: string): void;
+	isNotFrozen(value: unknown, message?: string): void;
+	isSealed(value: unknown, message?: string): void;
+	isNotSealed(value: unknown, message?: string): void;
+	/** Object's `key` does NOT deeply equal `value`. */
+	notPropertyVal(
+		object: unknown,
+		key: string,
+		value: unknown,
+		message?: string,
+	): void;
+	/** Length/size is NOT `length`. */
+	notLengthOf(value: unknown, length: number, message?: string): void;
+
 	throws(fn: () => unknown, matcher?: ErrorMatcher, message?: string): void;
 	doesNotThrow(fn: () => unknown, message?: string): void;
 	rejects(
@@ -566,6 +597,95 @@ export function createAssert(): Assert {
 			ok(
 				!hasAny,
 				message ?? `expected object to own none of ${stringify(keys)}`,
+			);
+		},
+		isNotTrue(value: unknown, message?: string): void {
+			ok(
+				value !== true,
+				message ?? `expected ${stringify(value)} not to be true`,
+			);
+		},
+		isNotFalse(value: unknown, message?: string): void {
+			ok(
+				value !== false,
+				message ?? `expected ${stringify(value)} not to be false`,
+			);
+		},
+		isNotArray(value: unknown, message?: string): void {
+			ok(!Array.isArray(value), message ?? "expected value not to be an array");
+		},
+		isNotObject(value: unknown, message?: string): void {
+			ok(
+				value === null || typeof value !== "object" || Array.isArray(value),
+				message ?? "expected value not to be an object",
+			);
+		},
+		isNotString(value: unknown, message?: string): void {
+			ok(
+				typeof value !== "string",
+				message ?? "expected value not to be a string",
+			);
+		},
+		isNotNumber(value: unknown, message?: string): void {
+			ok(
+				typeof value !== "number",
+				message ?? "expected value not to be a number",
+			);
+		},
+		isNotBoolean(value: unknown, message?: string): void {
+			ok(
+				typeof value !== "boolean",
+				message ?? "expected value not to be a boolean",
+			);
+		},
+		isFinite(value: unknown, message?: string): void {
+			ok(
+				typeof value === "number" && Number.isFinite(value),
+				message ?? `expected ${stringify(value)} to be a finite number`,
+			);
+		},
+		closeTo(
+			actual: number,
+			expected: number,
+			delta: number,
+			message?: string,
+		): void {
+			ok(
+				Math.abs(actual - expected) <= delta,
+				message ?? `expected ${actual} to be within ${delta} of ${expected}`,
+			);
+		},
+		isFrozen(value: unknown, message?: string): void {
+			ok(Object.isFrozen(value), message ?? "expected value to be frozen");
+		},
+		isNotFrozen(value: unknown, message?: string): void {
+			ok(!Object.isFrozen(value), message ?? "expected value not to be frozen");
+		},
+		isSealed(value: unknown, message?: string): void {
+			ok(Object.isSealed(value), message ?? "expected value to be sealed");
+		},
+		isNotSealed(value: unknown, message?: string): void {
+			ok(!Object.isSealed(value), message ?? "expected value not to be sealed");
+		},
+		notPropertyVal(
+			object: unknown,
+			key: string,
+			value: unknown,
+			message?: string,
+		): void {
+			const has =
+				object !== null && typeof object === "object" && key in object;
+			const actual = has ? prop(object, key) : undefined;
+			ok(
+				!(has && equals(actual, value)),
+				message ??
+					`expected property ${stringify(key)} not to equal ${stringify(value)}`,
+			);
+		},
+		notLengthOf(value: unknown, length: number, message?: string): void {
+			ok(
+				sizeOf(value) !== length,
+				message ?? `expected length not to be ${length}`,
 			);
 		},
 		throws(fn: () => unknown, matcher?: ErrorMatcher, message?: string): void {
