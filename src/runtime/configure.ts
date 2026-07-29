@@ -31,10 +31,20 @@ export interface PluginContext {
 	getter(name: string, fn: (ctx: TestContext) => unknown): void;
 }
 
+/** A runner-level hook (setup/teardown), run once around the whole run. */
+export type RunnerHook = () => void | Promise<void>;
+
 /** The API handed to each plugin at {@link configure} time. */
 export interface PluginApi {
 	/** Extend the injected test context. */
 	context: PluginContext;
+	/**
+	 * Register a teardown that runs ONCE after all tests in the run finish
+	 * (reverse registration order) — the place to close a booted server, a DB
+	 * pool, etc. (Japa runner-teardown parity). Without this, a plugin that boots
+	 * a resource at `configure()` has no clean shutdown point.
+	 */
+	cleanup(fn: RunnerHook): void;
 }
 
 /**
@@ -47,22 +57,52 @@ export type Plugin = (api: PluginApi) => void | Promise<void>;
 export interface ConfigureOptions {
 	/** Plugins to install — each extends the test context (Japa parity). */
 	plugins?: Plugin[];
+	/** Run once before the tests (Japa runner `setup`). */
+	setup?: RunnerHook[];
+	/** Run once after the tests, reverse order (Japa runner `teardown`). */
+	teardown?: RunnerHook[];
 }
+
+/** Teardowns to run after the run — from `configure({ teardown })` + `api.cleanup`. */
+const runnerTeardowns: RunnerHook[] = [];
 
 const api: PluginApi = {
 	context: {
 		macro: (name, value) => TestContextRegistry.macro(name, value),
 		getter: (name, fn) => TestContextRegistry.getter(name, fn),
 	},
+	cleanup: (fn) => {
+		runnerTeardowns.push(fn);
+	},
 };
 
 /**
- * Install plugins. Runs each in order, awaiting async ones so every context
- * extension is registered before the first test executes. Call this once from a
- * bootstrap file (Japa/AdonisJS `bin/test.ts` / `tests/bootstrap.ts`).
+ * Install plugins + runner hooks. Runs each plugin in order (awaiting async
+ * ones) so every context extension is registered before the first test runs.
+ * `setup` hooks run now; `teardown` hooks + `api.cleanup` fire after the run
+ * (see {@link drainRunnerTeardowns}). Call once from a bootstrap file
+ * (Japa/AdonisJS `bin/test.ts` / `tests/bootstrap.ts`).
  */
 export async function configure(options: ConfigureOptions): Promise<void> {
+	for (const fn of options.setup ?? []) await fn();
 	for (const plugin of options.plugins ?? []) {
 		await plugin(api);
 	}
+	for (const fn of options.teardown ?? []) runnerTeardowns.push(fn);
+}
+
+/**
+ * Run every registered runner teardown (reverse order), then clear them — called
+ * by the runtime after a file's tests finish. Failures are logged, not thrown,
+ * so one bad teardown can't hide the test results.
+ */
+export async function drainRunnerTeardowns(): Promise<void> {
+	for (let i = runnerTeardowns.length - 1; i >= 0; i -= 1) {
+		try {
+			await runnerTeardowns[i]();
+		} catch (err) {
+			console.error("[helix] runner teardown failed:", err);
+		}
+	}
+	runnerTeardowns.length = 0;
 }

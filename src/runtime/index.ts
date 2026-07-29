@@ -16,8 +16,9 @@ export type {
 	Plugin,
 	PluginApi,
 	PluginContext,
+	RunnerHook,
 } from "./configure.js";
-export { configure } from "./configure.js";
+export { configure, drainRunnerTeardowns } from "./configure.js";
 export type { TestContext } from "./context.js";
 export { buildTestContext, TestContextRegistry } from "./context.js";
 export type { EqualsOptions } from "./equals.js";

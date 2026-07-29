@@ -16,6 +16,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { drainRunnerTeardowns } from "./configure.js";
 import { type ExecuteOptions, executeRoot, type FileResult } from "./run.js";
 import { withCollection } from "./suite.js";
 import { withViContext } from "./vi/index.js";
@@ -130,18 +131,24 @@ export async function runTestFile(
 		const root = await withCollection(async () => {
 			await import(url);
 		});
-		// Retries / grep / tags are per-test runtime filters. They're carried via
-		// env vars (set by the CLI) so they reach the worker through ANY
-		// orchestrator — the Rust native engine forwards a fixed instruction
-		// shape, but child processes still inherit the CLI process env.
-		// Explicit options always win over the env fallback.
-		const raw = await executeRoot(root, absolutePath, {
-			timeoutMs: options.timeoutMs,
-			retries: options.retries ?? envRetries(),
-			grep: options.grep ?? process.env.HELIX_GREP,
-			tags: options.tags ?? envTags(),
-		});
-		return sanitize(raw);
+		try {
+			// Retries / grep / tags are per-test runtime filters. They're carried via
+			// env vars (set by the CLI) so they reach the worker through ANY
+			// orchestrator — the Rust native engine forwards a fixed instruction
+			// shape, but child processes still inherit the CLI process env.
+			// Explicit options always win over the env fallback.
+			const raw = await executeRoot(root, absolutePath, {
+				timeoutMs: options.timeoutMs,
+				retries: options.retries ?? envRetries(),
+				grep: options.grep ?? process.env.HELIX_GREP,
+				tags: options.tags ?? envTags(),
+			});
+			return sanitize(raw);
+		} finally {
+			// Runner teardowns (plugin `api.cleanup` + `configure({ teardown })`)
+			// run once the file's tests finish — close servers, DB pools, etc.
+			await drainRunnerTeardowns();
+		}
 	});
 }
 
