@@ -57,7 +57,9 @@ export class TestContext {
 	}
 }
 
-type Getter = (ctx: TestContext) => unknown;
+// Invoked with `this` bound to the context AND the context as the first arg, so
+// both Japa's `function () { return this.foo }` and `(ctx) => ctx.foo` work.
+type Getter = (this: TestContext, ctx: TestContext) => unknown;
 
 const macros = new Map<string, unknown>();
 const getters = new Map<string, Getter>();
@@ -126,7 +128,7 @@ export function buildTestContext(test: TestInstance): TestContext {
 			configurable: true,
 			get() {
 				if (!computed) {
-					cached = fn(ctx);
+					cached = fn.call(ctx, ctx);
 					computed = true;
 				}
 				return cached;

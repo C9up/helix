@@ -61,10 +61,32 @@ export interface ConfigureOptions {
 	setup?: RunnerHook[];
 	/** Run once after the tests, reverse order (Japa runner `teardown`). */
 	teardown?: RunnerHook[];
+	/**
+	 * Default per-test timeout in ms for this file's tests (Japa `configure({
+	 * timeout })`). `0` disables. Overridden by `--timeout` and by a per-test
+	 * `test.timeout(ms)` / `{ timeout }`.
+	 */
+	timeout?: number;
+	/**
+	 * Default extra attempts on failure for this file's tests (Japa `configure({
+	 * retries })`). Overridden by `--retries` and by a per-test `test.retry(n)`.
+	 */
+	retries?: number;
 }
 
 /** Teardowns to run after the run — from `configure({ teardown })` + `api.cleanup`. */
 const runnerTeardowns: RunnerHook[] = [];
+
+/** Run-level defaults from `configure({ timeout, retries })`, read by the runtime. */
+const configuredDefaults: { timeout?: number; retries?: number } = {};
+
+/** The `timeout`/`retries` defaults set by {@link configure}, if any. */
+export function getConfiguredDefaults(): Readonly<{
+	timeout?: number;
+	retries?: number;
+}> {
+	return configuredDefaults;
+}
 
 const api: PluginApi = {
 	context: {
@@ -84,6 +106,10 @@ const api: PluginApi = {
  * (Japa/AdonisJS `bin/test.ts` / `tests/bootstrap.ts`).
  */
 export async function configure(options: ConfigureOptions): Promise<void> {
+	if (options.timeout !== undefined)
+		configuredDefaults.timeout = options.timeout;
+	if (options.retries !== undefined)
+		configuredDefaults.retries = options.retries;
 	for (const fn of options.setup ?? []) await fn();
 	for (const plugin of options.plugins ?? []) {
 		await plugin(api);

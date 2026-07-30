@@ -9,6 +9,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { TestContext } from "./context.js";
+import { getFrameTest, type TestCleanup } from "./test-context.js";
 
 /**
  * Signals completion of a `waitForDone()` test. Call `done()` to pass, or
@@ -74,10 +75,30 @@ export interface TestNode {
 	setups?: HookFn[];
 	/** Per-test teardown hooks — `test.teardown(fn)` (run just after this test). */
 	teardowns?: HookFn[];
-	/** Dataset rows backing this test — `test.with(rows).run(...)` (Japa `ctx.test.dataset`). */
+	/** Resolved dataset rows backing this test — `test(name, fn).with(rows)` (Japa `ctx.test.dataset`). */
 	dataset?: readonly unknown[];
+	/**
+	 * Deferred dataset source — `test(name, fn).with(rows)`. An array OR a
+	 * (possibly async) function returning one (Japa parity). Resolved at RUN time
+	 * so async datasets work; the node then expands into one result per row.
+	 */
+	datasetFn?: DatasetSource<unknown>;
+	/**
+	 * The dataset test body — receives `(ctx, row)`. Set by `.with().run()` or
+	 * re-homed from `test(name, fn).with()`. Declared as a METHOD signature so its
+	 * `row` param is bivariant: a caller's `(ctx, row: Row) => …` assigns here
+	 * without a cast (the type-erasure boundary between the generic `.with<Row>`
+	 * surface and this untyped node storage).
+	 */
+	datasetBody?(ctx: TestContext, row: unknown): void | Promise<void>;
 	/** Wait for the `done()` callback before completing — `test.waitForDone()`. */
 	waitForDone?: boolean;
+	/**
+	 * Deferred skip condition — `test.skip(fn)` where `fn` may be async (Japa
+	 * parity). Evaluated at RUN time. A static boolean sets `mode` at collection
+	 * instead, so this only ever holds a function.
+	 */
+	skipCondition?: () => boolean | Promise<boolean>;
 }
 
 /** A group's instance, passed to `group.setup`/`teardown` hooks (Japa parity). */
@@ -97,14 +118,31 @@ export interface TestInstance {
 	title: string;
 	/** Fully-qualified dotted name (suite path + title). */
 	fullName: string;
-	/** Resolved options in effect for this run. */
+	/** Resolved options in effect for this run (Japa `test.options` parity). */
 	options: {
+		/** The test's title (leaf name). */
+		title: string;
 		timeout: number;
 		retries: number;
 		tags: readonly string[];
+		/** Whether this is a `todo` test. Always `false` inside a running test. */
+		isTodo: boolean;
+		/**
+		 * Free-form metadata bag (Japa `options.meta`). `fileName` is filled when
+		 * known; `group` holds the enclosing {@link Group} instance (or `undefined`
+		 * outside a group). `suite` is absent — helix has no named-suite layer.
+		 */
+		meta: Record<string, unknown>;
 	};
-	/** The full dataset when created via `test.with(rows).run(...)`, else undefined. */
+	/** The full dataset when created via `test(name, fn).with(rows)`, else undefined. */
 	dataset?: readonly unknown[];
+	/**
+	 * The injected {@link TestContext} for this run — Japa's `$test.context`. Set
+	 * before the `beforeEach` chain, so lifecycle hooks can reach it; the same
+	 * context is passed to the test body as its first argument. Undefined only
+	 * outside an active run.
+	 */
+	context?: TestContext;
 	/** Whether the test was pinned via `test.pin()`. */
 	isPinned: boolean;
 	/**
@@ -113,6 +151,13 @@ export interface TestInstance {
 	 * for long polling steps that shouldn't count against a single deadline.
 	 */
 	resetTimeout(ms?: number): void;
+	/**
+	 * Register a teardown that runs at the end of THIS test regardless of outcome
+	 * (Japa `test.cleanup`). This is the same registry as `ctx.cleanup`; it is
+	 * exposed here so a resource macro's `t` (see `test.macro`) can register
+	 * cleanups — `test.macro((t) => { t.cleanup(() => …) })`.
+	 */
+	cleanup(fn: TestCleanup): void;
 }
 
 /** Vitest-style per-test options (3rd argument to `test`). */
@@ -154,11 +199,40 @@ export interface TestHandle {
 	pin(): TestHandle;
 	/**
 	 * Skip the test, optionally only when `condition` (a boolean OR a function
-	 * returning one — Japa parity) is true, with a `reason`.
+	 * returning one — which may be async, Japa parity) is true, with a `reason`.
+	 * A function condition is evaluated at RUN time, not at collection.
 	 */
-	skip(condition?: boolean | (() => boolean), reason?: string): TestHandle;
+	skip(
+		condition?: boolean | (() => boolean | Promise<boolean>),
+		reason?: string,
+	): TestHandle;
 	/** Complete only once the body calls its `done` callback (Japa `waitForDone`). */
 	waitForDone(): TestHandle;
+	/**
+	 * Attach a dataset (Japa parity). Two forms:
+	 *   - `test('title', (ctx, row) => …).with([...])` — the body from `test()`
+	 *     is re-homed and runs once per row (row typed as the 2nd body arg).
+	 *   - `test('title').with([...]).run((ctx, row) => …)` — the fully-typed
+	 *     form; `row` is inferred as the dataset element type.
+	 * `rows` may be an array OR a (possibly async) function returning one,
+	 * resolved at run time. Title tokens: `{prop}` (object rows), `{$i}`
+	 * (1-based index), `{$self}` (the row itself).
+	 */
+	with<Row>(rows: DatasetSource<Row>): DatasetHandle<Row>;
+}
+
+/**
+ * The handle returned by `test(...).with(rows)` — carries the dataset element
+ * type so `.run((ctx, row) => …)` types `row` precisely (Japa parity).
+ */
+export interface DatasetHandle<Row> {
+	/**
+	 * Provide the per-row body when `test('title')` had none —
+	 * `test('title').with([...]).run((ctx, row) => …)`. Takes only the body (no
+	 * name); the name came from `test()`. Returns the base handle for further
+	 * chaining.
+	 */
+	run(fn: (ctx: TestContext, row: Row) => void | Promise<void>): TestHandle;
 }
 
 export interface SuiteNode {
@@ -174,6 +248,12 @@ export interface SuiteNode {
 	eachRetries?: number;
 	/** Opened via `test.group()` (vs `describe`) — Japa forbids nesting these. */
 	isGroup?: boolean;
+	/**
+	 * The single {@link Group} instance built by `test.group()` for this node —
+	 * the body handle, the value returned, AND the `self` its hooks receive
+	 * (Japa `self === group`). Absent on plain `describe` suites.
+	 */
+	groupInstance?: Group;
 }
 
 interface CollectionContext {
@@ -296,6 +376,12 @@ function registerTest(
 	return node;
 }
 
+/** Consumer-registered handle macros (Japa `Test.macro`) applied to every handle. */
+const handleMacros = new Map<
+	string,
+	(this: TestHandle, ...args: unknown[]) => unknown
+>();
+
 /** Wrap a registered node in the chainable Japa-style handle. */
 function makeHandle(node: TestNode): TestHandle {
 	const handle: TestHandle = {
@@ -344,9 +430,16 @@ function makeHandle(node: TestNode): TestHandle {
 			if (node.mode === "run") node.mode = "only";
 			return handle;
 		},
-		skip(condition: boolean | (() => boolean) = true, reason?: string) {
-			const skipIt = typeof condition === "function" ? condition() : condition;
-			if (skipIt) {
+		skip(
+			condition: boolean | (() => boolean | Promise<boolean>) = true,
+			reason?: string,
+		) {
+			if (typeof condition === "function") {
+				// Deferred: a function condition (possibly async) is evaluated at RUN
+				// time (Japa parity), not eagerly at collection.
+				node.skipCondition = condition;
+				if (reason !== undefined) node.reason = reason;
+			} else if (condition) {
 				node.mode = "skip";
 				if (reason !== undefined) node.reason = reason;
 			}
@@ -356,8 +449,78 @@ function makeHandle(node: TestNode): TestHandle {
 			node.waitForDone = true;
 			return handle;
 		},
+		with<Row>(rows: DatasetSource<Row>): DatasetHandle<Row> {
+			// Covariant: DatasetSource<Row> assigns to DatasetSource<unknown> (no cast).
+			node.datasetFn = rows;
+			// If `test(name, fn)` already supplied a body, it IS the dataset body —
+			// re-home it so the executor calls it with `(ctx, row)`. `datasetBody`'s
+			// bivariant method signature accepts `node.fn` directly (no cast). A body
+			// added later via `.run()` overrides this.
+			if (node.datasetBody === undefined && node.fn) {
+				node.datasetBody = node.fn;
+			}
+			// A `test('title')` with no body was registered as `todo`; attaching a
+			// dataset makes it a runnable, per-row test again.
+			if (node.mode === "todo") node.mode = "run";
+			node.fn = undefined;
+			const datasetHandle: DatasetHandle<Row> = {
+				run(fn) {
+					// Bivariant method param → the Row-typed body assigns without a cast.
+					node.datasetBody = fn;
+					if (node.mode === "todo") node.mode = "run";
+					node.fn = undefined;
+					return handle;
+				},
+			};
+			return datasetHandle;
+		},
 	};
+	// Apply consumer-registered macros (Japa `Test.macro`) — `this` is the handle
+	// so the macro can chain.
+	for (const [name, fn] of handleMacros) {
+		Object.defineProperty(handle, name, {
+			value: (...args: unknown[]) => fn.apply(handle, args),
+			enumerable: false,
+			configurable: true,
+			writable: true,
+		});
+	}
 	return handle;
+}
+
+/**
+ * Build the {@link TapHandle} passed to `group.tap` — the chainable modifiers
+ * plus a mutable `options` view backed live by the node (Japa `test.options`).
+ */
+function makeTapHandle(node: TestNode): TapHandle {
+	const handle = makeHandle(node);
+	const options: TapOptions = {
+		get title() {
+			return node.name;
+		},
+		set title(v: string) {
+			node.name = v;
+		},
+		get tags() {
+			return node.tags ?? [];
+		},
+		set tags(v: string[]) {
+			node.tags = v;
+		},
+		get timeout() {
+			return node.timeoutMs;
+		},
+		set timeout(v: number | undefined) {
+			node.timeoutMs = v;
+		},
+		get retries() {
+			return node.retries;
+		},
+		set retries(v: number | undefined) {
+			node.retries = v;
+		},
+	};
+	return Object.assign(handle, { options });
 }
 
 /** Normalise the optional 3rd arg: a bare number is a timeout (Vitest). */
@@ -417,11 +580,20 @@ type EachRow =
 type EachRows<Row extends EachRow> = readonly Row[] | (() => readonly Row[]);
 
 /**
+ * Source of dataset rows (`test(name, fn).with(...)`): a static array OR a
+ * function returning one — the function may be async (Japa parity). Resolved at
+ * RUN time so async sources work.
+ */
+export type DatasetSource<Row> =
+	| readonly Row[]
+	| (() => readonly Row[] | Promise<readonly Row[]>);
+
+/**
  * The `group` handle passed to `test.group(name, (group) => …)` (Japa parity).
  * `setup`/`teardown` run once for the whole group; `each.setup`/`each.teardown`
  * run around every test in it. Hook bodies may return a cleanup function.
  */
-export interface Group {
+export interface Group extends GroupInstance {
 	/** Run once before all tests in the group (≈ `beforeAll`). */
 	setup(fn: HookFn): void;
 	/** Run once after all tests in the group (≈ `afterAll`). */
@@ -438,14 +610,43 @@ export interface Group {
 		retry(n: number): void;
 	};
 	/**
-	 * Configure every test in the group via its handle — `group.tap(t =>
-	 * t.tags('@slow'))`. Applied to all tests registered in the group body.
+	 * Configure every test in the group — `group.tap(t => t.tags('@slow'))` or
+	 * `group.tap(t => { t.options.title = t.options.title.toUpperCase() })`.
+	 * Applied to all tests registered in the group body. The callback receives a
+	 * {@link TapHandle}: the chainable modifiers PLUS a mutable `options` view
+	 * (Japa `test.options.title` parity).
 	 */
-	tap(fn: (test: TestHandle) => void): void;
+	tap(fn: (test: TapHandle) => void): void;
+}
+
+/** The mutable, resolved options of a test, exposed to `group.tap` (Japa parity). */
+export interface TapOptions {
+	/** The test's title — assignable to rename it (Japa `test.options.title`). */
+	title: string;
+	/** The test's tags — assignable to replace them. */
+	tags: string[];
+	/** Per-test timeout in ms (`undefined` = inherit). */
+	timeout: number | undefined;
+	/** Extra attempts on failure (`undefined` = inherit). */
+	retries: number | undefined;
+}
+
+/**
+ * The handle passed to `group.tap` — a {@link TestHandle} (chainable modifiers)
+ * augmented with a mutable {@link TapOptions} view, matching Japa's `test`
+ * instance whose `options` are directly assignable.
+ */
+export interface TapHandle extends TestHandle {
+	readonly options: TapOptions;
 }
 
 type TestApi = {
-	(name: string, fn: TestFn, options?: TestOptions | number): TestHandle;
+	/**
+	 * Register a test. Omitting `fn` marks it `todo` (Japa parity) — reported as
+	 * pending and never executed — unless a dataset body is supplied later via
+	 * `.with(...).run(fn)`.
+	 */
+	(name: string, fn?: TestFn, options?: TestOptions | number): TestHandle;
 	skip(name: string, fn?: TestFn): void;
 	only(name: string, fn: TestFn, options?: TestOptions | number): TestHandle;
 	todo(name: string): void;
@@ -453,20 +654,28 @@ type TestApi = {
 		rows: EachRows<Row>,
 	): (name: string, fn: (row: Row) => void | Promise<void>) => void;
 	/**
-	 * Japa dataset API: `test.with(rows).run((ctx, row) => …)`. Registers one
-	 * test per row; the body receives the injected context AND the row. The full
-	 * dataset is available as `ctx.test.dataset`. `rows` may be an array OR a
-	 * function returning one (lazy dataset — Japa parity), resolved eagerly at
-	 * collection time.
+	 * Japa-style grouping: `test.group(name, (group) => { … })`. Returns the
+	 * {@link Group} — the SAME instance passed to the body and to the group's
+	 * hooks as `self` (Japa's current release returns the group; `self === group`).
 	 */
-	with<Row>(rows: readonly Row[] | (() => readonly Row[])): {
-		run(
-			name: string,
-			fn: (ctx: TestContext, row: Row) => void | Promise<void>,
-		): void;
-	};
-	/** Japa-style grouping: `test.group(name, (group) => { … })`. */
-	group(name: string, fn: (group: Group) => void): void;
+	group(name: string, fn: (group: Group) => void): Group;
+	/**
+	 * Create a resource macro (Japa `test.macro`). The callback receives the
+	 * running test instance `t` (carrying `t.cleanup`) followed by any arguments;
+	 * `macro` returns a function that, called inside a test body, invokes the
+	 * callback against the active test and returns its value:
+	 *
+	 *     const useFile = test.macro((t, path: string) => {
+	 *       t.cleanup(() => rm(path))
+	 *       return writeFile(path, '…')
+	 *     })
+	 *     // inside a test: await useFile('tmp/a.txt')
+	 *
+	 * To add a chainable method to every handle instead, use {@link Test.macro}.
+	 */
+	macro<Args extends unknown[], R>(
+		callback: (test: TestInstance, ...args: Args) => R,
+	): (...args: Args) => R;
 };
 
 function safeStringify(v: unknown): string {
@@ -567,16 +776,61 @@ function interpolateEach(
 	return `${template} [${index}]`;
 }
 
+/**
+ * Interpolate a dataset test title (Japa parity). Tokens:
+ *   - `{$i}`   → the 1-based row index
+ *   - `{$self}`→ the row itself (stringified) — for primitive/array rows
+ *   - `{prop}` / `{a.b}` → a (dotted) property lookup on an object row
+ * Unknown `{tokens}` are left verbatim. When the template has no token at all,
+ * a multi-row dataset appends ` (row N)` so per-row names don't collide.
+ */
+export function interpolateDatasetTitle(
+	template: string,
+	row: unknown,
+	index: number,
+	rowCount: number,
+): string {
+	const hasToken = /\{[^}]+\}/.test(template);
+	if (!hasToken) {
+		return rowCount > 1 ? `${template} (row ${index + 1})` : template;
+	}
+	return template.replace(/\{([^}]+)\}/g, (match, tokenRaw: string) => {
+		const token = tokenRaw.trim();
+		if (token === "$i") return String(index + 1);
+		if (token === "$self") {
+			return typeof row === "object" && row !== null
+				? safeStringify(row)
+				: String(row);
+		}
+		// Dotted property path against an object row.
+		let cursor: unknown = row;
+		for (const part of token.split(".")) {
+			if (cursor && typeof cursor === "object" && part in cursor) {
+				cursor = Reflect.get(cursor, part);
+			} else {
+				return match; // leave unknown tokens verbatim
+			}
+		}
+		if (typeof cursor === "object" && cursor !== null)
+			return safeStringify(cursor);
+		return String(cursor);
+	});
+}
+
 const describeFn = ((name: string, fn: SuiteFn) =>
 	registerSuite(name, "run", fn)) as SuiteApi;
 describeFn.skip = (name, fn) => registerSuite(name, "skip", fn);
 describeFn.only = (name, fn) => registerSuite(name, "only", fn);
 describeFn.todo = (name) => registerSuite(name, "todo", () => {});
 
-const testFn = ((name: string, fn: TestFn, options?: TestOptions | number) =>
-	makeHandle(
-		registerTest(name, "run", fn, normaliseTestOptions(options)),
-	)) as TestApi;
+const testFn = ((name: string, fn?: TestFn, options?: TestOptions | number) => {
+	// No body → `todo` (Japa parity). A dataset body added later via
+	// `.with(...).run(fn)` promotes it back to a runnable test.
+	const mode: RunMode = fn === undefined ? "todo" : "run";
+	return makeHandle(
+		registerTest(name, mode, fn, normaliseTestOptions(options)),
+	);
+}) as TestApi;
 testFn.skip = (name, fn) => {
 	registerTest(name, "skip", fn);
 };
@@ -596,27 +850,7 @@ testFn.each = <Row extends EachRow>(rows: EachRows<Row>) => {
 		});
 	};
 };
-testFn.with = <Row>(rows: readonly Row[] | (() => readonly Row[])) => ({
-	run(
-		name: string,
-		fn: (ctx: TestContext, row: Row) => void | Promise<void>,
-	): void {
-		// A lazy dataset (`with(() => rows)`) is resolved eagerly at collection
-		// time — per-row nodes need concrete rows to register.
-		const resolved = typeof rows === "function" ? rows() : rows;
-		// One test per row, Japa-style. The body gets the injected context AND the
-		// row; the full dataset is stamped on each node → `ctx.test.dataset`.
-		resolved.forEach((row, index) => {
-			// Dataset rows are arbitrary (not `EachRow`), so name by index rather
-			// than interpolating placeholders the way `.each` does.
-			const resolvedName =
-				resolved.length > 1 ? `${name} (row ${index + 1})` : name;
-			const node = registerTest(resolvedName, "run", (ctx) => fn(ctx, row));
-			node.dataset = resolved;
-		});
-	},
-});
-testFn.group = (name: string, fn: (group: Group) => void) => {
+testFn.group = (name: string, fn: (group: Group) => void): Group => {
 	// Japa forbids nested groups (grouping-tests docs) — a group inside a group
 	// is a structural error, not a supported nesting.
 	for (
@@ -630,13 +864,23 @@ testFn.group = (name: string, fn: (group: Group) => void) => {
 			);
 		}
 	}
-	// A group IS a suite: open one, then run the body with a `group` handle whose
-	// hook methods attach to THIS active suite via `addHook`.
+	// A group IS a suite. Build ONE instance that is the body handle, the value
+	// returned, AND the `self` the group's hooks receive (Japa `self === group`).
+	// Its hook methods attach to THIS active suite via `addHook`.
+	let instance: Group | undefined;
 	registerSuite(name, "run", () => {
 		const suite = current();
 		suite.isGroup = true;
-		const taps: Array<(test: TestHandle) => void> = [];
+		// Dotted full name from the suite chain (matching the runtime `joinName`
+		// separator); computed HERE where `suite` is the group's own node.
+		const ancestorNames: string[] = [];
+		for (let a: SuiteNode | undefined = suite; a !== undefined; a = a.parent) {
+			if (a.name) ancestorNames.unshift(a.name);
+		}
+		const taps: Array<(test: TapHandle) => void> = [];
 		const group: Group = {
+			title: name,
+			fullName: ancestorNames.join(" > "),
 			setup: (hookFn) => addHook("beforeAll", hookFn),
 			teardown: (hookFn) => addHook("afterAll", hookFn),
 			each: {
@@ -654,18 +898,56 @@ testFn.group = (name: string, fn: (group: Group) => void) => {
 			},
 			tap: (tapFn) => taps.push(tapFn),
 		};
+		suite.groupInstance = group;
+		instance = group;
 		fn(group);
 		// Apply `tap` callbacks to every test registered directly in this group,
 		// regardless of whether tap() was called before or after them.
 		if (taps.length > 0) {
 			for (const child of suite.children) {
 				if (child.kind === "test") {
-					const handle = makeHandle(child);
+					const handle = makeTapHandle(child);
 					for (const tapFn of taps) tapFn(handle);
 				}
 			}
 		}
 	});
+	// `registerSuite` ran the body synchronously, so `instance` is set.
+	if (instance === undefined) {
+		throw new Error(`internal: group("${name}") instance was not built`);
+	}
+	return instance;
+};
+
+testFn.macro = <Args extends unknown[], R>(
+	callback: (test: TestInstance, ...args: Args) => R,
+): ((...args: Args) => R) => {
+	return (...args: Args): R => {
+		const t = getFrameTest();
+		if (t === undefined) {
+			throw new Error(
+				"test.macro(...): the returned function must be invoked inside a running test.",
+			);
+		}
+		return callback(t, ...args);
+	};
+};
+
+/**
+ * Class-level extension surface (Japa `Test.macro`). Registers a named method
+ * available on every test handle; `this` inside it is the handle, so it can
+ * chain (`Test.macro('slow', function () { this.tags(['@slow']); return this })`).
+ * Pair with a `declare module` augmentation for the types.
+ */
+export const Test: {
+	macro(
+		name: string,
+		fn: (this: TestHandle, ...args: unknown[]) => unknown,
+	): void;
+} = {
+	macro(name, fn) {
+		handleMacros.set(name, fn);
+	},
 };
 
 export const describe: SuiteApi = describeFn;

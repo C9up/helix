@@ -43,7 +43,22 @@ const FLAG_SPEC = {
 		help: "Only run tests whose full name matches (regex or substring)",
 	},
 	retries: { kind: "number", help: "Extra attempts on failure (default 0)" },
-	tags: { kind: "string", help: "Comma-separated tag filter (@fast, !@slow)" },
+	tags: {
+		kind: "string",
+		help: "Comma-separated tag filter (@fast, ~@slow to exclude); OR by default",
+	},
+	"match-all": {
+		kind: "boolean",
+		help: "Require ALL --tags instead of any (Japa parity)",
+	},
+	tests: {
+		kind: "string",
+		help: "Comma-separated exact test titles to run (Japa --tests)",
+	},
+	groups: {
+		kind: "string",
+		help: "Comma-separated exact group titles to run (Japa --groups)",
+	},
 	watch: { kind: "boolean", help: "Watch mode — re-run on file changes" },
 	"watch-debounce": {
 		kind: "number",
@@ -389,6 +404,15 @@ async function main() {
 		}
 		if (parsed.flags.tags !== undefined) {
 			process.env.HELIX_TAGS = String(parsed.flags.tags);
+		}
+		if (parsed.flags["match-all"] === true) {
+			process.env.HELIX_MATCH_ALL = "1";
+		}
+		if (parsed.flags.tests !== undefined) {
+			process.env.HELIX_TESTS = String(parsed.flags.tests);
+		}
+		if (parsed.flags.groups !== undefined) {
+			process.env.HELIX_GROUPS = String(parsed.flags.groups);
 		}
 		const outcome = await run(cfg);
 		return outcome.exitCode;

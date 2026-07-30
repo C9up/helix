@@ -12,12 +12,14 @@ import { buildTestContext } from "./context.js";
 import type {
 	CleanupFn,
 	DoneFn,
+	Group,
 	GroupInstance,
 	Hook,
 	SuiteNode,
 	TestInstance,
 	TestNode,
 } from "./suite.js";
+import { interpolateDatasetTitle } from "./suite.js";
 import {
 	drainTestOutcomeHooks,
 	getAssertionState,
@@ -85,30 +87,49 @@ export interface ExecuteOptions {
 	 */
 	grep?: string;
 	/**
-	 * Tag filter expressions (`@fast`, `!@slow`). A test runs when it carries
-	 * every required tag and none of the excluded ones. Mirrors `--tags`.
+	 * Tag filter expressions (Japa `--tags`). A `~`-prefixed tag EXCLUDES (`!` is
+	 * also accepted). Required tags are OR-ed by default — a test runs when it
+	 * carries ANY of them — unless {@link ExecuteOptions.matchAll} is set, and
+	 * never when it carries an excluded tag.
 	 */
 	tags?: string[];
+	/** Require ALL required tags instead of any (Japa `--match-all`). */
+	matchAll?: boolean;
+	/** Exact test titles to run (Japa `--tests`). A test runs only if its leaf title is listed. */
+	tests?: string[];
+	/** Exact group titles to run (Japa `--groups`). A test runs only if its enclosing group is listed. */
+	groups?: string[];
 }
 
-/** Compiled tag filter: a test must have all `required` and none `excluded`. */
+/**
+ * Compiled tag filter (Japa `--tags` / `--match-all`). A test passes when it
+ * carries no `excluded` tag AND — if any `required` — matches them by the
+ * `matchAll` mode (all vs any).
+ */
 interface TagFilter {
 	required: string[];
 	excluded: string[];
+	/** `true` → every required tag must be present; `false` (default) → any. */
+	matchAll: boolean;
 }
 
-function compileTagFilter(tags: string[] | undefined): TagFilter | undefined {
+function compileTagFilter(
+	tags: string[] | undefined,
+	matchAll: boolean,
+): TagFilter | undefined {
 	if (!tags || tags.length === 0) return undefined;
 	const required: string[] = [];
 	const excluded: string[] = [];
 	for (const raw of tags) {
 		const t = raw.trim();
 		if (!t) continue;
-		if (t.startsWith("!")) excluded.push(t.slice(1));
+		// `~` is the Japa exclusion prefix; `!` is accepted too (helix legacy) so a
+		// stray `!` never silently becomes an impossible required tag.
+		if (t.startsWith("~") || t.startsWith("!")) excluded.push(t.slice(1));
 		else required.push(t);
 	}
 	if (required.length === 0 && excluded.length === 0) return undefined;
-	return { required, excluded };
+	return { required, excluded, matchAll };
 }
 
 function compileGrep(grep: string | undefined): RegExp | undefined {
@@ -123,9 +144,31 @@ function compileGrep(grep: string | undefined): RegExp | undefined {
 
 function tagMatches(node: TestNode, filter: TagFilter): boolean {
 	const have = new Set(node.tags ?? []);
-	for (const r of filter.required) if (!have.has(r)) return false;
+	// Exclusions always win.
 	for (const e of filter.excluded) if (have.has(e)) return false;
-	return true;
+	if (filter.required.length === 0) return true;
+	// OR by default (any required tag), AND under `--match-all` (every one).
+	return filter.matchAll
+		? filter.required.every((r) => have.has(r))
+		: filter.required.some((r) => have.has(r));
+}
+
+/** Nearest enclosing `test.group(...)` title, for the Japa `--groups` filter. */
+function enclosingGroupTitle(node: TestNode): string | undefined {
+	for (
+		let s: SuiteNode | undefined = node.parent;
+		s !== undefined;
+		s = s.parent
+	) {
+		if (s.isGroup) return s.name;
+	}
+	return undefined;
+}
+
+/** Whether the test's enclosing group is one of the `--groups` titles. */
+function isInGroups(node: TestNode, groups: Set<string>): boolean {
+	const title = enclosingGroupTitle(node);
+	return title !== undefined && groups.has(title);
 }
 
 function serializeError(err: unknown): SerializedError {
@@ -283,42 +326,130 @@ interface RunCtx {
 	retries: number;
 	grep: RegExp | undefined;
 	tagFilter: TagFilter | undefined;
+	/** Exact test titles to run (Japa `--tests`); `undefined` = no title filter. */
+	testTitles: Set<string> | undefined;
+	/** Exact group titles to run (Japa `--groups`); `undefined` = no group filter. */
+	groupTitles: Set<string> | undefined;
+	/** The test file being executed — surfaced as `ctx.test.options.meta.fileName`. */
+	file: string;
 }
 
 async function runTest(
 	node: TestNode,
 	parentFullName: string,
 	ctx: RunCtx,
-): Promise<TestResult> {
-	const fullName = joinName(parentFullName, node.name);
-	if (node.mode === "todo") {
+): Promise<TestResult[]> {
+	const baseFullName = joinName(parentFullName, node.name);
+
+	// A dataset test with no body (`test('x').with(rows)` and no `.run(fn)` / no
+	// body in `test`) is a `todo` — same as a bodiless plain test (Japa parity).
+	const datasetTodo =
+		node.datasetFn !== undefined && node.datasetBody === undefined;
+	if (node.mode === "todo" || datasetTodo) {
 		const r: TestResult = {
 			name: node.name,
-			fullName,
+			fullName: baseFullName,
 			status: "todo",
 			durationMs: 0,
 		};
 		ctx.flatTests.push(r);
-		return r;
-	}
-	const filteredOut =
-		(ctx.grep !== undefined && !ctx.grep.test(fullName)) ||
-		(ctx.tagFilter !== undefined && !tagMatches(node, ctx.tagFilter));
-	if (
-		node.mode === "skip" ||
-		filteredOut ||
-		(ctx.onlyActive && !pathLeadsToOnly(node))
-	) {
-		const r: TestResult = {
-			name: node.name,
-			fullName,
-			status: "skip",
-			durationMs: 0,
-		};
-		ctx.flatTests.push(r);
-		return r;
+		return [r];
 	}
 
+	// Deferred skip condition (Japa: a `skip(fn)` callback — possibly async — is
+	// evaluated here at run time, not eagerly at collection). A throwing
+	// condition fails the test rather than silently skipping it.
+	let deferredSkip = false;
+	if (node.skipCondition !== undefined) {
+		try {
+			deferredSkip = Boolean(await node.skipCondition());
+		} catch (err) {
+			const r: TestResult = {
+				name: node.name,
+				fullName: baseFullName,
+				status: "fail",
+				durationMs: 0,
+				error: serializeError(err),
+			};
+			ctx.flatTests.push(r);
+			return [r];
+		}
+	}
+
+	// Node-level gates that apply to the whole test (and every dataset row).
+	// `grep` is applied per-name below (per row for datasets).
+	const nodeSkipped =
+		node.mode === "skip" ||
+		deferredSkip ||
+		(ctx.tagFilter !== undefined && !tagMatches(node, ctx.tagFilter)) ||
+		(ctx.testTitles !== undefined && !ctx.testTitles.has(node.name)) ||
+		(ctx.groupTitles !== undefined && !isInGroups(node, ctx.groupTitles)) ||
+		(ctx.onlyActive && !pathLeadsToOnly(node));
+
+	const makeSkip = (name: string, fullName: string): TestResult => {
+		const r: TestResult = { name, fullName, status: "skip", durationMs: 0 };
+		ctx.flatTests.push(r);
+		return r;
+	};
+	const grepOut = (fullName: string): boolean =>
+		ctx.grep !== undefined && !ctx.grep.test(fullName);
+
+	// Dataset expansion (Japa `test(name, fn).with(rows)`): resolve the rows at
+	// run time (awaiting an async source), then run one test per row with an
+	// interpolated title. The full resolved dataset is exposed as `ctx.test.dataset`.
+	if (node.datasetFn !== undefined) {
+		let rows: readonly unknown[];
+		try {
+			rows =
+				typeof node.datasetFn === "function"
+					? await node.datasetFn()
+					: node.datasetFn;
+		} catch (err) {
+			const r: TestResult = {
+				name: node.name,
+				fullName: baseFullName,
+				status: "fail",
+				durationMs: 0,
+				error: serializeError(err),
+			};
+			ctx.flatTests.push(r);
+			return [r];
+		}
+		const results: TestResult[] = [];
+		for (let i = 0; i < rows.length; i += 1) {
+			const title = interpolateDatasetTitle(node.name, rows[i], i, rows.length);
+			const fullName = joinName(parentFullName, title);
+			if (nodeSkipped || grepOut(fullName)) {
+				results.push(makeSkip(title, fullName));
+				continue;
+			}
+			results.push(await runOneTest(node, title, fullName, ctx, rows, rows[i]));
+		}
+		return results;
+	}
+
+	// Single (non-dataset) test.
+	if (nodeSkipped || grepOut(baseFullName)) {
+		return [makeSkip(node.name, baseFullName)];
+	}
+	return [
+		await runOneTest(node, node.name, baseFullName, ctx, undefined, undefined),
+	];
+}
+
+/**
+ * Run one concrete test (a plain test, or one row of a dataset) through its
+ * retry loop and record the result. `title`/`fullName` are already resolved
+ * (interpolated for datasets); `dataset`/`row` are set for a dataset row.
+ */
+async function runOneTest(
+	node: TestNode,
+	title: string,
+	fullName: string,
+	ctx: RunCtx,
+	dataset: readonly unknown[] | undefined,
+	row: unknown,
+): Promise<TestResult> {
 	const before = collectHookChain(node.parent, "beforeEach");
 	const after = collectHookChain(node.parent, "afterEach");
 	// Resolution order: per-test override → nearest group `each.timeout`/`retry`
@@ -338,12 +469,16 @@ async function runTest(
 		last = await withTestContext<TestResult>(() =>
 			runAttempt(
 				node,
+				title,
 				fullName,
 				before,
 				after,
 				perTestTimeout,
 				perTestRetries,
 				start,
+				dataset,
+				row,
+				ctx.file,
 			),
 		);
 		if (last.status === "pass") break;
@@ -382,38 +517,69 @@ function inheritedEach(
 /** Run one full attempt of a test inside the active per-test frame. */
 async function runAttempt(
 	node: TestNode,
+	title: string,
 	fullName: string,
 	before: Hook["fn"][],
 	after: Hook["fn"][],
 	timeoutMs: number,
 	retries: number,
 	start: number,
+	dataset: readonly unknown[] | undefined,
+	row: unknown,
+	fileName: string,
 ): Promise<TestResult> {
 	// A re-armable body timeout so `ctx.test.resetTimeout()` can push the deadline.
 	const timeoutCtl = makeTimeoutController(timeoutMs, `test "${fullName}"`);
 
+	// Nearest enclosing `test.group(...)` instance (Japa `options.meta.group` — an
+	// object, not a name). `meta.suite` is intentionally absent: helix has no
+	// named-suite layer (process-per-file), so there is no Suite object to expose.
+	let groupInstance: Group | undefined;
+	for (
+		let s: SuiteNode | undefined = node.parent;
+		s !== undefined;
+		s = s.parent
+	) {
+		if (s.isGroup) {
+			groupInstance = s.groupInstance;
+			break;
+		}
+	}
+
 	// The running test's instance — injected as `ctx.test`, passed to the test
 	// hooks (Japa parity), and threaded into the frame so cleanups receive it.
 	const testInstance: TestInstance = {
-		title: node.name,
+		title,
 		fullName,
 		options: {
+			title,
 			timeout: timeoutMs,
 			retries,
 			tags: node.tags ?? [],
+			isTodo: false,
+			meta: { fileName, group: groupInstance },
 		},
-		dataset: node.dataset,
+		dataset: dataset ?? node.dataset,
 		isPinned: node.pinned === true,
 		resetTimeout: (ms?: number) => timeoutCtl.reset(ms),
+		cleanup: (fn) => {
+			registerTestCleanup(fn);
+		},
 	};
 	setFrameTest(testInstance);
+
+	// Build the injected context BEFORE the `beforeEach` chain so hooks can reach
+	// it as `$test.context` (Japa parity) — the SAME context flows to the body.
+	// Built inside the per-test frame so `ctx.cleanup` / getters bind here.
+	const context = buildTestContext(testInstance);
+	testInstance.context = context;
 
 	const beforeErr = await runHooks(before, true, testInstance);
 	if (beforeErr) {
 		const afterErrBE = await runHooks(after, false, testInstance);
 		await drainTestOutcomeHooks(true);
 		return {
-			name: node.name,
+			name: title,
 			fullName,
 			status: "fail",
 			durationMs: Date.now() - start,
@@ -430,10 +596,6 @@ async function runAttempt(
 		testErr = setupErr;
 	} else {
 		try {
-			// Build the injected context INSIDE the per-test frame so `ctx.cleanup`
-			// and any getter-registered per-test resources bind to this attempt.
-			const context = buildTestContext(testInstance);
-
 			// `done` callback (Japa `waitForDone`): the test completes when the
 			// body calls done()/done(error). Built even when unused (harmless).
 			let doneResolve: () => void = noop;
@@ -450,7 +612,12 @@ async function runAttempt(
 				else doneResolve();
 			};
 
-			const result = node.fn?.(context, done);
+			// A dataset test runs its `datasetBody(ctx, row)`; a plain test its
+			// `fn(ctx, done)`.
+			const result =
+				node.datasetFn !== undefined
+					? node.datasetBody?.(context, row)
+					: node.fn?.(context, done);
 
 			if (node.waitForDone) {
 				// Complete on done(); a body rejection still fails fast, but a body
@@ -497,7 +664,7 @@ async function runAttempt(
 	setFrameOutcome(finalErr !== undefined);
 	await drainTestOutcomeHooks(finalErr !== undefined);
 	return {
-		name: node.name,
+		name: title,
 		fullName,
 		status: finalErr ? "fail" : "pass",
 		durationMs: Date.now() - start,
@@ -582,7 +749,13 @@ async function runSuite(
 	const hookErrors: SerializedError[] = [];
 	// The group's instance (Japa parity) passed to group hooks, and cleanups a
 	// `group.setup()` returns — run in the afterAll phase with `(hadError, group)`.
-	const group: GroupInstance = { title: node.name, fullName };
+	// For a `test.group()` this is the SAME object the body received and the call
+	// returned (`self === group`); a plain `describe` suite has no group handle,
+	// so fall back to a bare identity object.
+	const group: GroupInstance = node.groupInstance ?? {
+		title: node.name,
+		fullName,
+	};
 	const groupCleanups: CleanupFn[] = [];
 
 	// beforeAll: when one throws, every descendant test inherits the failure
@@ -600,11 +773,12 @@ async function runSuite(
 
 	if (!beforeAllFailed) {
 		for (const child of node.children) {
-			children.push(
-				child.kind === "test"
-					? await runTest(child, fullName, ctx)
-					: await runSuite(child, fullName, ctx),
-			);
+			if (child.kind === "test") {
+				// A dataset test expands to one result per row (Japa parity).
+				for (const r of await runTest(child, fullName, ctx)) children.push(r);
+			} else {
+				children.push(await runSuite(child, fullName, ctx));
+			}
 		}
 	}
 
@@ -785,7 +959,16 @@ export async function executeRoot(
 		timeoutMs: options.timeoutMs ?? 0,
 		retries: options.retries ?? 0,
 		grep: compileGrep(options.grep),
-		tagFilter: compileTagFilter(options.tags),
+		tagFilter: compileTagFilter(options.tags, options.matchAll === true),
+		testTitles:
+			options.tests && options.tests.length > 0
+				? new Set(options.tests)
+				: undefined,
+		groupTitles:
+			options.groups && options.groups.length > 0
+				? new Set(options.groups)
+				: undefined,
+		file,
 	};
 	const suites: SuiteResult[] = [];
 
@@ -817,18 +1000,14 @@ export async function executeRoot(
 	if (!rootBeforeAllFailed) {
 		for (const child of root.children) {
 			if (child.kind === "test") {
-				const tr = await runTest(child, "", ctx);
+				// A dataset test expands to one result per row (Japa parity).
+				const trs = await runTest(child, "", ctx);
 				suites.push({
 					name: "",
 					fullName: "",
-					children: [tr],
-					status:
-						tr.status === "fail"
-							? "fail"
-							: tr.status === "pass"
-								? "pass"
-								: "skip",
-					durationMs: tr.durationMs,
+					children: trs,
+					status: suiteStatus(trs, []),
+					durationMs: trs.reduce((sum, t) => sum + t.durationMs, 0),
 					hookErrors: [],
 				});
 			} else {

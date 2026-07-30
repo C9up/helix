@@ -99,6 +99,14 @@ export function setFrameTest(test: TestInstance): void {
 	if (frame) frame.test = test;
 }
 
+/**
+ * Read the running test's instance from the active frame — the `t` handed to a
+ * Japa resource macro (`test.macro((t, …) => …)`). Undefined outside a test.
+ */
+export function getFrameTest(): TestInstance | undefined {
+	return storage.getStore()?.test;
+}
+
 /** Record whether the test errored — read by the cleanup/outcome drains. */
 export function setFrameOutcome(hadError: boolean): void {
 	const frame = storage.getStore();

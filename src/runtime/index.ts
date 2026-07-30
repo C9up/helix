@@ -44,11 +44,16 @@ export type {
 export { executeRoot } from "./run.js";
 export type {
 	CleanupFn,
+	DatasetHandle,
+	DatasetSource,
 	DoneFn,
 	Group,
+	GroupInstance,
 	HookFn,
 	RunMode,
 	SuiteNode,
+	TapHandle,
+	TapOptions,
 	TestFn,
 	TestHandle,
 	TestInstance,
@@ -60,6 +65,7 @@ export {
 	getRoot,
 	it,
 	resetRoot,
+	Test,
 	test,
 } from "./suite.js";
 export { onTestFailed, onTestFinished } from "./test-context.js";

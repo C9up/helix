@@ -16,7 +16,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { drainRunnerTeardowns } from "./configure.js";
+import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
 import { type ExecuteOptions, executeRoot, type FileResult } from "./run.js";
 import { withCollection } from "./suite.js";
 import { withViContext } from "./vi/index.js";
@@ -137,11 +137,18 @@ export async function runTestFile(
 			// orchestrator — the Rust native engine forwards a fixed instruction
 			// shape, but child processes still inherit the CLI process env.
 			// Explicit options always win over the env fallback.
+			// `configure({ timeout, retries })` ran during the import above; its
+			// defaults sit BELOW explicit options / env (CLI wins), ABOVE the
+			// runtime's own `?? 0`.
+			const defaults = getConfiguredDefaults();
 			const raw = await executeRoot(root, absolutePath, {
-				timeoutMs: options.timeoutMs,
-				retries: options.retries ?? envRetries(),
+				timeoutMs: options.timeoutMs ?? defaults.timeout,
+				retries: options.retries ?? envRetries() ?? defaults.retries,
 				grep: options.grep ?? process.env.HELIX_GREP,
 				tags: options.tags ?? envTags(),
+				matchAll: options.matchAll ?? envMatchAll(),
+				tests: options.tests ?? envList("HELIX_TESTS"),
+				groups: options.groups ?? envList("HELIX_GROUPS"),
 			});
 			return sanitize(raw);
 		} finally {
@@ -160,13 +167,22 @@ function envRetries(): number | undefined {
 }
 
 function envTags(): string[] | undefined {
-	const raw = process.env.HELIX_TAGS;
+	return envList("HELIX_TAGS");
+}
+
+/** Comma-separated env list → trimmed non-empty entries, or undefined. */
+function envList(name: string): string[] | undefined {
+	const raw = process.env[name];
 	if (raw === undefined || raw === "") return undefined;
-	const tags = raw
+	const items = raw
 		.split(",")
 		.map((t) => t.trim())
 		.filter((t) => t.length > 0);
-	return tags.length > 0 ? tags : undefined;
+	return items.length > 0 ? items : undefined;
+}
+
+function envMatchAll(): boolean | undefined {
+	return process.env.HELIX_MATCH_ALL === "1" ? true : undefined;
 }
 
 interface WorkerIncoming {

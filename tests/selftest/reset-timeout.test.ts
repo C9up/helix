@@ -1,6 +1,6 @@
 /**
  * Self-test: `ctx.test.resetTimeout()` (Japa parity) re-arms the running test's
- * deadline, and `test.with(() => rows)` accepts a lazy dataset.
+ * deadline, and `test(name).with(() => rows).run(...)` accepts a lazy dataset.
  */
 
 import { expect, test } from "@c9up/helix";
@@ -22,10 +22,10 @@ test("resetTimeout(ms) can set a new duration", async (ctx) => {
 	expect(true).toBe(true);
 }).timeout(20);
 
-// Lazy dataset — the function is resolved eagerly at collection time.
-test
+// Lazy dataset — the function (may be async) is resolved at run time (Japa).
+test("lazy dataset yields even rows")
 	.with(() => [2, 4, 6])
-	.run("lazy dataset yields even rows", (ctx, row) => {
+	.run((ctx, row) => {
 		expect(row % 2).toBe(0);
 		expect(ctx.test.dataset).toEqual([2, 4, 6]);
 	});
