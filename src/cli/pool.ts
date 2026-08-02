@@ -42,6 +42,17 @@ export interface PoolConfig {
 	 * Used by coverage to forward `NODE_V8_COVERAGE=<tmp-dir>`.
 	 */
 	extraEnv?: NodeJS.ProcessEnv;
+	/**
+	 * Stop the run once a file reports a failure (Japa `--bail` at the runner
+	 * layer). Files already in flight finish; files not yet started are never
+	 * spawned.
+	 *
+	 * Named deviation from Japa: those files are DROPPED, not reported as
+	 * skipped. Japa can skip them because it collected every test in one
+	 * process; helix runs one process per file, so a file that never starts has
+	 * no tests to skip.
+	 */
+	bail?: boolean;
 }
 
 export interface WorkerErrorMessage {
@@ -189,20 +200,30 @@ export async function runPool(
 	const sem = new Semaphore(effectiveThreads);
 	const results: FileResult[] = [];
 	const errors: WorkerErrorMessage[] = [];
+	// Under `--bail`, the first failing file closes the gate: whatever has not
+	// been spawned yet never will be.
+	let gateClosed = false;
 
 	await Promise.all(
 		files.map(async (file) => {
 			const absFile = path.isAbsolute(file) ? file : path.resolve(file);
 			const release = await sem.acquire();
 			try {
+				// Checked AFTER acquiring the slot: by then an earlier file may have
+				// failed while this one was queued.
+				if (cfg.bail === true && gateClosed) return;
 				safeCall(() => reporter.onFileStart(absFile), "onFileStart");
 				const outcome = await runOne(absFile, cfg);
 				if (outcome.kind === "result") {
 					safeCall(() => reporter.onFileResult(outcome.result), "onFileResult");
 					results.push(outcome.result);
+					if (cfg.bail === true && outcome.result.totals.fail > 0) {
+						gateClosed = true;
+					}
 				} else {
 					safeCall(() => reporter.onFileError(outcome.error), "onFileError");
 					errors.push(outcome.error);
+					if (cfg.bail === true) gateClosed = true;
 				}
 			} finally {
 				release();

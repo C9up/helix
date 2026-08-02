@@ -34,9 +34,10 @@ import {
 	violationSummary,
 } from "./coverage/index.js";
 import { type DiscoveryOptions, discover } from "./discover.js";
+import { writeFailedCache } from "./failed-cache.js";
 import { getNative } from "./native.js";
 import { runPool } from "./pool.js";
-import { makeReporter, type Reporter } from "./reporter.js";
+import { makeReporters, type Reporter } from "./reporter.js";
 import {
 	buildSummary,
 	exitCode,
@@ -79,6 +80,12 @@ export interface RunConfig {
 	timeoutMs?: number;
 	/** Reporter name: `"dot" | "spec" | "json"`. Default `"spec"`. */
 	reporter?: string;
+	/**
+	 * Activate several reporters at once (Japa `--reporters=spec,json`). Takes
+	 * precedence over {@link RunConfig.reporter} when it holds more than one
+	 * name.
+	 */
+	reporters?: string[];
 	/** Enable ANSI colours. Default: stdout is TTY. */
 	useColors?: boolean;
 	/** Pluggable reporter instance (overrides `reporter` when provided). */
@@ -95,6 +102,16 @@ export interface RunConfig {
 	diffCoverage?: DiffOptions;
 	/** Watch mode: re-run on file changes. */
 	watch?: WatchOptions;
+	/**
+	 * Stop the run at the first failure (Japa `--bail`). Within a file the
+	 * remaining tests are reported as skipped; files not yet started are dropped.
+	 */
+	bail?: boolean;
+	/**
+	 * Re-run only the tests that failed last time (Japa `--failed`). Reads the
+	 * cache written by the previous run and applies it as a `--tests` filter.
+	 */
+	failed?: boolean;
 }
 
 export interface RunOutcome {
@@ -369,18 +386,24 @@ async function runOnce(config: RunConfig): Promise<RunOutcome> {
 	// layer is active — a pluggable reporter instance, coverage, or diff-cov,
 	// none of which the Rust `run` exposes yet. Watch is already unwrapped by
 	// `run()` above, so it never reaches here.
-	if (
-		!config.reporterInstance &&
-		config.coverage?.enabled !== true &&
-		config.diffCoverage?.enabled !== true
-	) {
+	// `--bail` and `--failed` need per-test detail and cross-file control, and
+	// several reporters need the TS reporter chain — none of which the native
+	// engine exposes. They keep the run on the TypeScript pool.
+	const needsTsPool =
+		config.reporterInstance !== undefined ||
+		config.coverage?.enabled === true ||
+		config.diffCoverage?.enabled === true ||
+		config.bail === true ||
+		config.failed === true ||
+		(config.reporters !== undefined && config.reporters.length > 1);
+	if (!needsTsPool) {
 		return runNative(config, root, files);
 	}
 
 	const reporter =
 		config.reporterInstance ??
-		makeReporter(
-			config.reporter,
+		makeReporters(
+			config.reporters ?? (config.reporter ? [config.reporter] : []),
 			config.useColors ?? process.stdout.isTTY === true,
 		);
 
@@ -403,12 +426,16 @@ async function runOnce(config: RunConfig): Promise<RunOutcome> {
 				threads,
 				timeoutMs: config.timeoutMs,
 				extraEnv: session?.env,
+				bail: config.bail,
 			},
 			reporter,
 		);
 
 		const summary = buildSummary(results, errors, Date.now() - started);
 		reporter.onSummary(summary);
+		// Feed the `--failed` cache with this run's failures (Japa writes it from
+		// a runner teardown).
+		await writeFailedCache(root, summary);
 
 		const cov: CoverageOutcome =
 			session && config.coverage

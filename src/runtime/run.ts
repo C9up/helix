@@ -113,6 +113,20 @@ export interface ExecuteOptions {
 	 * `suite:*` event payloads. Defaults to `"default"`, Japa's implicit suite.
 	 */
 	suite?: string;
+	/**
+	 * Stop running once a test fails (Japa `--bail`). Everything after the
+	 * failure is reported as SKIPPED, not dropped — same as Japa, so the counts
+	 * still add up.
+	 */
+	bail?: boolean;
+	/**
+	 * How far a bail reaches (Japa `--bail-layer`): `"group"` stops the enclosing
+	 * group only, `"suite"` the rest of the file, `"runner"` (Japa's default,
+	 * spelled `""` on its CLI) the rest of the run — the remaining FILES are
+	 * dropped by the pool, since helix runs one process per file and cannot skip
+	 * tests it never collected.
+	 */
+	bailLayer?: "group" | "suite" | "runner" | "";
 }
 
 /**
@@ -348,6 +362,12 @@ interface RunCtx {
 	file: string;
 	/** The suite these tests belong to (Japa `meta.suite` / `suite:*`). */
 	suite: SuiteIdentity;
+	/** Stop after the first failure (Japa `--bail`). */
+	bail: boolean;
+	/** How far a bail reaches — `"group"` resets at each group boundary. */
+	bailLayer: "group" | "suite" | "runner";
+	/** Set once a test has failed under `bail`; skips everything after it. */
+	bailed: boolean;
 }
 
 /**
@@ -534,8 +554,10 @@ async function runTest(
 	}
 
 	// Node-level gates that apply to the whole test (and every dataset row).
-	// `grep` is applied per-name below (per row for datasets).
-	const nodeSkipped = node.mode === "skip" || deferredSkip || filteredOut;
+	// `grep` is applied per-name below (per row for datasets). A bailed run skips
+	// what is left — Japa marks them `skip`, it does not drop them.
+	const nodeSkipped =
+		node.mode === "skip" || deferredSkip || filteredOut || ctx.bailed;
 
 	const makeSkip = (
 		name: string,
@@ -673,6 +695,7 @@ async function runOneTest(
 		if (last.status === "pass") break;
 	}
 	ctx.flatTests.push(last);
+	if (ctx.bail && last.status === "fail") ctx.bailed = true;
 	emitter.emit("test:end", {
 		...startNode,
 		retryAttempt: perTestRetries > 0 ? attemptNumber : undefined,
@@ -973,6 +996,10 @@ async function runSuite(
 	const beforeAllFailed = attributed !== null;
 	const children: Array<SuiteResult | TestResult> = attributed ?? [];
 
+	// `--bail-layer=group` confines a bail to the group it happened in, so the
+	// next group starts clean. The wider layers leave the flag set.
+	const bailedOnEntry = ctx.bailed;
+
 	if (!beforeAllFailed) {
 		for (const child of node.children) {
 			if (child.kind === "test") {
@@ -983,6 +1010,8 @@ async function runSuite(
 			}
 		}
 	}
+
+	if (ctx.bailLayer === "group") ctx.bailed = bailedOnEntry;
 
 	const groupHadError =
 		hookErrors.length > 0 || children.some((c) => c.status === "fail");
@@ -995,9 +1024,11 @@ async function runSuite(
 		emitter.emit("group:end", {
 			title: node.name,
 			meta: { suite: ctx.suite, fileName: ctx.file },
-			hasError: hookErrors.length > 0,
-			// A group's own errors are its hook failures; test failures are
-			// reported by the tests themselves (Japa parity).
+			// True when ANYTHING under the group failed — a hook or a test — which
+			// is what Japa's GroupRunner reports.
+			hasError: groupHadError || hookErrors.length > 0,
+			// The group's own `errors` are its hook failures only; a test's failure
+			// travels on that test's `test:end` (Japa parity).
 			errors: hookErrors.map(
 				(error, i): EmittedError => ({
 					phase: i < setupErrorCount ? "setup" : "teardown",
@@ -1215,6 +1246,13 @@ export async function executeRoot(
 				: undefined,
 		file,
 		suite: { name: options.suite ?? "default" },
+		bail: options.bail === true,
+		// Japa spells the runner layer as an empty string on its CLI.
+		bailLayer:
+			options.bailLayer === undefined || options.bailLayer === ""
+				? "runner"
+				: options.bailLayer,
+		bailed: false,
 	};
 	const suites: SuiteResult[] = [];
 

@@ -3,6 +3,8 @@ import {
 	DotReporter,
 	JsonReporter,
 	makeReporter,
+	makeReporters,
+	makeReportersFrom,
 	type Reporter,
 	SpecReporter,
 } from "../../src/cli/reporter.js";
@@ -170,5 +172,79 @@ describe("helix > cli > reporter > makeReporter factory", () => {
 	it("name lookup is case-insensitive", () => {
 		expect(classNameOf(makeReporter("DOT", true))).toBe("DotReporter");
 		expect(classNameOf(makeReporter("Json", true))).toBe("JsonReporter");
+	});
+});
+
+describe("makeReporters — Japa --reporters", () => {
+	/** A reporter that records which callbacks it received. */
+	function recording(log: string[], label: string): Reporter {
+		return {
+			onFileStart: () => log.push(`${label}:start`),
+			onFileResult: () => log.push(`${label}:result`),
+			onFileError: () => log.push(`${label}:error`),
+			onSummary: () => log.push(`${label}:summary`),
+		};
+	}
+
+	const emptyResult: FileResult = {
+		file: "a.test.ts",
+		suites: [],
+		tests: [],
+		totals: { pass: 0, fail: 0, skip: 0, todo: 0 },
+		durationMs: 0,
+	};
+	const emptySummary: Summary = {
+		totals: { pass: 0, fail: 0, skip: 0, todo: 0, fileErrors: 0 },
+		files: [],
+		fileErrors: [],
+		durationMs: 0,
+	};
+
+	it("a single name behaves exactly like makeReporter", () => {
+		expect(makeReporters(["dot"], true)).toBeInstanceOf(DotReporter);
+		expect(makeReporters([], true)).toBeInstanceOf(SpecReporter);
+		expect(makeReporters(undefined, true)).toBeInstanceOf(SpecReporter);
+	});
+
+	it("several names fan every callback out to all of them", () => {
+		const log: string[] = [];
+		const fanned = makeReportersFrom([
+			recording(log, "a"),
+			recording(log, "b"),
+		]);
+
+		fanned.onFileStart("a.test.ts");
+		fanned.onFileResult(emptyResult);
+		fanned.onFileError({ file: "a.test.ts", message: "boom" });
+		fanned.onSummary(emptySummary);
+
+		expect(log).toEqual([
+			"a:start",
+			"b:start",
+			"a:result",
+			"b:result",
+			"a:error",
+			"b:error",
+			"a:summary",
+			"b:summary",
+		]);
+	});
+
+	it("isolates a throwing reporter from the others", () => {
+		const log: string[] = [];
+		const fanned = makeReportersFrom([
+			{
+				onFileStart: () => {
+					throw new Error("bad reporter");
+				},
+				onFileResult: () => {},
+				onFileError: () => {},
+				onSummary: () => {},
+			},
+			recording(log, "b"),
+		]);
+
+		expect(() => fanned.onFileStart("a.test.ts")).not.toThrow();
+		expect(log).toEqual(["b:start"]);
 	});
 });

@@ -156,6 +156,8 @@ export async function runTestFile(
 					process.env.HELIX_SUITE ??
 					defaults.suite ??
 					"default",
+				bail: options.bail ?? process.env.HELIX_BAIL === "1",
+				bailLayer: options.bailLayer ?? envBailLayer(),
 			});
 			return sanitize(raw);
 		} finally {
@@ -164,6 +166,13 @@ export async function runTestFile(
 			await drainRunnerTeardowns();
 		}
 	});
+}
+
+/** `--bail-layer` as forwarded by the CLI; anything else falls back to runner. */
+function envBailLayer(): "group" | "suite" | "runner" | undefined {
+	const raw = process.env.HELIX_BAIL_LAYER;
+	if (raw === "group" || raw === "suite" || raw === "runner") return raw;
+	return undefined;
 }
 
 interface WorkerIncoming {

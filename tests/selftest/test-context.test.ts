@@ -8,7 +8,7 @@
  *   - `ctx.cleanup(fn)` runs after the test (verified across two tests).
  */
 
-import { expect, test, TestContextRegistry } from "@c9up/helix";
+import { expect, TestContextRegistry, test } from "@c9up/helix";
 
 // Typing side: plugins pair a runtime registration with a declaration-merge so
 // `ctx.answer` / `ctx.lazy` are fully typed (the Japa pattern).

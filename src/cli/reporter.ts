@@ -153,3 +153,65 @@ export function makeReporter(
 			return new SpecReporter(stdoutSink(), useColors);
 	}
 }
+
+/**
+ * Fan one run out to several reporters — Japa activates a LIST of reporters
+ * (`--reporters=spec,json`), not just one. Each callback reaches every reporter;
+ * a throwing reporter is isolated so it cannot take the run down with it.
+ */
+class MultiReporter implements Reporter {
+	readonly #reporters: Reporter[];
+
+	constructor(reporters: Reporter[]) {
+		this.#reporters = reporters;
+	}
+
+	#each(label: string, call: (reporter: Reporter) => void): void {
+		for (const reporter of this.#reporters) {
+			try {
+				call(reporter);
+			} catch (err) {
+				console.error(`[helix] reporter ${label} failed:`, err);
+			}
+		}
+	}
+
+	onFileStart(file: string): void {
+		this.#each("onFileStart", (r) => r.onFileStart(file));
+	}
+
+	onFileResult(result: FileResult): void {
+		this.#each("onFileResult", (r) => r.onFileResult(result));
+	}
+
+	onFileError(error: WorkerErrorMessage): void {
+		this.#each("onFileError", (r) => r.onFileError(error));
+	}
+
+	onSummary(summary: Summary): void {
+		this.#each("onSummary", (r) => r.onSummary(summary));
+	}
+}
+
+/**
+ * Fan a run out to reporter INSTANCES — the programmatic form, for callers that
+ * built their own. A single reporter is returned as-is, so no wrapper sits in
+ * the common path.
+ */
+export function makeReportersFrom(reporters: readonly Reporter[]): Reporter {
+	if (reporters.length === 1) return reporters[0];
+	return new MultiReporter([...reporters]);
+}
+
+/**
+ * Build the reporter for a run. One name behaves exactly as before; several
+ * (Japa `--reporters=spec,json`) fan out to all of them.
+ */
+export function makeReporters(
+	names: readonly string[] | undefined,
+	useColors: boolean,
+): Reporter {
+	const list = (names ?? []).filter((n) => n.trim().length > 0);
+	if (list.length <= 1) return makeReporter(list[0], useColors);
+	return makeReportersFrom(list.map((n) => makeReporter(n, useColors)));
+}

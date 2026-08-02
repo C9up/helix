@@ -24,6 +24,9 @@ for (const arg of process.argv.slice(3)) {
 	else if (arg.startsWith("--tags=")) process.env.HELIX_TAGS = arg.slice(7);
 	else if (arg.startsWith("--tests=")) process.env.HELIX_TESTS = arg.slice(8);
 	else if (arg.startsWith("--groups=")) process.env.HELIX_GROUPS = arg.slice(9);
+	else if (arg === "--bail") process.env.HELIX_BAIL = "1";
+	else if (arg.startsWith("--bail-layer="))
+		process.env.HELIX_BAIL_LAYER = arg.slice(13);
 	else throw new Error(`run-helix: unsupported filter flag "${arg}"`);
 }
 

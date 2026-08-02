@@ -16,20 +16,63 @@ their own integration packages, not here — helix stays dependency-light.
 ## CLI
 
 ```sh
-helix test [paths...]            # run a one-shot suite (e.g. `helix test app`)
+helix test [paths...|suites...]  # run paths, or suites named in helix.config
 helix test --watch               # re-run on file changes
 helix test --coverage            # V8 coverage + LCOV + thresholds
 helix test --diff-cov            # diff coverage vs main branch
+helix test --bail                # stop at the first failure
+helix test --failed              # re-run what failed last time
 ```
+
+## Suites
+
+Declare named suites and `helix test unit` runs one, the AdonisJS way.
+With no positional, every suite runs, in order:
+
+```ts
+// helix.config.ts
+export default {
+  suites: [
+    { name: "unit", files: ["tests/unit"], timeout: 2_000 },
+    { name: "functional", files: ["tests/functional/**/*.spec.ts"], timeout: 30_000 },
+  ],
+}
+```
+
+A suite's name reaches the tests as `ctx.test.options.meta.suite` and
+rides on the `suite:*` events. Without a config file — or when a
+positional is not a suite name — positionals stay paths, exactly as
+before.
+
+Named deviation from Adonis: `files` entries are directories or file
+paths resolved through helix's suffix-based discovery, not a glob
+engine. A trailing wildcard is understood (`tests/unit/**`, and
+`tests/**/*.spec.ts` also constrains the suffix); anything richer is
+rejected rather than half-honoured.
 
 Filters follow Japa: `--tests` and `--groups` take exact titles,
 `--files` matches path segments (`--files=user`, `--files=unit/*`),
 `--tags` matches ANY of the given tags (`--match-all`, spelled
 `--matchAll` too, requires every one), and a `~@tag` / `!@tag` entry
 excludes. `--suite=<name>` names the suite the files belong to
-(`"default"` otherwise, like Japa's implicit suite) — it surfaces as
-`ctx.test.options.meta.suite` and on the `suite:*` events. `--grep` is
-a helix extra: a regex or substring over the full test name.
+(`"default"` otherwise, like Japa's implicit suite). `--grep` is a helix
+extra: a regex or substring over the full test name.
+
+`--bail` stops at the first failure; `--bail-layer=group|suite|runner`
+says how far that reaches. Within a file the remaining tests are
+reported as SKIPPED, like Japa. Files not yet started are dropped
+rather than skipped — a named deviation: helix runs one process per
+file, so a file that never starts has no tests to skip.
+
+`--failed` re-runs only what failed last time, from the cache each run
+writes to `node_modules/.cache/helix/summary.json` (same `{ tests }`
+shape as Japa). `--reporters=spec,json` activates several reporters at
+once. `--force-exit` is accepted for parity and is a no-op: the helix
+CLI always exits as soon as the run ends.
+
+`--bail`, `--failed` and multiple reporters keep the run on the
+TypeScript pool — the native (Rust) engine reports totals only, and
+those three need per-test detail or cross-file control.
 
 ## Plugins
 

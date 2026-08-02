@@ -32,6 +32,7 @@ const SPECS = [
 	"macros",
 	"group_identity",
 	"filters",
+	"bail",
 ] as const;
 
 /** Filter flags exercised against `filters.spec.ts`, passed to BOTH runners. */
@@ -46,6 +47,13 @@ const FILTER_MATRIX: string[][] = [
 	["--groups=alpha"],
 	["--groups=alpha", "--tags=@db"],
 	["--groups=beta", "--tags=@db"],
+];
+
+/** `--bail` / `--bail-layer` combinations exercised against `bail.spec.ts`. */
+const BAIL_MATRIX: string[][] = [
+	["--bail"],
+	["--bail", "--bail-layer=group"],
+	["--bail", "--bail-layer=suite"],
 ];
 
 type Side = "helix" | "japa";
@@ -121,6 +129,16 @@ describe("golden — helix vs @japa/runner", () => {
 			const [helix, japa] = await Promise.all([
 				runHarness("helix", spec),
 				runHarness("japa", spec),
+			]);
+			expect(helix).toEqual(japa);
+		}, 60_000);
+	}
+
+	for (const flags of BAIL_MATRIX) {
+		test(`bail ${flags.join(" ")}: both runners stop the same way`, async () => {
+			const [helix, japa] = await Promise.all([
+				runHarness("helix", "bail", flags),
+				runHarness("japa", "bail", flags),
 			]);
 			expect(helix).toEqual(japa);
 		}, 60_000);

@@ -73,6 +73,23 @@ const FLAG_SPEC = {
 		kind: "string",
 		help: "Comma-separated substrings matched against test file paths (Japa --files)",
 	},
+	reporters: {
+		kind: "string",
+		help: "Comma-separated reporters to activate, e.g. spec,json (Japa --reporters)",
+	},
+	bail: { kind: "boolean", help: "Stop at the first failure (Japa --bail)" },
+	"bail-layer": {
+		kind: "string",
+		help: "How far a bail reaches: group|suite|runner (Japa --bail-layer)",
+	},
+	failed: {
+		kind: "boolean",
+		help: "Re-run only the tests that failed last run (Japa --failed)",
+	},
+	"force-exit": {
+		kind: "boolean",
+		help: "Exit as soon as the run ends — helix always does, accepted for parity",
+	},
 	watch: { kind: "boolean", help: "Watch mode — re-run on file changes" },
 	"watch-debounce": {
 		kind: "number",
@@ -364,11 +381,27 @@ async function main() {
 				: path.resolve(here, "../src/cli/discover.ts"),
 		).href;
 		const { discover } = await import(discoverModule);
-
-		const expanded = filterByFileFilters(
-			await expandPositionals(parsed.positional, discover),
-			parsed.flags.files,
+		const suitesModule = pathToFileURL(
+			useDist
+				? path.resolve(here, "../dist/cli/suites.js")
+				: path.resolve(here, "../src/cli/suites.ts"),
+		).href;
+		const { loadHelixConfig, resolveSuiteFiles, selectSuites } = await import(
+			suitesModule
 		);
+
+		// AdonisJS parity: positionals may name SUITES declared in
+		// `helix.config.*` (`helix test unit`). When they don't — or there is no
+		// config — they stay what they have always been: paths.
+		const helixConfig = await loadHelixConfig(process.cwd());
+		const selectedSuites = selectSuites(helixConfig, parsed.positional);
+
+		const expanded = selectedSuites
+			? []
+			: filterByFileFilters(
+					await expandPositionals(parsed.positional, discover),
+					parsed.flags.files,
+				);
 		const tsxLoader = findTsxLoader();
 		if (parsed.flags.tsx !== false && !tsxLoader) {
 			process.stderr.write(
@@ -412,6 +445,14 @@ async function main() {
 			threads: parsed.flags.threads,
 			timeoutMs: parsed.flags.timeout,
 			reporter: parsed.flags.reporter,
+			reporters: parsed.flags.reporters
+				? String(parsed.flags.reporters)
+						.split(",")
+						.map((r) => r.trim())
+						.filter((r) => r.length > 0)
+				: undefined,
+			bail: parsed.flags.bail === true,
+			failed: parsed.flags.failed === true,
 			useColors: parsed.flags.colors,
 			discovery: {
 				suffixes: parsed.flags.include,
@@ -475,8 +516,61 @@ async function main() {
 		if (parsed.flags.files !== undefined) {
 			process.env.HELIX_FILES = String(parsed.flags.files);
 		}
-		const outcome = await run(cfg);
-		return outcome.exitCode;
+		if (parsed.flags.bail === true) {
+			process.env.HELIX_BAIL = "1";
+		}
+		if (parsed.flags["bail-layer"] !== undefined) {
+			process.env.HELIX_BAIL_LAYER = String(parsed.flags["bail-layer"]);
+		}
+		// `--failed` replays the previous run's failures as a `--tests` filter,
+		// exactly like Japa's retry plugin.
+		if (parsed.flags.failed === true) {
+			const failedModule = pathToFileURL(
+				useDist
+					? path.resolve(here, "../dist/cli/failed-cache.js")
+					: path.resolve(here, "../src/cli/failed-cache.ts"),
+			).href;
+			const { readFailedCache } = await import(failedModule);
+			const failedTests = await readFailedCache(process.cwd());
+			if (failedTests.length === 0) {
+				process.stdout.write(
+					"helix: no failing tests cached — running all of them\n",
+				);
+			} else {
+				process.env.HELIX_TESTS = failedTests.join(",");
+			}
+		}
+
+		if (!selectedSuites) {
+			const outcome = await run(cfg);
+			return outcome.exitCode;
+		}
+
+		// Suites run one after another (Japa runs them in sequence too), each
+		// with its own files, timeout, retries and `meta.suite` name.
+		let worstExit = 0;
+		for (const suite of selectedSuites) {
+			const suiteFiles = filterByFileFilters(
+				await resolveSuiteFiles(suite, process.cwd(), cfg.discovery),
+				parsed.flags.files,
+			);
+			if (suiteFiles.length === 0) {
+				process.stderr.write(`helix: suite "${suite.name}": no test files\n`);
+				continue;
+			}
+			process.env.HELIX_SUITE = suite.name;
+			if (suite.retries !== undefined) {
+				process.env.HELIX_RETRIES = String(suite.retries);
+			}
+			const outcome = await run({
+				...cfg,
+				files: suiteFiles,
+				timeoutMs: cfg.timeoutMs ?? suite.timeout,
+			});
+			worstExit = Math.max(worstExit, outcome.exitCode);
+			if (parsed.flags.bail === true && outcome.exitCode !== 0) break;
+		}
+		return worstExit;
 	} catch (err) {
 		// Re-exec under tsx when Node can't satisfy the TS-source imports
 		// natively. Two failure shapes seen in the wild:
