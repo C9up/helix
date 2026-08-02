@@ -11,6 +11,7 @@ export { createAssert } from "./assert.js";
 export type { AssertionErrorInit } from "./assertion-error.js";
 export { AssertionError, isAssertionError } from "./assertion-error.js";
 export type { AsymmetricMatcher, Constructor } from "./asymmetric.js";
+export type { CLIArgs } from "./cli-args.js";
 export type {
 	ConfigureOptions,
 	Plugin,
@@ -19,8 +20,29 @@ export type {
 	RunnerHook,
 } from "./configure.js";
 export { configure, drainRunnerTeardowns } from "./configure.js";
-export type { TestContext } from "./context.js";
-export { buildTestContext, TestContextRegistry } from "./context.js";
+export type { Getter } from "./context.js";
+export {
+	buildTestContext,
+	TestContext,
+	TestContextRegistry,
+} from "./context.js";
+export type {
+	EmittedDataset,
+	EmittedError,
+	EmittedTitle,
+	ErrorPhase,
+	EventHandler,
+	GroupEndNode,
+	GroupStartNode,
+	RunnerEndNode,
+	RunnerEvents,
+	RunnerStartNode,
+	SuiteEndNode,
+	SuiteStartNode,
+	TestEndNode,
+	TestStartNode,
+} from "./emitter.js";
+export { Emitter, emitter } from "./emitter.js";
 export type { EqualsOptions } from "./equals.js";
 export { equals, partialEquals } from "./equals.js";
 export type { Assertion, ExpectStatic } from "./expect.js";
@@ -42,6 +64,8 @@ export type {
 	TestResult,
 } from "./run.js";
 export { executeRoot } from "./run.js";
+export type { RunnerSummary, SummaryAggregates } from "./runner.js";
+export { Runner } from "./runner.js";
 export type {
 	CleanupFn,
 	DatasetHandle,
@@ -68,7 +92,12 @@ export {
 	Test,
 	test,
 } from "./suite.js";
-export { onTestFailed, onTestFinished } from "./test-context.js";
+export {
+	getActiveTest,
+	getActiveTestOrFail,
+	onTestFailed,
+	onTestFinished,
+} from "./test-context.js";
 export type { Vi } from "./vi/index.js";
 export { vi, withViContext } from "./vi/index.js";
 export type {

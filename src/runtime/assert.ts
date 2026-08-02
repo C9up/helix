@@ -90,6 +90,62 @@ function deepSubset(obj: unknown, subset: unknown): boolean {
 	);
 }
 
+/**
+ * How two array members are compared. `@japa/assert` (chai) uses STRICT
+ * equality for the plain `*Members` family and deep equality only for the
+ * explicit `*DeepMembers` variants.
+ */
+type MemberCompare = (a: unknown, b: unknown) => boolean;
+
+const strictMember: MemberCompare = (a, b) => a === b;
+const deepMember: MemberCompare = (a, b) => equals(a, b);
+
+/** Same members, order-independent, each element consumed at most once. */
+function sameMembersWith(
+	a: readonly unknown[],
+	b: readonly unknown[],
+	cmp: MemberCompare,
+): boolean {
+	if (a.length !== b.length) return false;
+	return isSubsetWith(b, a, cmp);
+}
+
+/** Every member of `subset` has its own distinct match in `superset`. */
+function isSubsetWith(
+	superset: readonly unknown[],
+	subset: readonly unknown[],
+	cmp: MemberCompare,
+): boolean {
+	const taken = new Array<boolean>(superset.length).fill(false);
+	return subset.every((want) => {
+		const i = superset.findIndex((have, j) => !taken[j] && cmp(have, want));
+		if (i === -1) return false;
+		taken[i] = true;
+		return true;
+	});
+}
+
+/** Same members, same order. */
+function sameOrderedWith(
+	a: readonly unknown[],
+	b: readonly unknown[],
+	cmp: MemberCompare,
+): boolean {
+	return a.length === b.length && a.every((x, i) => cmp(x, b[i]));
+}
+
+/** `subset` is an ordered PREFIX of `superset` (chai's ordered-superset rule). */
+function includeOrderedWith(
+	superset: readonly unknown[],
+	subset: readonly unknown[],
+	cmp: MemberCompare,
+): boolean {
+	return (
+		subset.length <= superset.length &&
+		subset.every((want, i) => cmp(superset[i], want))
+	);
+}
+
 /** Loose equality (chai `assert.equal` semantics). Isolated so the `==` is deliberate. */
 function looseEqual(a: unknown, b: unknown): boolean {
 	// biome-ignore lint/suspicious/noDoubleEquals: chai/@japa `assert.equal` is intentionally non-strict (`==`); `strictEqual` covers `===`.
@@ -194,6 +250,12 @@ export interface Assert {
 		keys: readonly string[],
 		message?: string,
 	): void;
+	/** Object owns AT LEAST ONE of `keys` (@japa/assert `anyProperties`). */
+	anyProperties(
+		object: unknown,
+		keys: readonly string[],
+		message?: string,
+	): void;
 
 	/** Negation helpers + numeric/object-state matchers (chai / @japa/assert). */
 	isNotTrue(value: unknown, message?: string): void;
@@ -212,10 +274,21 @@ export interface Assert {
 		delta: number,
 		message?: string,
 	): void;
+	/** Alias of {@link closeTo} (`@japa/assert` exposes both). */
+	approximately(
+		actual: number,
+		expected: number,
+		delta: number,
+		message?: string,
+	): void;
 	isFrozen(value: unknown, message?: string): void;
 	isNotFrozen(value: unknown, message?: string): void;
 	isSealed(value: unknown, message?: string): void;
 	isNotSealed(value: unknown, message?: string): void;
+	/** Alias of {@link isSealed}. */
+	sealed(value: unknown, message?: string): void;
+	/** Alias of {@link isNotSealed}. */
+	notSealed(value: unknown, message?: string): void;
 	/** Object's `key` does NOT deeply equal `value`. */
 	notPropertyVal(
 		object: unknown,
@@ -240,19 +313,116 @@ export interface Assert {
 		value: unknown,
 		message?: string,
 	): void;
-	/** `superset` array deep-contains every member of `subset`. */
+	/**
+	 * `superset` contains every member of `subset` (strict equality, order
+	 * independent) — `@japa/assert`'s `includeMembers`.
+	 */
 	includeMembers(
 		superset: readonly unknown[],
 		subset: readonly unknown[],
 		message?: string,
 	): void;
-	/** Two arrays have the SAME members, order-independent (deep). */
+	/** Negation of {@link includeMembers}. */
+	notIncludeMembers(
+		superset: readonly unknown[],
+		subset: readonly unknown[],
+		message?: string,
+	): void;
+	/** {@link includeMembers} with deep comparison. */
+	includeDeepMembers(
+		superset: readonly unknown[],
+		subset: readonly unknown[],
+		message?: string,
+	): void;
+	/** Negation of {@link includeDeepMembers}. */
+	notIncludeDeepMembers(
+		superset: readonly unknown[],
+		subset: readonly unknown[],
+		message?: string,
+	): void;
+	/** `subset` is an ordered prefix of `superset` (strict equality). */
+	includeOrderedMembers(
+		superset: readonly unknown[],
+		subset: readonly unknown[],
+		message?: string,
+	): void;
+	/** Negation of {@link includeOrderedMembers}. */
+	notIncludeOrderedMembers(
+		superset: readonly unknown[],
+		subset: readonly unknown[],
+		message?: string,
+	): void;
+	/** {@link includeOrderedMembers} with deep comparison. */
+	includeDeepOrderedMembers(
+		superset: readonly unknown[],
+		subset: readonly unknown[],
+		message?: string,
+	): void;
+	/** Negation of {@link includeDeepOrderedMembers}. */
+	notIncludeDeepOrderedMembers(
+		superset: readonly unknown[],
+		subset: readonly unknown[],
+		message?: string,
+	): void;
+	/** Two arrays have the SAME members, order-independent (strict equality). */
 	sameMembers(
 		a: readonly unknown[],
 		b: readonly unknown[],
 		message?: string,
 	): void;
+	/** Negation of {@link sameMembers}. */
+	notSameMembers(
+		a: readonly unknown[],
+		b: readonly unknown[],
+		message?: string,
+	): void;
+	/** {@link sameMembers} with deep comparison. */
+	sameDeepMembers(
+		a: readonly unknown[],
+		b: readonly unknown[],
+		message?: string,
+	): void;
+	/** Negation of {@link sameDeepMembers}. */
+	notSameDeepMembers(
+		a: readonly unknown[],
+		b: readonly unknown[],
+		message?: string,
+	): void;
+	/** Same members in the same order (strict equality). */
+	sameOrderedMembers(
+		a: readonly unknown[],
+		b: readonly unknown[],
+		message?: string,
+	): void;
+	/** Negation of {@link sameOrderedMembers}. */
+	notSameOrderedMembers(
+		a: readonly unknown[],
+		b: readonly unknown[],
+		message?: string,
+	): void;
+	/** {@link sameOrderedMembers} with deep comparison. */
+	sameDeepOrderedMembers(
+		a: readonly unknown[],
+		b: readonly unknown[],
+		message?: string,
+	): void;
+	/** Negation of {@link sameDeepOrderedMembers}. */
+	notSameDeepOrderedMembers(
+		a: readonly unknown[],
+		b: readonly unknown[],
+		message?: string,
+	): void;
 	/** `object` deep-contains `subset` (nested partial match). */
+	containsSubset(object: unknown, subset: unknown, message?: string): void;
+	/** Negation of {@link containsSubset}. */
+	doesNotContainSubset(
+		object: unknown,
+		subset: unknown,
+		message?: string,
+	): void;
+	/** Alias of {@link doesNotContainSubset} (`@japa/assert` exposes both). */
+	notContainsSubset(object: unknown, subset: unknown, message?: string): void;
+	/** Alias of {@link containsSubset} kept from helix's earlier naming. */
 	containSubset(object: unknown, subset: unknown, message?: string): void;
 	/** `typeof`/type name is NOT `type`. */
 	notTypeOf(value: unknown, type: string, message?: string): void;
@@ -266,12 +436,16 @@ export interface Assert {
 
 	throws(fn: () => unknown, matcher?: ErrorMatcher, message?: string): void;
 	doesNotThrow(fn: () => unknown, message?: string): void;
+	/** Alias of {@link doesNotThrow} (`@japa/assert` exposes both spellings). */
+	doesNotThrows(fn: () => unknown, message?: string): void;
 	rejects(
 		fn: () => Promise<unknown>,
 		matcher?: ErrorMatcher,
 		message?: string,
 	): Promise<void>;
 	doesNotReject(fn: () => Promise<unknown>, message?: string): Promise<void>;
+	/** Alias of {@link doesNotReject} (`@japa/assert` exposes both spellings). */
+	doesNotRejects(fn: () => Promise<unknown>, message?: string): Promise<void>;
 
 	/** Force a failure with a message. */
 	fail(message?: string): never;
@@ -658,6 +832,17 @@ export function createAssert(): Assert {
 				message ?? `expected object to own none of ${stringify(keys)}`,
 			);
 		},
+		anyProperties(
+			object: unknown,
+			keys: readonly string[],
+			message?: string,
+		): void {
+			const hasAny =
+				object !== null &&
+				typeof object === "object" &&
+				keys.some((k) => k in object);
+			ok(hasAny, message ?? `expected object to own any of ${stringify(keys)}`);
+		},
 		isNotTrue(value: unknown, message?: string): void {
 			ok(
 				value !== true,
@@ -714,6 +899,17 @@ export function createAssert(): Assert {
 				message ?? `expected ${actual} to be within ${delta} of ${expected}`,
 			);
 		},
+		approximately(
+			actual: number,
+			expected: number,
+			delta: number,
+			message?: string,
+		): void {
+			ok(
+				Math.abs(actual - expected) <= delta,
+				message ?? `expected ${actual} to be within ${delta} of ${expected}`,
+			);
+		},
 		isFrozen(value: unknown, message?: string): void {
 			ok(Object.isFrozen(value), message ?? "expected value to be frozen");
 		},
@@ -724,6 +920,12 @@ export function createAssert(): Assert {
 			ok(Object.isSealed(value), message ?? "expected value to be sealed");
 		},
 		isNotSealed(value: unknown, message?: string): void {
+			ok(!Object.isSealed(value), message ?? "expected value not to be sealed");
+		},
+		sealed(value: unknown, message?: string): void {
+			ok(Object.isSealed(value), message ?? "expected value to be sealed");
+		},
+		notSealed(value: unknown, message?: string): void {
 			ok(!Object.isSealed(value), message ?? "expected value not to be sealed");
 		},
 		notPropertyVal(
@@ -775,16 +977,95 @@ export function createAssert(): Assert {
 					`expected property ${stringify(key)} not to deep-equal ${stringify(value)}`,
 			);
 		},
+		// The `*Members` family. Plain variants compare with `===`, `*Deep*`
+		// variants structurally, `*Ordered*` variants position by position —
+		// chai/`@japa/assert` semantics, verified against the real package.
 		includeMembers(
 			superset: readonly unknown[],
 			subset: readonly unknown[],
 			message?: string,
 		): void {
-			const all = subset.every((want) => superset.some((s) => equals(s, want)));
 			ok(
-				all,
+				isSubsetWith(superset, subset, strictMember),
 				message ??
 					`expected ${stringify(superset)} to include members ${stringify(subset)}`,
+			);
+		},
+		notIncludeMembers(
+			superset: readonly unknown[],
+			subset: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				!isSubsetWith(superset, subset, strictMember),
+				message ??
+					`expected ${stringify(superset)} not to include members ${stringify(subset)}`,
+			);
+		},
+		includeDeepMembers(
+			superset: readonly unknown[],
+			subset: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				isSubsetWith(superset, subset, deepMember),
+				message ??
+					`expected ${stringify(superset)} to include deep members ${stringify(subset)}`,
+			);
+		},
+		notIncludeDeepMembers(
+			superset: readonly unknown[],
+			subset: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				!isSubsetWith(superset, subset, deepMember),
+				message ??
+					`expected ${stringify(superset)} not to include deep members ${stringify(subset)}`,
+			);
+		},
+		includeOrderedMembers(
+			superset: readonly unknown[],
+			subset: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				includeOrderedWith(superset, subset, strictMember),
+				message ??
+					`expected ${stringify(superset)} to be an ordered superset of ${stringify(subset)}`,
+			);
+		},
+		notIncludeOrderedMembers(
+			superset: readonly unknown[],
+			subset: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				!includeOrderedWith(superset, subset, strictMember),
+				message ??
+					`expected ${stringify(superset)} not to be an ordered superset of ${stringify(subset)}`,
+			);
+		},
+		includeDeepOrderedMembers(
+			superset: readonly unknown[],
+			subset: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				includeOrderedWith(superset, subset, deepMember),
+				message ??
+					`expected ${stringify(superset)} to be a deep ordered superset of ${stringify(subset)}`,
+			);
+		},
+		notIncludeDeepOrderedMembers(
+			superset: readonly unknown[],
+			subset: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				!includeOrderedWith(superset, subset, deepMember),
+				message ??
+					`expected ${stringify(superset)} not to be a deep ordered superset of ${stringify(subset)}`,
 			);
 		},
 		sameMembers(
@@ -792,12 +1073,116 @@ export function createAssert(): Assert {
 			b: readonly unknown[],
 			message?: string,
 		): void {
-			const aInB = a.every((x) => b.some((y) => equals(x, y)));
-			const bInA = b.every((y) => a.some((x) => equals(x, y)));
 			ok(
-				a.length === b.length && aInB && bInA,
+				sameMembersWith(a, b, strictMember),
 				message ??
 					`expected ${stringify(a)} to have the same members as ${stringify(b)}`,
+			);
+		},
+		notSameMembers(
+			a: readonly unknown[],
+			b: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				!sameMembersWith(a, b, strictMember),
+				message ??
+					`expected ${stringify(a)} not to have the same members as ${stringify(b)}`,
+			);
+		},
+		sameDeepMembers(
+			a: readonly unknown[],
+			b: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				sameMembersWith(a, b, deepMember),
+				message ??
+					`expected ${stringify(a)} to have the same deep members as ${stringify(b)}`,
+			);
+		},
+		notSameDeepMembers(
+			a: readonly unknown[],
+			b: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				!sameMembersWith(a, b, deepMember),
+				message ??
+					`expected ${stringify(a)} not to have the same deep members as ${stringify(b)}`,
+			);
+		},
+		sameOrderedMembers(
+			a: readonly unknown[],
+			b: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				sameOrderedWith(a, b, strictMember),
+				message ??
+					`expected ${stringify(a)} to have the same ordered members as ${stringify(b)}`,
+			);
+		},
+		notSameOrderedMembers(
+			a: readonly unknown[],
+			b: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				!sameOrderedWith(a, b, strictMember),
+				message ??
+					`expected ${stringify(a)} not to have the same ordered members as ${stringify(b)}`,
+			);
+		},
+		sameDeepOrderedMembers(
+			a: readonly unknown[],
+			b: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				sameOrderedWith(a, b, deepMember),
+				message ??
+					`expected ${stringify(a)} to have the same deep ordered members as ${stringify(b)}`,
+			);
+		},
+		notSameDeepOrderedMembers(
+			a: readonly unknown[],
+			b: readonly unknown[],
+			message?: string,
+		): void {
+			ok(
+				!sameOrderedWith(a, b, deepMember),
+				message ??
+					`expected ${stringify(a)} not to have the same deep ordered members as ${stringify(b)}`,
+			);
+		},
+		containsSubset(object: unknown, subset: unknown, message?: string): void {
+			ok(
+				deepSubset(object, subset),
+				message ??
+					`expected ${stringify(object)} to contain subset ${stringify(subset)}`,
+			);
+		},
+		doesNotContainSubset(
+			object: unknown,
+			subset: unknown,
+			message?: string,
+		): void {
+			ok(
+				!deepSubset(object, subset),
+				message ??
+					`expected ${stringify(object)} not to contain subset ${stringify(subset)}`,
+			);
+		},
+		notContainsSubset(
+			object: unknown,
+			subset: unknown,
+			message?: string,
+		): void {
+			ok(
+				!deepSubset(object, subset),
+				message ??
+					`expected ${stringify(object)} not to contain subset ${stringify(subset)}`,
 			);
 		},
 		containSubset(object: unknown, subset: unknown, message?: string): void {
@@ -855,6 +1240,15 @@ export function createAssert(): Assert {
 			}
 			ok(!didThrow, message ?? "expected function not to throw");
 		},
+		doesNotThrows(fn: () => unknown, message?: string): void {
+			let didThrow = false;
+			try {
+				fn();
+			} catch {
+				didThrow = true;
+			}
+			ok(!didThrow, message ?? "expected function not to throw");
+		},
 		async rejects(
 			fn: () => Promise<unknown>,
 			matcher?: ErrorMatcher,
@@ -875,6 +1269,18 @@ export function createAssert(): Assert {
 			);
 		},
 		async doesNotReject(
+			fn: () => Promise<unknown>,
+			message?: string,
+		): Promise<void> {
+			let didReject = false;
+			try {
+				await fn();
+			} catch {
+				didReject = true;
+			}
+			ok(!didReject, message ?? "expected promise not to reject");
+		},
+		async doesNotRejects(
 			fn: () => Promise<unknown>,
 			message?: string,
 		): Promise<void> {

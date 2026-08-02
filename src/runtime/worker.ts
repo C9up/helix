@@ -16,6 +16,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { envCount, envList, envMatchAll, envTags } from "./cli-args.js";
 import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
 import { type ExecuteOptions, executeRoot, type FileResult } from "./run.js";
 import { withCollection } from "./suite.js";
@@ -143,12 +144,18 @@ export async function runTestFile(
 			const defaults = getConfiguredDefaults();
 			const raw = await executeRoot(root, absolutePath, {
 				timeoutMs: options.timeoutMs ?? defaults.timeout,
-				retries: options.retries ?? envRetries() ?? defaults.retries,
+				retries:
+					options.retries ?? envCount("HELIX_RETRIES") ?? defaults.retries,
 				grep: options.grep ?? process.env.HELIX_GREP,
 				tags: options.tags ?? envTags(),
 				matchAll: options.matchAll ?? envMatchAll(),
 				tests: options.tests ?? envList("HELIX_TESTS"),
 				groups: options.groups ?? envList("HELIX_GROUPS"),
+				suite:
+					options.suite ??
+					process.env.HELIX_SUITE ??
+					defaults.suite ??
+					"default",
 			});
 			return sanitize(raw);
 		} finally {
@@ -157,32 +164,6 @@ export async function runTestFile(
 			await drainRunnerTeardowns();
 		}
 	});
-}
-
-function envRetries(): number | undefined {
-	const raw = process.env.HELIX_RETRIES;
-	if (raw === undefined || raw === "") return undefined;
-	const n = Number.parseInt(raw, 10);
-	return Number.isFinite(n) && n >= 0 ? n : undefined;
-}
-
-function envTags(): string[] | undefined {
-	return envList("HELIX_TAGS");
-}
-
-/** Comma-separated env list → trimmed non-empty entries, or undefined. */
-function envList(name: string): string[] | undefined {
-	const raw = process.env[name];
-	if (raw === undefined || raw === "") return undefined;
-	const items = raw
-		.split(",")
-		.map((t) => t.trim())
-		.filter((t) => t.length > 0);
-	return items.length > 0 ? items : undefined;
-}
-
-function envMatchAll(): boolean | undefined {
-	return process.env.HELIX_MATCH_ALL === "1" ? true : undefined;
 }
 
 interface WorkerIncoming {

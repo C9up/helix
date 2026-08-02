@@ -22,6 +22,40 @@ helix test --coverage            # V8 coverage + LCOV + thresholds
 helix test --diff-cov            # diff coverage vs main branch
 ```
 
+Filters follow Japa: `--tests` and `--groups` take exact titles,
+`--files` matches path segments (`--files=user`, `--files=unit/*`),
+`--tags` matches ANY of the given tags (`--match-all`, spelled
+`--matchAll` too, requires every one), and a `~@tag` / `!@tag` entry
+excludes. `--suite=<name>` names the suite the files belong to
+(`"default"` otherwise, like Japa's implicit suite) — it surfaces as
+`ctx.test.options.meta.suite` and on the `suite:*` events. `--grep` is
+a helix extra: a regex or substring over the full test name.
+
+## Plugins
+
+A plugin is a function run once at `configure()` time, handed the same
+object Japa hands its plugins — plus two helix extras:
+
+```ts
+await configure({
+  plugins: [
+    ({ config, cliArgs, runner, emitter, context, cleanup }) => {
+      context.macro("greeting", "hello")       // extend the test context
+      emitter.on("test:end", (t) => { … })     // observe the run
+      cleanup(async () => server.close())      // close resources afterwards
+    },
+  ],
+})
+```
+
+- `config` — the resolved `configure()` options
+- `cliArgs` — the flags the CLI forwarded to this worker
+- `runner` — `getSummary()`: counts, `hasError`, failed titles
+- `emitter` — `runner:start` / `suite:*` / `group:*` / `test:*`
+- `context` — `macro` / `getter` (also on the `TestContext` class, as
+  in Japa)
+- `cleanup` — a teardown run once the file's tests finish
+
 In `package.json`, call the `helix` bin directly — in npm scripts it resolves to
 `node_modules/.bin/helix` and bootstraps the TS loader itself, so the verbose
 `node --import tsx node_modules/@c9up/helix/bin/helix.js …` form is unnecessary:
@@ -50,7 +84,41 @@ Both commands run independently in CI. Stage 2b will retire vitest
 once the helix self-test corpus reaches parity coverage with the
 vitest suite.
 
-### Parity proofs
+### Japa parity proofs (golden tests)
+
+`tests/golden/` runs helix against the **real `@japa/runner`**. Every
+spec under `specs/helix/` has a byte-identical twin under
+`specs/japa/` — only the runner import differs. Each pair is executed
+by its own runner; both harnesses write the same normalized event
+journal (`runner:start`, `group:start`, `test:start`, `test:end`, …)
+and the journals must match event for event:
+
+| Spec | What it pins down |
+| --- | --- |
+| `lifecycle` | group `setup`/`teardown`/`each.*` order |
+| `outcomes` | pass / fail / `.skip()` / todo / tags, as reported |
+| `dataset` | `.with()` expansion and `{prop}` / `{$i}` titles |
+| `retries` | one start/end pair per test, 1-based `retryAttempt` |
+| `macros` | `test.macro(callback)` + `t.cleanup` |
+| `group_identity` | `test.group()` returns the instance its hooks get |
+| `filters` | `--tags` (OR), `--match-all`, `~@tag`, `--tests`, `--groups` |
+
+The filter matrix runs the same flags through both runners, including
+the rules that a group — or a whole suite — with no runnable test
+announces nothing.
+
+`tests/golden/assert-surface.test.ts` does the same for assertions: it
+asserts helix exposes every public assertion of the installed
+`@japa/assert`, then runs a battery of inputs through BOTH
+implementations and requires the same verdict (this is what pinned
+`sameMembers` to strict equality and `sameDeepMembers` to structural).
+
+One named deviation, intentional: a dataset title with no interpolation
+token gets a `(row N)` suffix so titles stay unique, where Japa repeats
+the same title. And since helix runs one process per FILE, `suite:*`
+fires once per file rather than once for a multi-file suite.
+
+### Vitest parity proofs
 
 A handful of identical test bodies live in BOTH directories
 (`tests/selftest/parity-*.test.ts` and
@@ -64,10 +132,9 @@ currently cover:
 - assertion failure shapes (`AssertionError` thrown, message contains
   both received and expected values)
 
-What the parity proofs do **NOT** cover today:
+What the VITEST parity proofs do **NOT** cover today (the Japa golden
+tests above cover the runner semantics):
 
-- Lifecycle hook semantics across runners (`beforeEach`/`afterEach`
-  behaviour is exercised in `tests/selftest/lifecycle.test.ts` only).
 - Spy / fake-timer parity (`vi.fn`, `vi.spyOn`, `vi.useFakeTimers`).
 - Failure-pipeline parity (i.e. that both runners REPORT a failed
   test the same way, at the runner level). The current parity-fail

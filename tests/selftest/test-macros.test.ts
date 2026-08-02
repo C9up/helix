@@ -25,7 +25,9 @@ Test.macro("asSlow", function () {
 test("Test.macro extends the handle and chains", (ctx) => {
 	expect(ctx.test.options.tags).toContain("@slow");
 	// ctx.test.options carries the title + isTodo (Japa parity).
-	expect(ctx.test.options.title).toBe("Test.macro extends the handle and chains");
+	expect(ctx.test.options.title).toBe(
+		"Test.macro extends the handle and chains",
+	);
 	expect(ctx.test.options.isTodo).toBe(false);
 }).asSlow();
 

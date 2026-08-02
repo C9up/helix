@@ -9,6 +9,13 @@
 
 import { AssertionError } from "./assertion-error.js";
 import { buildTestContext } from "./context.js";
+import {
+	type EmittedDataset,
+	type EmittedError,
+	type ErrorPhase,
+	emitter,
+	type TestStartNode,
+} from "./emitter.js";
 import type {
 	CleanupFn,
 	DoneFn,
@@ -35,6 +42,8 @@ export interface TestResult {
 	status: "pass" | "fail" | "skip" | "todo";
 	durationMs: number;
 	error?: SerializedError;
+	/** Lifecycle phase `error` was raised in (Japa `test:end` parity). */
+	errorPhase?: ErrorPhase;
 }
 
 export interface SuiteResult {
@@ -99,6 +108,11 @@ export interface ExecuteOptions {
 	tests?: string[];
 	/** Exact group titles to run (Japa `--groups`). A test runs only if its enclosing group is listed. */
 	groups?: string[];
+	/**
+	 * The suite these tests belong to — `ctx.test.options.meta.suite` and the
+	 * `suite:*` event payloads. Defaults to `"default"`, Japa's implicit suite.
+	 */
+	suite?: string;
 }
 
 /**
@@ -332,6 +346,140 @@ interface RunCtx {
 	groupTitles: Set<string> | undefined;
 	/** The test file being executed — surfaced as `ctx.test.options.meta.fileName`. */
 	file: string;
+	/** The suite these tests belong to (Japa `meta.suite` / `suite:*`). */
+	suite: SuiteIdentity;
+}
+
+/**
+ * Whether a test survives the run's filters (Japa's refiner). `--grep` is a
+ * helix extra applied per resolved title, so it lives at the call sites that
+ * know the interpolated name rather than here.
+ */
+function isFilteredOut(node: TestNode, ctx: RunCtx): boolean {
+	return (
+		(ctx.tagFilter !== undefined && !tagMatches(node, ctx.tagFilter)) ||
+		(ctx.testTitles !== undefined && !ctx.testTitles.has(node.name)) ||
+		(ctx.groupTitles !== undefined && !isInGroups(node, ctx.groupTitles)) ||
+		(ctx.onlyActive && !pathLeadsToOnly(node))
+	);
+}
+
+/**
+ * Whether any test under this suite survives the filters — Japa's
+ * `Refiner#isGroupAllowed`: a group announces itself only when it has at least
+ * one runnable test, so a fully filtered-out group is invisible to reporters.
+ */
+function suiteHasRunnableTest(node: SuiteNode, ctx: RunCtx): boolean {
+	for (const child of node.children) {
+		if (child.kind === "test") {
+			if (!isFilteredOut(child, ctx)) return true;
+		} else if (suiteHasRunnableTest(child, ctx)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * The suite a run belongs to (Japa `meta.suite`). Helix runs one process per
+ * FILE, so the suite is a name the run carries — `"default"` unless
+ * `configure({ suite })` or `--suite` says otherwise, exactly like Japa's
+ * implicit suite.
+ */
+export interface SuiteIdentity {
+	name: string;
+}
+
+/**
+ * The `meta` bag exposed as `ctx.test.options.meta` and on the test events —
+ * Japa's `{ suite, group, fileName, abort }`.
+ */
+function testMeta(node: TestNode, ctx: RunCtx): Record<string, unknown> {
+	return {
+		suite: ctx.suite,
+		group: enclosingGroup(node),
+		fileName: ctx.file,
+		// Japa's escape hatch: fail the running test with a given message.
+		abort: (message: string): never => {
+			throw new Error(message);
+		},
+	};
+}
+
+/** Nearest enclosing `test.group(...)` instance, if any (Japa `meta.group`). */
+function enclosingGroup(node: TestNode): Group | undefined {
+	for (
+		let s: SuiteNode | undefined = node.parent;
+		s !== undefined;
+		s = s.parent
+	) {
+		if (s.isGroup) return s.groupInstance;
+	}
+	return undefined;
+}
+
+/**
+ * The `test:start` payload for one concrete test (a plain test, or one dataset
+ * row). `test:end` is this object plus the outcome — exactly how Japa builds
+ * the two nodes.
+ */
+function buildTestStartNode(
+	node: TestNode,
+	expandedTitle: string,
+	ctx: RunCtx,
+	dataset: EmittedDataset | undefined,
+	flags: { isTodo: boolean; isSkipped: boolean },
+): TestStartNode {
+	return {
+		title: { original: node.name, expanded: expandedTitle },
+		tags: node.tags ?? [],
+		timeout: node.timeoutMs ?? ctx.timeoutMs,
+		retries: node.retries,
+		isTodo: flags.isTodo,
+		isSkipped: flags.isSkipped,
+		isFailing: node.failing === true,
+		isPinned: node.pinned === true,
+		meta: testMeta(node, ctx),
+		dataset,
+	};
+}
+
+/** The `errors` array of a `test:end` / `group:end` node. */
+function toEmittedErrors(
+	error: SerializedError | undefined,
+	phase: ErrorPhase,
+): EmittedError[] {
+	return error === undefined ? [] : [{ phase, error }];
+}
+
+/**
+ * Emit the Japa `test:start` / `test:end` pair for a test that never runs a
+ * body — a `todo`, an explicit `.skip()`, or a test whose skip condition threw.
+ * Japa announces those through its `DummyRunner`, back-to-back.
+ *
+ * Tests dropped by a FILTER (`--tags`/`--tests`/`--groups`/`--grep`/`.only`)
+ * are deliberately NOT emitted: Japa's refiner removes them before they can
+ * announce themselves, so a reporter never hears about them. They still show up
+ * as `skip` in {@link FileResult}, which is what the (Vitest-shaped) CLI
+ * reporter consumes.
+ */
+function emitTestResult(
+	node: TestNode,
+	result: TestResult,
+	ctx: RunCtx,
+	dataset?: EmittedDataset,
+): void {
+	const start = buildTestStartNode(node, result.name, ctx, dataset, {
+		isTodo: result.status === "todo",
+		isSkipped: result.status === "skip",
+	});
+	emitter.emit("test:start", start);
+	emitter.emit("test:end", {
+		...start,
+		duration: result.durationMs,
+		hasError: result.status === "fail",
+		errors: toEmittedErrors(result.error, result.errorPhase ?? "test"),
+	});
 }
 
 async function runTest(
@@ -340,6 +488,12 @@ async function runTest(
 	ctx: RunCtx,
 ): Promise<TestResult[]> {
 	const baseFullName = joinName(parentFullName, node.name);
+
+	// Filter gates (Japa's refiner). Computed first because a filtered-out test
+	// emits NOTHING — not even the `test:start`/`test:end` pair a `.skip()` or a
+	// `todo` still announces. `grep` is per-name (per row for datasets), so it
+	// stays below.
+	const filteredOut = isFilteredOut(node, ctx);
 
 	// A dataset test with no body (`test('x').with(rows)` and no `.run(fn)` / no
 	// body in `test`) is a `todo` — same as a bodiless plain test (Japa parity).
@@ -353,6 +507,7 @@ async function runTest(
 			durationMs: 0,
 		};
 		ctx.flatTests.push(r);
+		if (!filteredOut) emitTestResult(node, r, ctx);
 		return [r];
 	}
 
@@ -370,25 +525,27 @@ async function runTest(
 				status: "fail",
 				durationMs: 0,
 				error: serializeError(err),
+				errorPhase: "setup",
 			};
 			ctx.flatTests.push(r);
+			if (!filteredOut) emitTestResult(node, r, ctx);
 			return [r];
 		}
 	}
 
 	// Node-level gates that apply to the whole test (and every dataset row).
 	// `grep` is applied per-name below (per row for datasets).
-	const nodeSkipped =
-		node.mode === "skip" ||
-		deferredSkip ||
-		(ctx.tagFilter !== undefined && !tagMatches(node, ctx.tagFilter)) ||
-		(ctx.testTitles !== undefined && !ctx.testTitles.has(node.name)) ||
-		(ctx.groupTitles !== undefined && !isInGroups(node, ctx.groupTitles)) ||
-		(ctx.onlyActive && !pathLeadsToOnly(node));
+	const nodeSkipped = node.mode === "skip" || deferredSkip || filteredOut;
 
-	const makeSkip = (name: string, fullName: string): TestResult => {
+	const makeSkip = (
+		name: string,
+		fullName: string,
+		emit: boolean,
+		dataset?: EmittedDataset,
+	): TestResult => {
 		const r: TestResult = { name, fullName, status: "skip", durationMs: 0 };
 		ctx.flatTests.push(r);
+		if (emit) emitTestResult(node, r, ctx, dataset);
 		return r;
 	};
 	const grepOut = (fullName: string): boolean =>
@@ -411,29 +568,48 @@ async function runTest(
 				status: "fail",
 				durationMs: 0,
 				error: serializeError(err),
+				errorPhase: "setup",
 			};
 			ctx.flatTests.push(r);
+			if (!filteredOut) emitTestResult(node, r, ctx);
 			return [r];
 		}
 		const results: TestResult[] = [];
 		for (let i = 0; i < rows.length; i += 1) {
 			const title = interpolateDatasetTitle(node.name, rows[i], i, rows.length);
 			const fullName = joinName(parentFullName, title);
+			const dataset: EmittedDataset = {
+				size: rows.length,
+				index: i,
+				row: rows[i],
+			};
 			if (nodeSkipped || grepOut(fullName)) {
-				results.push(makeSkip(title, fullName));
+				const emit = !filteredOut && !grepOut(fullName);
+				results.push(makeSkip(title, fullName, emit, dataset));
 				continue;
 			}
-			results.push(await runOneTest(node, title, fullName, ctx, rows, rows[i]));
+			results.push(
+				await runOneTest(node, title, fullName, ctx, rows, rows[i], dataset),
+			);
 		}
 		return results;
 	}
 
 	// Single (non-dataset) test.
 	if (nodeSkipped || grepOut(baseFullName)) {
-		return [makeSkip(node.name, baseFullName)];
+		const emit = !filteredOut && !grepOut(baseFullName);
+		return [makeSkip(node.name, baseFullName, emit)];
 	}
 	return [
-		await runOneTest(node, node.name, baseFullName, ctx, undefined, undefined),
+		await runOneTest(
+			node,
+			node.name,
+			baseFullName,
+			ctx,
+			undefined,
+			undefined,
+			undefined,
+		),
 	];
 }
 
@@ -449,6 +625,7 @@ async function runOneTest(
 	ctx: RunCtx,
 	dataset: readonly unknown[] | undefined,
 	row: unknown,
+	datasetNode: EmittedDataset | undefined,
 ): Promise<TestResult> {
 	const before = collectHookChain(node.parent, "beforeEach");
 	const after = collectHookChain(node.parent, "afterEach");
@@ -461,11 +638,23 @@ async function runOneTest(
 	const attempts = 1 + Math.max(0, perTestRetries);
 	const start = Date.now();
 
+	// Japa announces the test ONCE, before the first attempt; the retry loop
+	// lives inside the start/end pair and only the final attempt is reported.
+	const startNode = buildTestStartNode(node, title, ctx, datasetNode, {
+		isTodo: false,
+		isSkipped: false,
+	});
+	emitter.emit("test:start", startNode);
+
 	// Retry loop: each attempt runs the FULL cycle (beforeEach + body +
 	// afterEach) inside its own per-test frame so cleanups / outcome hooks /
 	// assertion counters reset between attempts. Passes on the first success.
 	let last!: TestResult;
+	// 1-based number of the attempt that produced `last` (Japa counts the first
+	// run as attempt 1), and only reported when the test opted into retries.
+	let attemptNumber = 1;
 	for (let attempt = 0; attempt < attempts; attempt += 1) {
+		attemptNumber = attempt + 1;
 		last = await withTestContext<TestResult>(() =>
 			runAttempt(
 				node,
@@ -478,12 +667,19 @@ async function runOneTest(
 				start,
 				dataset,
 				row,
-				ctx.file,
+				testMeta(node, ctx),
 			),
 		);
 		if (last.status === "pass") break;
 	}
 	ctx.flatTests.push(last);
+	emitter.emit("test:end", {
+		...startNode,
+		retryAttempt: perTestRetries > 0 ? attemptNumber : undefined,
+		duration: last.durationMs,
+		hasError: last.status === "fail",
+		errors: toEmittedErrors(last.error, last.errorPhase ?? "test"),
+	});
 	return last;
 }
 
@@ -526,25 +722,10 @@ async function runAttempt(
 	start: number,
 	dataset: readonly unknown[] | undefined,
 	row: unknown,
-	fileName: string,
+	meta: Record<string, unknown>,
 ): Promise<TestResult> {
 	// A re-armable body timeout so `ctx.test.resetTimeout()` can push the deadline.
 	const timeoutCtl = makeTimeoutController(timeoutMs, `test "${fullName}"`);
-
-	// Nearest enclosing `test.group(...)` instance (Japa `options.meta.group` — an
-	// object, not a name). `meta.suite` is intentionally absent: helix has no
-	// named-suite layer (process-per-file), so there is no Suite object to expose.
-	let groupInstance: Group | undefined;
-	for (
-		let s: SuiteNode | undefined = node.parent;
-		s !== undefined;
-		s = s.parent
-	) {
-		if (s.isGroup) {
-			groupInstance = s.groupInstance;
-			break;
-		}
-	}
 
 	// The running test's instance — injected as `ctx.test`, passed to the test
 	// hooks (Japa parity), and threaded into the frame so cleanups receive it.
@@ -557,7 +738,7 @@ async function runAttempt(
 			retries,
 			tags: node.tags ?? [],
 			isTodo: false,
-			meta: { fileName, group: groupInstance },
+			meta,
 		},
 		dataset: dataset ?? node.dataset,
 		isPinned: node.pinned === true,
@@ -584,16 +765,20 @@ async function runAttempt(
 			status: "fail",
 			durationMs: Date.now() - start,
 			error: combineErrors(beforeErr, afterErrBE),
+			errorPhase: "setup",
 		};
 	}
 
 	let testErr: SerializedError | undefined;
+	// Which phase produced `testErr` — surfaced on `test:end` (Japa parity).
+	let errorPhase: ErrorPhase | undefined;
 
 	// Per-test setup hooks (`test.setup`) run after the group `each.setup` chain,
 	// just before the body. A failing setup fails the test without running it.
 	const setupErr = await runHooks(node.setups ?? [], true, testInstance);
 	if (setupErr) {
 		testErr = setupErr;
+		errorPhase = "setup";
 	} else {
 		try {
 			// `done` callback (Japa `waitForDone`): the test completes when the
@@ -635,6 +820,7 @@ async function runAttempt(
 			}
 		} catch (err) {
 			testErr = serializeError(err);
+			errorPhase = "test";
 		}
 
 		// `test.fails()` inverts the body outcome: a throw is success, a clean
@@ -647,11 +833,13 @@ async function runAttempt(
 						name: "AssertionError",
 						message: `test "${fullName}" was expected to fail (test.fails) but passed`,
 					};
+			errorPhase = testErr === undefined ? undefined : "test";
 		}
 
 		// Assertion-count enforcement (`expect.assertions(n)` / `hasAssertions()`).
 		if (!testErr) {
 			testErr = checkAssertionCount(fullName);
+			if (testErr !== undefined) errorPhase = "test";
 		}
 	}
 
@@ -669,6 +857,8 @@ async function runAttempt(
 		status: finalErr ? "fail" : "pass",
 		durationMs: Date.now() - start,
 		error: finalErr,
+		// A failure with no recorded phase came from the teardown chain.
+		errorPhase: finalErr === undefined ? undefined : (errorPhase ?? "teardown"),
 	};
 }
 
@@ -712,9 +902,11 @@ function attributeHookFailure(
 				status: child.mode === "todo" ? "todo" : "fail",
 				durationMs: 0,
 				error: child.mode === "todo" ? undefined : err,
+				errorPhase: child.mode === "todo" ? undefined : "setup",
 			};
 			children.push(r);
 			ctx.flatTests.push(r);
+			emitTestResult(child, r, ctx);
 		} else {
 			const innerChildren = attributeHookFailure(child, fullName, err, ctx);
 			children.push({
@@ -758,6 +950,16 @@ async function runSuite(
 	};
 	const groupCleanups: CleanupFn[] = [];
 
+	// A group with no runnable test announces nothing — Japa's refiner drops it
+	// before `Group.exec()` runs, so a reporter never sees it.
+	const groupFiltered = !suiteHasRunnableTest(node, ctx);
+	if (!groupFiltered) {
+		emitter.emit("group:start", {
+			title: node.name,
+			meta: { suite: ctx.suite, fileName: ctx.file },
+		});
+	}
+
 	// beforeAll: when one throws, every descendant test inherits the failure
 	// and the children list is replaced with those attributed results.
 	const attributed = await runBeforeAllHooks(
@@ -784,7 +986,26 @@ async function runSuite(
 
 	const groupHadError =
 		hookErrors.length > 0 || children.some((c) => c.status === "fail");
+	// Errors recorded so far come from `beforeAll`; anything appended by
+	// `runAfterAllHooks` below belongs to the teardown phase.
+	const setupErrorCount = hookErrors.length;
 	await runAfterAllHooks(node, hookErrors, group, groupCleanups, groupHadError);
+
+	if (!groupFiltered) {
+		emitter.emit("group:end", {
+			title: node.name,
+			meta: { suite: ctx.suite, fileName: ctx.file },
+			hasError: hookErrors.length > 0,
+			// A group's own errors are its hook failures; test failures are
+			// reported by the tests themselves (Japa parity).
+			errors: hookErrors.map(
+				(error, i): EmittedError => ({
+					phase: i < setupErrorCount ? "setup" : "teardown",
+					error,
+				}),
+			),
+		});
+	}
 
 	// Surface afterAll failures as a synthetic test so `totals.fail` reflects
 	// them and CI exits nonzero.
@@ -817,6 +1038,12 @@ async function runSkippedSuite(
 	ctx: RunCtx,
 ): Promise<SuiteResult> {
 	const children: Array<SuiteResult | TestResult> = [];
+	// The group still announces itself — its tests are skipped, not filtered
+	// out — so a reporter can nest them under it.
+	emitter.emit("group:start", {
+		title: node.name,
+		meta: { suite: ctx.suite, fileName: ctx.file },
+	});
 	for (const child of node.children) {
 		if (child.kind === "test") {
 			const r: TestResult = {
@@ -827,10 +1054,17 @@ async function runSkippedSuite(
 			};
 			children.push(r);
 			ctx.flatTests.push(r);
+			emitTestResult(child, r, ctx);
 		} else {
 			children.push(await runSuiteSkip(child, fullName, ctx));
 		}
 	}
+	emitter.emit("group:end", {
+		title: node.name,
+		meta: { suite: ctx.suite, fileName: ctx.file },
+		hasError: false,
+		errors: [],
+	});
 	return {
 		name: node.name,
 		fullName,
@@ -922,6 +1156,10 @@ async function runSuiteSkip(
 ): Promise<SuiteResult> {
 	const fullName = joinName(parentFullName, node.name);
 	const children: Array<SuiteResult | TestResult> = [];
+	emitter.emit("group:start", {
+		title: node.name,
+		meta: { suite: ctx.suite, fileName: ctx.file },
+	});
 	for (const child of node.children) {
 		if (child.kind === "test") {
 			const r: TestResult = {
@@ -932,10 +1170,17 @@ async function runSuiteSkip(
 			};
 			children.push(r);
 			ctx.flatTests.push(r);
+			emitTestResult(child, r, ctx);
 		} else {
 			children.push(await runSuiteSkip(child, fullName, ctx));
 		}
 	}
+	emitter.emit("group:end", {
+		title: node.name,
+		meta: { suite: ctx.suite, fileName: ctx.file },
+		hasError: false,
+		errors: [],
+	});
 	return {
 		name: node.name,
 		fullName,
@@ -969,8 +1214,17 @@ export async function executeRoot(
 				? new Set(options.groups)
 				: undefined,
 		file,
+		suite: { name: options.suite ?? "default" },
 	};
 	const suites: SuiteResult[] = [];
+
+	// Japa's runner/suite frame. Helix has no named-suite layer (one process per
+	// file), so the FILE is the suite — `suite:start` carries its name.
+	// Japa skips a suite whose every test is filtered out — the suite never
+	// announces itself, though the runner still opens and closes the run.
+	const suiteRunnable = suiteHasRunnableTest(root, ctx);
+	emitter.emit("runner:start", {});
+	if (suiteRunnable) emitter.emit("suite:start", { name: ctx.suite.name });
 
 	// Root-level beforeAll: run once before anything, root-level afterAll:
 	// once after everything. Errors attribute to a synthetic test entry so
@@ -1037,6 +1291,19 @@ export async function executeRoot(
 
 	const totals = { pass: 0, fail: 0, skip: 0, todo: 0 };
 	for (const t of ctx.flatTests) totals[t.status] += 1;
+
+	const hasError = totals.fail > 0;
+	if (suiteRunnable) {
+		emitter.emit("suite:end", {
+			name: ctx.suite.name,
+			hasError,
+			errors: rootHookErrors.map(
+				(error): EmittedError => ({ phase: "setup", error }),
+			),
+		});
+	}
+	emitter.emit("runner:end", { hasError });
+
 	return {
 		file,
 		suites,

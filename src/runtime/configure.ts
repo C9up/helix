@@ -18,7 +18,10 @@
  * the other way round — the Japa "runner + plugins" topology.
  */
 
+import { type CLIArgs, readCLIArgs } from "./cli-args.js";
 import { type TestContext, TestContextRegistry } from "./context.js";
+import { type Emitter, emitter } from "./emitter.js";
+import { Runner } from "./runner.js";
 
 /**
  * What a plugin uses to extend the test context. Mirrors Japa's
@@ -34,8 +37,23 @@ export interface PluginContext {
 /** A runner-level hook (setup/teardown), run once around the whole run. */
 export type RunnerHook = () => void | Promise<void>;
 
-/** The API handed to each plugin at {@link configure} time. */
+/**
+ * The API handed to each plugin at {@link configure} time.
+ *
+ * Japa hands its plugins `{ config, cliArgs, runner, emitter }`; helix passes
+ * the same four, so a Japa plugin's body ports over unchanged, plus two helix
+ * additions — `context` (Japa reaches the same registry through the imported
+ * `TestContext` class) and `cleanup` (Japa uses `config.teardown`).
+ */
 export interface PluginApi {
+	/** The resolved options this run was configured with (Japa `config`). */
+	config: Readonly<ConfigureOptions>;
+	/** The flags the CLI forwarded to this worker (Japa `cliArgs`). */
+	cliArgs: CLIArgs;
+	/** Run-level counters, readable once the run ends (Japa `runner`). */
+	runner: Runner;
+	/** Lifecycle events — `test:start`, `group:end`, … (Japa `emitter`). */
+	emitter: Emitter;
 	/** Extend the injected test context. */
 	context: PluginContext;
 	/**
@@ -72,23 +90,51 @@ export interface ConfigureOptions {
 	 * retries })`). Overridden by `--retries` and by a per-test `test.retry(n)`.
 	 */
 	retries?: number;
+	/**
+	 * The name of the suite these tests belong to — surfaced as
+	 * `ctx.test.options.meta.suite` and on the `suite:*` events. Defaults to
+	 * `"default"`, the name Japa gives its implicit suite. Overridden by
+	 * `--suite`.
+	 */
+	suite?: string;
 }
 
 /** Teardowns to run after the run — from `configure({ teardown })` + `api.cleanup`. */
 const runnerTeardowns: RunnerHook[] = [];
 
-/** Run-level defaults from `configure({ timeout, retries })`, read by the runtime. */
-const configuredDefaults: { timeout?: number; retries?: number } = {};
+/** Run-level defaults from `configure({ timeout, retries, suite })`. */
+const configuredDefaults: {
+	timeout?: number;
+	retries?: number;
+	suite?: string;
+} = {};
 
-/** The `timeout`/`retries` defaults set by {@link configure}, if any. */
+/** The `timeout`/`retries`/`suite` defaults set by {@link configure}, if any. */
 export function getConfiguredDefaults(): Readonly<{
 	timeout?: number;
 	retries?: number;
+	suite?: string;
 }> {
 	return configuredDefaults;
 }
 
+/** Tracks the run by listening to {@link emitter} — handed to plugins. */
+const runner = new Runner(emitter);
+
+/** The options the last {@link configure} call resolved to (Japa `config`). */
+let resolvedConfig: ConfigureOptions = {};
+
 const api: PluginApi = {
+	// A getter so a plugin reads the config of the `configure()` call it is
+	// running under, not an empty object captured at module load.
+	get config(): Readonly<ConfigureOptions> {
+		return resolvedConfig;
+	},
+	get cliArgs(): CLIArgs {
+		return readCLIArgs();
+	},
+	runner,
+	emitter,
 	context: {
 		macro: (name, value) => TestContextRegistry.macro(name, value),
 		getter: (name, fn) => TestContextRegistry.getter(name, fn),
@@ -106,10 +152,12 @@ const api: PluginApi = {
  * (Japa/AdonisJS `bin/test.ts` / `tests/bootstrap.ts`).
  */
 export async function configure(options: ConfigureOptions): Promise<void> {
+	resolvedConfig = options;
 	if (options.timeout !== undefined)
 		configuredDefaults.timeout = options.timeout;
 	if (options.retries !== undefined)
 		configuredDefaults.retries = options.retries;
+	if (options.suite !== undefined) configuredDefaults.suite = options.suite;
 	for (const fn of options.setup ?? []) await fn();
 	for (const plugin of options.plugins ?? []) {
 		await plugin(api);

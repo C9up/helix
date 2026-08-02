@@ -51,6 +51,12 @@ const FLAG_SPEC = {
 		kind: "boolean",
 		help: "Require ALL --tags instead of any (Japa parity)",
 	},
+	// Japa's parser accepts both spellings (`matchAll` with `match-all` as its
+	// alias), so both work here too.
+	matchAll: {
+		kind: "boolean",
+		help: "Alias of --match-all",
+	},
 	tests: {
 		kind: "string",
 		help: "Comma-separated exact test titles to run (Japa --tests)",
@@ -58,6 +64,14 @@ const FLAG_SPEC = {
 	groups: {
 		kind: "string",
 		help: "Comma-separated exact group titles to run (Japa --groups)",
+	},
+	suite: {
+		kind: "string",
+		help: "Name of the suite these files belong to (Japa meta.suite)",
+	},
+	files: {
+		kind: "string",
+		help: "Comma-separated substrings matched against test file paths (Japa --files)",
 	},
 	watch: { kind: "boolean", help: "Watch mode — re-run on file changes" },
 	"watch-debounce": {
@@ -208,6 +222,39 @@ function findTsxLoader() {
 	return undefined;
 }
 
+/** Trailing `.test.ts` / `.spec.js` / … stripped, so `--files=user` matches `user.test.ts`. */
+const TEST_SUFFIX = /(\.(test|spec))?\.[cm]?[jt]sx?$/;
+
+/**
+ * Japa's `--files` rule: keep a file when its path ENDS WITH the filter, or
+ * when every segment of the filter (read right-to-left, `*` matching anything)
+ * matches the corresponding path segment of the file minus its test suffix.
+ * `--files=user` keeps `tests/unit/user.test.ts`; `--files=unit/*` keeps
+ * everything under a `unit` directory.
+ */
+function filterByFileFilters(files, raw) {
+	if (raw === undefined) return files;
+	const filters = String(raw)
+		.split(",")
+		.map((f) => f.trim())
+		.filter((f) => f.length > 0);
+	if (filters.length === 0) return files;
+	return files.filter((file) => {
+		const unix = file.split(path.sep).join("/");
+		const withoutSuffix = unix.replace(TEST_SUFFIX, "");
+		return filters.some((filter) => {
+			if (unix.endsWith(filter)) return true;
+			const filterSegments = filter.split("/").reverse();
+			const fileSegments = withoutSuffix.split("/").reverse();
+			return filterSegments.every(
+				(segment, i) =>
+					fileSegments[i] !== undefined &&
+					(segment === "*" || fileSegments[i].endsWith(segment)),
+			);
+		});
+	});
+}
+
 function printHelp() {
 	const lines = [
 		"helix — Vitest-compatible test runner",
@@ -318,7 +365,10 @@ async function main() {
 		).href;
 		const { discover } = await import(discoverModule);
 
-		const expanded = await expandPositionals(parsed.positional, discover);
+		const expanded = filterByFileFilters(
+			await expandPositionals(parsed.positional, discover),
+			parsed.flags.files,
+		);
 		const tsxLoader = findTsxLoader();
 		if (parsed.flags.tsx !== false && !tsxLoader) {
 			process.stderr.write(
@@ -402,10 +452,15 @@ async function main() {
 		if (parsed.flags.retries !== undefined) {
 			process.env.HELIX_RETRIES = String(parsed.flags.retries);
 		}
+		// Not used to resolve the timeout (the orchestrator carries it in the
+		// run instruction) — exported so a plugin can read it off `api.cliArgs`.
+		if (parsed.flags.timeout !== undefined) {
+			process.env.HELIX_TIMEOUT = String(parsed.flags.timeout);
+		}
 		if (parsed.flags.tags !== undefined) {
 			process.env.HELIX_TAGS = String(parsed.flags.tags);
 		}
-		if (parsed.flags["match-all"] === true) {
+		if (parsed.flags["match-all"] === true || parsed.flags.matchAll === true) {
 			process.env.HELIX_MATCH_ALL = "1";
 		}
 		if (parsed.flags.tests !== undefined) {
@@ -413,6 +468,12 @@ async function main() {
 		}
 		if (parsed.flags.groups !== undefined) {
 			process.env.HELIX_GROUPS = String(parsed.flags.groups);
+		}
+		if (parsed.flags.suite !== undefined) {
+			process.env.HELIX_SUITE = String(parsed.flags.suite);
+		}
+		if (parsed.flags.files !== undefined) {
+			process.env.HELIX_FILES = String(parsed.flags.files);
 		}
 		const outcome = await run(cfg);
 		return outcome.exitCode;

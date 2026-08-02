@@ -107,6 +107,25 @@ export function getFrameTest(): TestInstance | undefined {
 	return storage.getStore()?.test;
 }
 
+/** The running test, or `undefined` outside one (Japa `getActiveTest`). */
+export function getActiveTest(): TestInstance | undefined {
+	return getFrameTest();
+}
+
+/**
+ * The running test, or a thrown error outside one — Japa's
+ * `getActiveTestOrFail`, the guard a plugin uses before touching test state.
+ */
+export function getActiveTestOrFail(): TestInstance {
+	const test = getFrameTest();
+	if (test === undefined) {
+		throw new Error(
+			"getActiveTestOrFail(): no test is running. Call it from inside a test body, a hook, or a resource macro.",
+		);
+	}
+	return test;
+}
+
 /** Record whether the test errored — read by the cleanup/outcome drains. */
 export function setFrameOutcome(hadError: boolean): void {
 	const frame = storage.getStore();

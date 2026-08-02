@@ -1,0 +1,194 @@
+/**
+ * Runner events — the Japa `Emitter` surface.
+ *
+ * Japa's plugin/reporter topology is built on an event emitter: a plugin
+ * receives `{ config, cliArgs, runner, emitter }` and subscribes to
+ * `runner:start`, `suite:start`, `group:start`, `test:start`, … to observe the
+ * run. Helix emits the SAME event names with the SAME node shapes
+ * (`TestStartNode`, `TestEndNode`, `GroupStartNode`, …) so a Japa reporter or
+ * plugin can be ported without rewriting its listeners.
+ *
+ * Two named deviations from `@japa/core`:
+ *   - `errors[].error` is a {@link SerializedError} (`{ name, message, stack }`),
+ *     not an `Error` instance — helix serializes errors at the point of capture
+ *     because results cross the worker→CLI IPC boundary.
+ *   - `suite:start` / `suite:end` carry the test FILE name. Helix has no named
+ *     suite layer (it runs one process per file), so the file is the suite.
+ */
+
+import type { SerializedError } from "./run.js";
+
+/** The lifecycle phase an error was raised in (Japa parity). */
+export type ErrorPhase =
+	| "setup"
+	| "test"
+	| "setup:cleanup"
+	| "teardown"
+	| "teardown:cleanup"
+	| "test:cleanup";
+
+/** One captured failure, tagged with the phase it happened in. */
+export interface EmittedError {
+	phase: ErrorPhase;
+	error: SerializedError;
+}
+
+/** A test title, before and after dataset interpolation (Japa parity). */
+export interface EmittedTitle {
+	original: string;
+	expanded: string;
+}
+
+/** The dataset row a test instance was expanded from. */
+export interface EmittedDataset {
+	size: number;
+	index: number;
+	row: unknown;
+}
+
+/** Shared shape of `test:start` / `test:end` (Japa `TestOptions`). */
+interface TestNodeBase {
+	title: EmittedTitle;
+	tags: string[];
+	timeout: number;
+	retries?: number;
+	retryAttempt?: number;
+	isTodo?: boolean;
+	isSkipped?: boolean;
+	isFailing?: boolean;
+	isPinned: boolean;
+	meta: Record<string, unknown>;
+	dataset?: EmittedDataset;
+}
+
+/** Payload of `test:start`. */
+export type TestStartNode = TestNodeBase;
+
+/** Payload of `test:end`. */
+export type TestEndNode = TestNodeBase & {
+	duration: number;
+	hasError: boolean;
+	errors: EmittedError[];
+};
+
+/** Payload of `group:start`. */
+export interface GroupStartNode {
+	title: string;
+	meta: Record<string, unknown>;
+}
+
+/** Payload of `group:end`. */
+export type GroupEndNode = GroupStartNode & {
+	hasError: boolean;
+	errors: EmittedError[];
+};
+
+/** Payload of `suite:start` — helix's suite is the test file. */
+export interface SuiteStartNode {
+	name: string;
+}
+
+/** Payload of `suite:end`. */
+export type SuiteEndNode = SuiteStartNode & {
+	hasError: boolean;
+	errors: EmittedError[];
+};
+
+/**
+ * Payload of `runner:start`. Japa types this as `{}`; helix spells the same
+ * "no fields" shape as an empty record so no lint suppression is needed.
+ */
+export type RunnerStartNode = Record<string, never>;
+
+/** Payload of `runner:end`. */
+export interface RunnerEndNode {
+	hasError: boolean;
+}
+
+/** Every event the runtime emits, with its payload (Japa `RunnerEvents`). */
+export interface RunnerEvents {
+	"test:start": TestStartNode;
+	"test:end": TestEndNode;
+	"group:start": GroupStartNode;
+	"group:end": GroupEndNode;
+	"suite:start": SuiteStartNode;
+	"suite:end": SuiteEndNode;
+	"runner:start": RunnerStartNode;
+	"runner:end": RunnerEndNode;
+}
+
+/** A listener for one event. */
+export type EventHandler<E extends keyof RunnerEvents> = (
+	payload: RunnerEvents[E],
+) => void;
+
+/**
+ * A registered listener. `fn` is declared as a METHOD so its parameter is
+ * bivariant: a concrete `EventHandler<"test:end">` assigns to it without a
+ * cast, while `emit` can still invoke it with the union payload.
+ */
+interface StoredListener {
+	fn(payload: RunnerEvents[keyof RunnerEvents]): void;
+}
+
+/**
+ * A typed event emitter over {@link RunnerEvents}. Deliberately minimal — `on`
+ * / `once` / `off` / `emit`, the surface a Japa reporter or plugin uses. A
+ * throwing listener is reported on stderr and never fails the run.
+ */
+export class Emitter {
+	readonly #listeners = new Map<keyof RunnerEvents, Set<StoredListener>>();
+
+	/** Subscribe to an event. Returns `this` for chaining. */
+	on<E extends keyof RunnerEvents>(event: E, handler: EventHandler<E>): this {
+		const set = this.#listeners.get(event) ?? new Set<StoredListener>();
+		set.add({ fn: handler });
+		this.#listeners.set(event, set);
+		return this;
+	}
+
+	/** Subscribe to the next occurrence of an event only. */
+	once<E extends keyof RunnerEvents>(event: E, handler: EventHandler<E>): this {
+		const wrapped: EventHandler<E> = (payload) => {
+			this.off(event, wrapped);
+			handler(payload);
+		};
+		return this.on(event, wrapped);
+	}
+
+	/** Remove a previously registered listener. */
+	off<E extends keyof RunnerEvents>(event: E, handler: EventHandler<E>): this {
+		const set = this.#listeners.get(event);
+		if (set === undefined) return this;
+		for (const entry of set) {
+			if (entry.fn === handler) set.delete(entry);
+		}
+		return this;
+	}
+
+	/** Drop every listener (used between runs in the same process). */
+	clear(): void {
+		this.#listeners.clear();
+	}
+
+	/** Broadcast an event. Listener failures are isolated. */
+	emit<E extends keyof RunnerEvents>(event: E, payload: RunnerEvents[E]): void {
+		const set = this.#listeners.get(event);
+		if (set === undefined) return;
+		// Snapshot: a `once` listener removes itself while we iterate.
+		for (const entry of [...set]) {
+			try {
+				entry.fn(payload);
+			} catch (err) {
+				console.error(`[helix] "${event}" listener failed:`, err);
+			}
+		}
+	}
+}
+
+/**
+ * The process-wide emitter. Helix runs one file per process, so a module-level
+ * instance is the run's emitter — the same object plugins receive at
+ * `configure()` time and the runtime emits on.
+ */
+export const emitter = new Emitter();

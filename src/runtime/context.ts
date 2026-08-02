@@ -36,6 +36,20 @@ import { registerTestCleanup, type TestCleanup } from "./test-context.js";
  * is exactly how Japa's `TestContext` works.
  */
 export class TestContext {
+	/**
+	 * Add a shared property to every test context — Japa's
+	 * `TestContext.macro('sleep', fn)`, callable on the class itself so a Japa
+	 * plugin's registration code ports over unchanged.
+	 */
+	static macro(name: string, value: unknown): void {
+		TestContextRegistry.macro(name, value);
+	}
+
+	/** Add a lazily-computed, per-context property (Japa `TestContext.getter`). */
+	static getter(name: string, fn: Getter): void {
+		TestContextRegistry.getter(name, fn);
+	}
+
 	/** Chai-flavored assertions (`@japa/assert` parity), alongside `expect`. */
 	readonly assert: Assert;
 	/** The running test's own instance — name, options, dataset (Japa `ctx.test`). */
@@ -59,7 +73,7 @@ export class TestContext {
 
 // Invoked with `this` bound to the context AND the context as the first arg, so
 // both Japa's `function () { return this.foo }` and `(ctx) => ctx.foo` work.
-type Getter = (this: TestContext, ctx: TestContext) => unknown;
+export type Getter = (this: TestContext, ctx: TestContext) => unknown;
 
 const macros = new Map<string, unknown>();
 const getters = new Map<string, Getter>();

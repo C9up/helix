@@ -128,9 +128,10 @@ export interface TestInstance {
 		/** Whether this is a `todo` test. Always `false` inside a running test. */
 		isTodo: boolean;
 		/**
-		 * Free-form metadata bag (Japa `options.meta`). `fileName` is filled when
-		 * known; `group` holds the enclosing {@link Group} instance (or `undefined`
-		 * outside a group). `suite` is absent — helix has no named-suite layer.
+		 * Free-form metadata bag (Japa `options.meta`): `fileName`, `group` (the
+		 * enclosing {@link Group} instance, or `undefined` outside a group),
+		 * `suite` (`{ name }` — `"default"` unless `configure({ suite })` or
+		 * `--suite` names it, exactly like Japa's implicit suite), and `abort`.
 		 */
 		meta: Record<string, unknown>;
 	};

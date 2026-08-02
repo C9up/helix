@@ -1,0 +1,79 @@
+/**
+ * The run's command-line arguments, as seen from inside a worker.
+ *
+ * `bin/helix.js` parses the flags in the CLI process and forwards them to every
+ * worker through the environment (`HELIX_TAGS`, `HELIX_TESTS`, …), because a
+ * worker is spawned by either orchestrator (Node pool or the Rust engine) with
+ * a fixed instruction shape. Reading them back here is what lets both the
+ * runtime and a plugin (`api.cliArgs`, Japa parity) see the same filters.
+ *
+ * Named deviation from Japa's `CLIArgs`: values are parsed (`string[]`,
+ * `number`, `boolean`) rather than kept as raw CLI strings — they have already
+ * been through the parser once, on the CLI side.
+ */
+
+/** Parsed CLI flags for the current run. */
+export interface CLIArgs {
+	/** `--tags` — `~@tag`/`!@tag` entries exclude. */
+	tags?: string[];
+	/** `--tests` — exact test titles. */
+	tests?: string[];
+	/** `--groups` — exact group titles. */
+	groups?: string[];
+	/** `--match-all` — require every `--tags` entry instead of any. */
+	matchAll?: boolean;
+	/** `--timeout`, in ms. */
+	timeout?: number;
+	/** `--retries` — extra attempts on failure. */
+	retries?: number;
+	/** `--grep` — helix extra: regex/substring over the full test name. */
+	grep?: string;
+	/** `--suite` — the suite name these files belong to. */
+	suite?: string;
+	/** `--files` — substrings matched against the test file path (Japa `--files`). */
+	files?: string[];
+}
+
+/** Comma-separated env list → trimmed non-empty entries, or undefined. */
+export function envList(name: string): string[] | undefined {
+	const raw = process.env[name];
+	if (raw === undefined || raw === "") return undefined;
+	const items = raw
+		.split(",")
+		.map((t) => t.trim())
+		.filter((t) => t.length > 0);
+	return items.length > 0 ? items : undefined;
+}
+
+/** A non-negative integer env var, or undefined when unset/invalid. */
+export function envCount(name: string): number | undefined {
+	const raw = process.env[name];
+	if (raw === undefined || raw === "") return undefined;
+	const n = Number.parseInt(raw, 10);
+	return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+/** `--tags` as forwarded by the CLI. */
+export function envTags(): string[] | undefined {
+	return envList("HELIX_TAGS");
+}
+
+/** `--match-all` as forwarded by the CLI. */
+export function envMatchAll(): boolean | undefined {
+	return process.env.HELIX_MATCH_ALL === "1" ? true : undefined;
+}
+
+/** Every CLI flag the current worker can see. */
+export function readCLIArgs(): CLIArgs {
+	return {
+		tags: envTags(),
+		tests: envList("HELIX_TESTS"),
+		groups: envList("HELIX_GROUPS"),
+		matchAll: envMatchAll(),
+		timeout: envCount("HELIX_TIMEOUT"),
+		retries: envCount("HELIX_RETRIES"),
+		grep: process.env.HELIX_GREP,
+		suite: process.env.HELIX_SUITE,
+		files: envList("HELIX_FILES"),
+	};
+}
