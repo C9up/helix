@@ -46,6 +46,10 @@ export interface NativeRunConfig {
 	readonly nodeBin?: string;
 	readonly nodeArgs?: readonly string[];
 	readonly useColors?: boolean;
+	/** Activate several reporters at once (Japa `--reporters`). */
+	readonly reporters?: readonly string[];
+	/** Stop the run at the first failing file (Japa `--bail`). */
+	readonly bail?: boolean;
 }
 
 /** Mirror of the Rust `SummaryPayload` (camelCase). */

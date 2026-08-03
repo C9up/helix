@@ -11,6 +11,7 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use ream_test_core::ipc::{FileResult, WorkerError};
 use ream_test_core::{
     discover, reporter::Reporter, DiscoveryOptions, DotReporter, JsonReporter, SpecReporter,
     Summary,
@@ -35,6 +36,12 @@ pub struct RunConfig {
     pub timeout_ms: Option<u32>,
     /// `"dot" | "spec" | "json"`. Default `"spec"`.
     pub reporter: Option<String>,
+    /// Activate several reporters at once (Japa `--reporters=spec,json`).
+    /// Takes precedence over `reporter` when it holds more than one name.
+    #[napi(ts_type = "string[] | undefined")]
+    pub reporters: Option<Vec<String>>,
+    /// Stop the run at the first failing file (Japa `--bail`).
+    pub bail: Option<bool>,
     /// Path to the compiled worker entry (points at the JS shim that calls
     /// `runtime/worker.ts#main()`). Required — there's no sensible default
     /// from Rust's perspective.
@@ -59,6 +66,54 @@ pub struct SummaryPayload {
     pub exit_code: u32,
     /// Full summary as a JSON string (clients that want detail parse this).
     pub json: String,
+}
+
+/// One reporter from its CLI-style name; unknown names fall back to Spec,
+/// same as the TypeScript factory.
+fn make_reporter(kind: &str, use_colors: bool) -> Box<dyn Reporter + Send> {
+    match kind {
+        "dot" => Box::new(DotReporter::new(std::io::stdout())),
+        "json" => Box::new(JsonReporter::new(std::io::stdout())),
+        _ => Box::new(SpecReporter::new(std::io::stdout(), use_colors)),
+    }
+}
+
+/// Fans every reporter callback out to a list of reporters — the Rust side of
+/// Japa's `--reporters=spec,json`.
+struct MultiReporter {
+    reporters: Vec<Box<dyn Reporter + Send>>,
+}
+
+impl MultiReporter {
+    fn new(reporters: Vec<Box<dyn Reporter + Send>>) -> Self {
+        Self { reporters }
+    }
+}
+
+impl Reporter for MultiReporter {
+    fn on_file_start(&mut self, file: &str) {
+        for r in &mut self.reporters {
+            r.on_file_start(file);
+        }
+    }
+
+    fn on_file_result(&mut self, result: &FileResult) {
+        for r in &mut self.reporters {
+            r.on_file_result(result);
+        }
+    }
+
+    fn on_file_error(&mut self, error: &WorkerError) {
+        for r in &mut self.reporters {
+            r.on_file_error(error);
+        }
+    }
+
+    fn on_summary(&mut self, summary: &Summary) {
+        for r in &mut self.reporters {
+            r.on_summary(summary);
+        }
+    }
 }
 
 #[napi]
@@ -88,15 +143,21 @@ pub async fn run(config: RunConfig) -> Result<SummaryPayload> {
         .min(files.len().max(1));
     let timeout = Duration::from_millis(config.timeout_ms.unwrap_or(60_000) as u64);
 
-    let reporter_kind = config.reporter.unwrap_or_else(|| "spec".to_string());
     let use_colors = config.use_colors.unwrap_or(true);
-    let reporter: Arc<Mutex<Box<dyn Reporter + Send>>> = match reporter_kind.as_str() {
-        "dot" => Arc::new(Mutex::new(Box::new(DotReporter::new(std::io::stdout())))),
-        "json" => Arc::new(Mutex::new(Box::new(JsonReporter::new(std::io::stdout())))),
-        _ => Arc::new(Mutex::new(Box::new(SpecReporter::new(
-            std::io::stdout(),
-            use_colors,
-        )))),
+    // A list wins over the single name; either way an empty list falls back to
+    // the default reporter.
+    let kinds: Vec<String> = match config.reporters {
+        Some(list) if !list.is_empty() => list,
+        _ => vec![config.reporter.unwrap_or_else(|| "spec".to_string())],
+    };
+    let built: Vec<Box<dyn Reporter + Send>> = kinds
+        .iter()
+        .map(|kind| make_reporter(kind, use_colors))
+        .collect();
+    let reporter: Arc<Mutex<Box<dyn Reporter + Send>>> = if built.len() == 1 {
+        Arc::new(Mutex::new(built.into_iter().next().expect("one reporter")))
+    } else {
+        Arc::new(Mutex::new(Box::new(MultiReporter::new(built))))
     };
 
     let pool_cfg = pool::PoolConfig {
@@ -105,6 +166,7 @@ pub async fn run(config: RunConfig) -> Result<SummaryPayload> {
         worker_entry: config.worker_entry,
         threads,
         timeout,
+        bail: config.bail.unwrap_or(false),
     };
 
     let (files_ok, errors) = pool::run_pool(files, pool_cfg, reporter.clone()).await?;

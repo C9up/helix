@@ -374,7 +374,7 @@ async function main() {
 	).href;
 	try {
 		// Probe by resolving through dynamic import; Node throws synchronously.
-		const { run } = await import(runModule);
+		const { run, runSuites } = await import(runModule);
 		const discoverModule = pathToFileURL(
 			useDist
 				? path.resolve(here, "../dist/cli/discover.js")
@@ -547,8 +547,11 @@ async function main() {
 		}
 
 		// Suites run one after another (Japa runs them in sequence too), each
-		// with its own files, timeout, retries and `meta.suite` name.
-		let worstExit = 0;
+		// with its own files, timeout, retries and `meta.suite` name. The
+		// sequence is handed to the orchestrator as a whole so watch mode
+		// wraps ALL of it in one watcher and the `--failed` cache holds every
+		// suite's failures.
+		const steps = [];
 		for (const suite of selectedSuites) {
 			const suiteFiles = filterByFileFilters(
 				await resolveSuiteFiles(suite, process.cwd(), cfg.discovery),
@@ -558,19 +561,25 @@ async function main() {
 				process.stderr.write(`helix: suite "${suite.name}": no test files\n`);
 				continue;
 			}
-			process.env.HELIX_SUITE = suite.name;
-			if (suite.retries !== undefined) {
-				process.env.HELIX_RETRIES = String(suite.retries);
-			}
-			const outcome = await run({
-				...cfg,
-				files: suiteFiles,
-				timeoutMs: cfg.timeoutMs ?? suite.timeout,
+			// A suite's `retries` overrides `--retries` for that suite only. Set
+			// on EVERY step (empty = unset, see `envCount`) so a suite that
+			// declares none doesn't inherit the previous suite's value.
+			const retries = suite.retries ?? parsed.flags.retries;
+			const env = {
+				HELIX_SUITE: suite.name,
+				HELIX_RETRIES: retries === undefined ? "" : String(retries),
+			};
+			steps.push({
+				env,
+				config: {
+					...cfg,
+					files: suiteFiles,
+					timeoutMs: cfg.timeoutMs ?? suite.timeout,
+				},
 			});
-			worstExit = Math.max(worstExit, outcome.exitCode);
-			if (parsed.flags.bail === true && outcome.exitCode !== 0) break;
 		}
-		return worstExit;
+		const outcome = await runSuites(steps, cfg);
+		return outcome.exitCode;
 	} catch (err) {
 		// Re-exec under tsx when Node can't satisfy the TS-source imports
 		// natively. Two failure shapes seen in the wild:

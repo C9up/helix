@@ -139,15 +139,42 @@ function defaultWorkerEntry(): string {
 /**
  * Plain-path execution via the native `ream-test-napi` engine: it discovers
  * (skipped here — we pass the resolved `files`), spawns the worker pool, drives
- * the reporter, and returns aggregated totals. Per-file detail is carried in
- * `payload.json` (same shape as `Summary`) for callers that need it; the CLI
- * only consumes `exitCode`, and the Rust reporter already streamed per-file
- * output, so the reconstructed `Summary` keeps the detail arrays empty.
+ * the reporter, and returns the run's `Summary`.
+ *
+ * The engine serializes the FULL summary — per file, per test — into
+ * `payload.json`, so the native path is as detailed as the TypeScript pool.
+ * Only if that payload were unreadable would we fall back to the flat totals.
  */
+function parseNativeSummary(
+	json: string,
+	totals: Totals,
+	durationMs: number,
+): Summary {
+	try {
+		const parsed: unknown = JSON.parse(json);
+		if (parsed !== null && typeof parsed === "object") {
+			const files = Reflect.get(parsed, "files");
+			const fileErrors = Reflect.get(parsed, "fileErrors");
+			if (Array.isArray(files)) {
+				return {
+					totals,
+					files,
+					fileErrors: Array.isArray(fileErrors) ? fileErrors : [],
+					durationMs,
+				};
+			}
+		}
+	} catch {
+		// Fall through to the flat summary below.
+	}
+	return { totals, files: [], fileErrors: [], durationMs };
+}
+
 async function runNative(
 	config: RunConfig,
 	root: string,
 	files: string[],
+	writeCache: boolean,
 ): Promise<RunOutcome> {
 	const { run: nativeRun } = getNative();
 	const payload = await nativeRun({
@@ -156,6 +183,8 @@ async function runNative(
 		threads: config.threads,
 		timeoutMs: config.timeoutMs,
 		reporter: config.reporter,
+		reporters: config.reporters,
+		bail: config.bail,
 		workerEntry: config.workerEntry ?? defaultWorkerEntry(),
 		nodeBin: config.nodeBin ?? process.execPath,
 		nodeArgs: config.nodeArgs,
@@ -168,12 +197,9 @@ async function runNative(
 		todo: payload.todo,
 		fileErrors: payload.fileErrors,
 	};
-	const summary: Summary = {
-		totals,
-		files: [],
-		fileErrors: [],
-		durationMs: payload.durationMs,
-	};
+	const summary = parseNativeSummary(payload.json, totals, payload.durationMs);
+	// The `--failed` cache is fed by EVERY run, native or not.
+	if (writeCache) await writeFailedCache(root, summary);
 	return { summary, exitCode: payload.exitCode };
 }
 
@@ -187,7 +213,20 @@ export async function run(config: RunConfig): Promise<RunOutcome> {
 	// letting app code gate on `NODE_ENV === 'test'`).
 	process.env.NODE_ENV = "test";
 
-	if (!config.watch?.enabled) return runOnce(config);
+	const watch = config.watch;
+	if (!watch?.enabled) return runOnce(config);
+	return watching({ ...config, watch }, () => runOnce(config));
+}
+
+/**
+ * Wrap ONE full pass in the file watcher. Split out of `run()` because a
+ * multi-suite run is a single watched pass: a watcher per suite would settle
+ * only on Ctrl-C, so the second suite would never start.
+ */
+async function watching(
+	config: RunConfig & { watch: WatchOptions },
+	pass: () => Promise<RunOutcome>,
+): Promise<RunOutcome> {
 	const root = path.isAbsolute(config.root)
 		? config.root
 		: path.resolve(config.root);
@@ -212,8 +251,96 @@ export async function run(config: RunConfig): Promise<RunOutcome> {
 			debounceMs,
 			signal: config.watch.signal,
 		},
-		() => runOnce(config),
+		pass,
 	);
+}
+
+/** One suite of a sequenced run: its config, plus the env its workers need. */
+export interface SuiteRun {
+	/**
+	 * Applied to `process.env` right before this suite runs — how the suite's
+	 * name and retry count reach the workers, which inherit this process's env.
+	 */
+	env?: Readonly<Record<string, string>>;
+	config: RunConfig;
+}
+
+/**
+ * Run suites one after another, the way Japa does. Two things only this level
+ * can get right:
+ *   - watch mode wraps the WHOLE sequence in one watcher, so every suite runs
+ *     on every pass;
+ *   - the `--failed` cache is written once, from the merged summary, so a
+ *     `--failed` re-run replays the failures of every suite.
+ * `base` carries the run-wide options — watch wiring and `bail`.
+ */
+export async function runSuites(
+	suites: readonly SuiteRun[],
+	base: RunConfig,
+): Promise<RunOutcome> {
+	process.env.NODE_ENV = "test";
+	const root = path.isAbsolute(base.root) ? base.root : path.resolve(base.root);
+
+	const pass = async (): Promise<RunOutcome> => {
+		const outcomes: RunOutcome[] = [];
+		for (const suite of suites) {
+			for (const [key, value] of Object.entries(suite.env ?? {})) {
+				process.env[key] = value;
+			}
+			const outcome = await runOnce(
+				{ ...suite.config, watch: undefined },
+				false,
+			);
+			outcomes.push(outcome);
+			if (base.bail === true && outcome.exitCode !== 0) break;
+		}
+		const merged = mergeOutcomes(outcomes);
+		await writeFailedCache(root, merged.summary);
+		return merged;
+	};
+
+	if (!base.watch?.enabled) return pass();
+	return watching({ ...base, watch: base.watch }, pass);
+}
+
+/** Fold a sequence of suite outcomes into the one the CLI returns. */
+function mergeOutcomes(outcomes: readonly RunOutcome[]): RunOutcome {
+	const totals: Totals = { pass: 0, fail: 0, skip: 0, todo: 0, fileErrors: 0 };
+	const summary: Summary = {
+		totals,
+		files: [],
+		fileErrors: [],
+		durationMs: 0,
+	};
+	const merged: RunOutcome = { summary, exitCode: 0 };
+	for (const outcome of outcomes) {
+		totals.pass += outcome.summary.totals.pass;
+		totals.fail += outcome.summary.totals.fail;
+		totals.skip += outcome.summary.totals.skip;
+		totals.todo += outcome.summary.totals.todo;
+		totals.fileErrors += outcome.summary.totals.fileErrors;
+		summary.files.push(...outcome.summary.files);
+		summary.fileErrors.push(...outcome.summary.fileErrors);
+		summary.durationMs += outcome.summary.durationMs;
+		merged.exitCode = Math.max(merged.exitCode, outcome.exitCode);
+		// Coverage is per-suite (each suite opens its own session); keep the last
+		// report and every violation, so no threshold failure is swallowed.
+		if (outcome.coverage) merged.coverage = outcome.coverage;
+		if (outcome.diffCoverage) merged.diffCoverage = outcome.diffCoverage;
+		if (outcome.coverageViolations?.length) {
+			merged.coverageViolations = [
+				...(merged.coverageViolations ?? []),
+				...outcome.coverageViolations,
+			];
+		}
+		if (outcome.diffCoverageViolations?.length) {
+			merged.diffCoverageViolations = [
+				...(merged.diffCoverageViolations ?? []),
+				...outcome.diffCoverageViolations,
+			];
+		}
+	}
+	return merged;
 }
 
 /** Aggregated coverage + diff-coverage results threaded back into `RunOutcome`. */
@@ -373,7 +500,16 @@ async function overlayDiffCoverage(
 	}
 }
 
-async function runOnce(config: RunConfig): Promise<RunOutcome> {
+/**
+ * One pass over the resolved files. `writeCache` is off when the caller runs a
+ * SEQUENCE of suites and writes the `--failed` cache itself, from the merged
+ * summary — otherwise each suite would overwrite the previous suite's failures
+ * and `--failed` would replay only the last one.
+ */
+async function runOnce(
+	config: RunConfig,
+	writeCache = true,
+): Promise<RunOutcome> {
 	const started = Date.now();
 	const root = path.isAbsolute(config.root)
 		? config.root
@@ -386,18 +522,15 @@ async function runOnce(config: RunConfig): Promise<RunOutcome> {
 	// layer is active — a pluggable reporter instance, coverage, or diff-cov,
 	// none of which the Rust `run` exposes yet. Watch is already unwrapped by
 	// `run()` above, so it never reaches here.
-	// `--bail` and `--failed` need per-test detail and cross-file control, and
-	// several reporters need the TS reporter chain — none of which the native
-	// engine exposes. They keep the run on the TypeScript pool.
+	// The native engine owns discovery + pool + reporter + summary — including
+	// `--bail` and a reporter chain. Only the TS-only layers (a pluggable
+	// reporter INSTANCE, coverage, diff coverage) move a run onto the TS pool.
 	const needsTsPool =
 		config.reporterInstance !== undefined ||
 		config.coverage?.enabled === true ||
-		config.diffCoverage?.enabled === true ||
-		config.bail === true ||
-		config.failed === true ||
-		(config.reporters !== undefined && config.reporters.length > 1);
+		config.diffCoverage?.enabled === true;
 	if (!needsTsPool) {
-		return runNative(config, root, files);
+		return runNative(config, root, files, writeCache);
 	}
 
 	const reporter =
@@ -435,7 +568,7 @@ async function runOnce(config: RunConfig): Promise<RunOutcome> {
 		reporter.onSummary(summary);
 		// Feed the `--failed` cache with this run's failures (Japa writes it from
 		// a runner teardown).
-		await writeFailedCache(root, summary);
+		if (writeCache) await writeFailedCache(root, summary);
 
 		const cov: CoverageOutcome =
 			session && config.coverage

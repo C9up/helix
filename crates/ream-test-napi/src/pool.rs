@@ -11,6 +11,7 @@ use ream_test_core::ipc::{FileResult, WorkerError, WorkerOutgoing};
 use ream_test_core::reporter::Reporter;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -29,6 +30,9 @@ pub struct PoolConfig {
     pub worker_entry: String,
     pub threads: usize,
     pub timeout: Duration,
+    /// Stop the run once a file reports a failure (Japa `--bail`). Files
+    /// already spawned finish; files still queued are never started.
+    pub bail: bool,
 }
 
 pub async fn run_pool(
@@ -38,12 +42,16 @@ pub async fn run_pool(
 ) -> Result<(Vec<FileResult>, Vec<WorkerError>)> {
     let semaphore = Arc::new(Semaphore::new(cfg.threads.max(1)));
     let cfg = Arc::new(cfg);
+    // Under `--bail`, the first failing file closes the gate and whatever is
+    // still queued never starts.
+    let gate_closed = Arc::new(AtomicBool::new(false));
 
     let mut tasks = FuturesUnordered::new();
     for file in files {
         let sem = semaphore.clone();
         let cfg = cfg.clone();
         let reporter = reporter.clone();
+        let gate_closed = gate_closed.clone();
         tasks.push(tokio::spawn(async move {
             // If the semaphore was closed (shouldn't happen in normal flow),
             // surface as a worker error rather than panicking the task.
@@ -57,6 +65,11 @@ pub async fn run_pool(
                     });
                 }
             };
+            // Checked AFTER the permit: an earlier file may have failed while
+            // this one waited for a slot.
+            if cfg.bail && gate_closed.load(Ordering::SeqCst) {
+                return Ok(None);
+            }
             let path_str = file.to_string_lossy().into_owned();
             {
                 let mut r = reporter.lock().await;
@@ -65,10 +78,20 @@ pub async fn run_pool(
             let outcome = run_one_file(&file, &cfg).await;
             let mut r = reporter.lock().await;
             match &outcome {
-                Ok(result) => r.on_file_result(result),
-                Err(err) => r.on_file_error(err),
+                Ok(result) => {
+                    r.on_file_result(result);
+                    if cfg.bail && result.totals.fail > 0 {
+                        gate_closed.store(true, Ordering::SeqCst);
+                    }
+                }
+                Err(err) => {
+                    r.on_file_error(err);
+                    if cfg.bail {
+                        gate_closed.store(true, Ordering::SeqCst);
+                    }
+                }
             }
-            outcome
+            outcome.map(Some)
         }));
     }
 
@@ -78,7 +101,9 @@ pub async fn run_pool(
         let outcome = join
             .map_err(|e| Error::from_reason(format!("worker task join failed: {}", e)))?;
         match outcome {
-            Ok(fr) => results.push(fr),
+            // `None` = the file was never started because the bail gate closed.
+            Ok(Some(fr)) => results.push(fr),
+            Ok(None) => {}
             Err(err) => errors.push(err),
         }
     }

@@ -44,6 +44,11 @@ rides on the `suite:*` events. Without a config file — or when a
 positional is not a suite name — positionals stay paths, exactly as
 before.
 
+Suites run one after another, and the sequence is what the run-wide
+flags act on: `--watch` re-runs every selected suite on each change (one
+watcher for the whole sequence), `--bail` stops at the suite that failed,
+and the `--failed` cache holds every suite's failures.
+
 Named deviation from Adonis: `files` entries are directories or file
 paths resolved through helix's suffix-based discovery, not a glob
 engine. A trailing wildcard is understood (`tests/unit/**`, and
@@ -61,8 +66,9 @@ extra: a regex or substring over the full test name.
 `--bail` stops at the first failure; `--bail-layer=group|suite|runner`
 says how far that reaches. Within a file the remaining tests are
 reported as SKIPPED, like Japa. Files not yet started are dropped
-rather than skipped — a named deviation: helix runs one process per
-file, so a file that never starts has no tests to skip.
+rather than skipped — a named deviation that follows from per-file
+process isolation: reporting them as skipped would mean spawning every
+remaining file just to collect names.
 
 `--failed` re-runs only what failed last time, from the cache each run
 writes to `node_modules/.cache/helix/summary.json` (same `{ tests }`
@@ -70,9 +76,10 @@ shape as Japa). `--reporters=spec,json` activates several reporters at
 once. `--force-exit` is accepted for parity and is a no-op: the helix
 CLI always exits as soon as the run ends.
 
-`--bail`, `--failed` and multiple reporters keep the run on the
-TypeScript pool — the native (Rust) engine reports totals only, and
-those three need per-test detail or cross-file control.
+All of these work on BOTH orchestrators: the native (Rust) engine
+serializes the full per-test summary and implements bail and the
+reporter chain itself. Only coverage, diff coverage and a pluggable
+reporter instance keep a run on the TypeScript pool.
 
 ## Plugins
 
