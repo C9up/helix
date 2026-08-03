@@ -86,6 +86,10 @@ const FLAG_SPEC = {
 		kind: "boolean",
 		help: "Re-run only the tests that failed last run (Japa --failed)",
 	},
+	"list-pinned": {
+		kind: "boolean",
+		help: "Print the tests marked .pin() and run nothing (Japa --list-pinned)",
+	},
 	"force-exit": {
 		kind: "boolean",
 		help: "process.exit() as soon as the run ends, without draining the event loop (Japa --force-exit)",
@@ -469,6 +473,7 @@ async function main() {
 						.filter((r) => r.length > 0)
 				: undefined,
 			bail: parsed.flags.bail === true,
+			listPinned: parsed.flags["list-pinned"] === true,
 			failed: parsed.flags.failed === true,
 			useColors: parsed.flags.colors,
 			discovery: {
@@ -549,6 +554,13 @@ async function main() {
 		}
 		// `--force-exit`, or `forceExit` in the config (AdonisJS `tests.forceExit`).
 		// Read back by `finish()` below, and by a plugin off `api.cliArgs`.
+		if (parsed.flags["list-pinned"] === true) {
+			process.env.HELIX_LIST_PINNED = "1";
+		}
+		// Positionals reach a plugin as `api.cliArgs._`, like Japa's.
+		if (parsed.positional.length > 0) {
+			process.env.HELIX_POSITIONALS = parsed.positional.join(",");
+		}
 		if (parsed.flags["force-exit"] === true || helixConfig.forceExit === true) {
 			process.env.HELIX_FORCE_EXIT = "1";
 		}

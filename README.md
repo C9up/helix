@@ -22,6 +22,7 @@ helix test --coverage            # V8 coverage + LCOV + thresholds
 helix test --diff-cov            # diff coverage vs main branch
 helix test --bail                # stop at the first failure
 helix test --failed              # re-run what failed last time
+helix test --list-pinned         # print the .pin()ed tests, run nothing
 ```
 
 ## Suites
@@ -77,6 +78,12 @@ reported as SKIPPED, like Japa. Files not yet started are dropped
 rather than skipped — a named deviation that follows from per-file
 process isolation: reporting them as skipped would mean spawning every
 remaining file just to collect names.
+
+`--list-pinned` collects the files, prints the tests marked `.pin()` and
+runs nothing — the global `setup` hooks are skipped too, as in Japa,
+since nothing they would open gets used. It stays on the TypeScript
+pool: it prints a list rather than executing, so the native engine's
+fast path buys nothing.
 
 `--failed` re-runs only what failed last time, from the cache each run
 writes to `node_modules/.cache/helix/summary.json` (same `{ tests }`

@@ -76,6 +76,12 @@ export interface FileResult {
 		todo: number;
 	};
 	durationMs: number;
+	/**
+	 * Full names of the tests marked `.pin()` — only populated under
+	 * `--list-pinned`, where Japa collects the files, prints what is pinned, and
+	 * runs nothing.
+	 */
+	pinned?: string[];
 }
 
 export interface ExecuteOptions {

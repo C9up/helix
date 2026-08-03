@@ -14,6 +14,10 @@
 
 /** Parsed CLI flags for the current run. */
 export interface CLIArgs {
+	/** Positionals — the paths or suite names typed on the command line. */
+	_?: string[];
+	/** `--list-pinned` — collect and print the pinned tests, run nothing. */
+	listPinned?: boolean;
 	/** `--tags` — `~@tag`/`!@tag` entries exclude. */
 	tags?: string[];
 	/** `--tests` — exact test titles. */
@@ -115,5 +119,7 @@ export function readCLIArgs(): CLIArgs {
 		bailLayer: process.env.HELIX_BAIL_LAYER,
 		failed: envFlag("HELIX_FAILED"),
 		forceExit: envFlag("HELIX_FORCE_EXIT"),
+		listPinned: envFlag("HELIX_LIST_PINNED"),
+		_: envList("HELIX_POSITIONALS"),
 	};
 }

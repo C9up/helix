@@ -20,7 +20,7 @@ import { loadBootstrap } from "./bootstrap.js";
 import { cliArgs } from "./cli-args.js";
 import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
 import { type ExecuteOptions, executeRoot, type FileResult } from "./run.js";
-import { withCollection } from "./suite.js";
+import { type SuiteNode, withCollection } from "./suite.js";
 import { applyTaps, tappedBail } from "./suite-taps.js";
 import { withViContext } from "./vi/index.js";
 
@@ -149,6 +149,19 @@ export async function runTestFile(
 		// `configureSuite`'s taps run between collection and execution — the
 		// point at which Japa's own `onTest`/`onGroup` fire.
 		applyTaps(root);
+		// `--list-pinned`: Japa collects the files, prints what is pinned and
+		// runs nothing — not the tests, and not the runner teardowns either,
+		// since it skipped the setup hooks that would have needed undoing.
+		if (cliArgs().listPinned === true) {
+			return {
+				file: absolutePath,
+				suites: [],
+				tests: [],
+				totals: { pass: 0, fail: 0, skip: 0, todo: 0 },
+				durationMs: 0,
+				pinned: pinnedNames(root, []),
+			};
+		}
 		try {
 			// Retries / grep / tags are per-test runtime filters. The CLI carries
 			// them in env vars so they reach the worker through ANY orchestrator —
@@ -184,6 +197,19 @@ export async function runTestFile(
 			await drainRunnerTeardowns();
 		}
 	});
+}
+
+/** Full names of every `.pin()`ed test under `node`, in declaration order. */
+function pinnedNames(node: SuiteNode, path: string[]): string[] {
+	const names: string[] = [];
+	for (const child of node.children) {
+		if (child.kind === "test") {
+			if (child.pinned === true) names.push([...path, child.name].join(" > "));
+			continue;
+		}
+		names.push(...pinnedNames(child, [...path, child.name]));
+	}
+	return names;
 }
 
 /** `--bail-layer` as forwarded by the CLI; anything else falls back to runner. */

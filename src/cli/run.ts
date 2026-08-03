@@ -18,6 +18,7 @@ import { rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { FileResult } from "../runtime/run.js";
 import {
 	type DiffOptions,
 	type DiffSummary,
@@ -112,6 +113,12 @@ export interface RunConfig {
 	 * cache written by the previous run and applies it as a `--tests` filter.
 	 */
 	failed?: boolean;
+	/**
+	 * Collect the files, print the tests marked `.pin()`, and run nothing (Japa
+	 * `--list-pinned`). Stays on the TypeScript pool: it prints a list rather
+	 * than executing anything, so the native engine's fast path buys nothing.
+	 */
+	listPinned?: boolean;
 }
 
 export interface RunOutcome {
@@ -343,6 +350,32 @@ function mergeOutcomes(outcomes: readonly RunOutcome[]): RunOutcome {
 	return merged;
 }
 
+/** Swallows every reporter callback — used while listing pinned tests. */
+const SILENT_REPORTER: Reporter = {
+	onFileStart() {},
+	onFileResult() {},
+	onFileError() {},
+	onSummary() {},
+};
+
+/**
+ * `--list-pinned` output: every pinned test, grouped by the file it lives in.
+ * Japa prints the list and exits 0 without running anything.
+ */
+function printPinnedTests(results: readonly FileResult[]): void {
+	let total = 0;
+	for (const result of results) {
+		const pinned = result.pinned ?? [];
+		if (pinned.length === 0) continue;
+		process.stdout.write(`${result.file}\n`);
+		for (const name of pinned) process.stdout.write(`  ${name}\n`);
+		total += pinned.length;
+	}
+	process.stdout.write(
+		total === 0 ? "No pinned tests\n" : `\n${total} pinned test(s)\n`,
+	);
+}
+
 /** Aggregated coverage + diff-coverage results threaded back into `RunOutcome`. */
 interface CoverageOutcome {
 	coverage?: CoverageSummary;
@@ -526,6 +559,7 @@ async function runOnce(
 	// `--bail` and a reporter chain. Only the TS-only layers (a pluggable
 	// reporter INSTANCE, coverage, diff coverage) move a run onto the TS pool.
 	const needsTsPool =
+		config.listPinned === true ||
 		config.reporterInstance !== undefined ||
 		config.coverage?.enabled === true ||
 		config.diffCoverage?.enabled === true;
@@ -533,12 +567,16 @@ async function runOnce(
 		return runNative(config, root, files, writeCache);
 	}
 
+	// `--list-pinned` prints the list and nothing else, so no reporter runs —
+	// otherwise the per-file banners would frame output that is not a run.
 	const reporter =
-		config.reporterInstance ??
-		makeReporters(
-			config.reporters ?? (config.reporter ? [config.reporter] : []),
-			config.useColors ?? process.stdout.isTTY === true,
-		);
+		config.listPinned === true
+			? SILENT_REPORTER
+			: (config.reporterInstance ??
+				makeReporters(
+					config.reporters ?? (config.reporter ? [config.reporter] : []),
+					config.useColors ?? process.stdout.isTTY === true,
+				));
 
 	const threads = config.threads ?? os.cpus().length;
 
@@ -565,6 +603,10 @@ async function runOnce(
 		);
 
 		const summary = buildSummary(results, errors, Date.now() - started);
+		if (config.listPinned === true) {
+			printPinnedTests(results);
+			return { summary, exitCode: 0 };
+		}
 		reporter.onSummary(summary);
 		// Feed the `--failed` cache with this run's failures (Japa writes it from
 		// a runner teardown).

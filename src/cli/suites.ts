@@ -1,6 +1,11 @@
 /**
- * Named test suites — the AdonisJS `adonisrc.ts` / Japa `configure({ suites })`
- * layer, so `helix test unit` runs a suite rather than a path.
+ * Named test suites — helix's equivalent of the `tests` block AdonisJS puts in
+ * `adonisrc.ts`, so `helix test unit` runs a suite rather than a path. The
+ * SHAPE is Adonis's (`timeout`, `forceExit`, `suites[{ name, files, timeout }]`)
+ * and the glob syntax is portable verbatim, but the file read is
+ * `helix.config.*`: helix is framework-agnostic, and `adonisrc.ts` belongs to
+ * the framework that owns it — in Adonis it is `@adonisjs/core`, not Japa, that
+ * reads the file and hands the suites to the runner.
  *
  *     // helix.config.ts
  *     export default {

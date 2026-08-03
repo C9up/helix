@@ -32,6 +32,8 @@ const FLAG_ENV = [
 	"HELIX_BAIL_LAYER",
 	"HELIX_FAILED",
 	"HELIX_FORCE_EXIT",
+	"HELIX_LIST_PINNED",
+	"HELIX_POSITIONALS",
 ];
 
 afterEach(() => {
@@ -114,6 +116,16 @@ describe("plugin API — Japa surface", () => {
 		expect(api.cliArgs.bailLayer).toBe("group");
 		expect(api.cliArgs.failed).toBe(true);
 		expect(api.cliArgs.forceExit).toBe(true);
+	});
+
+	it("exposes the positionals and --list-pinned, as Japa's CLIArgs does", async () => {
+		process.env.HELIX_POSITIONALS = "unit,functional";
+		process.env.HELIX_LIST_PINNED = "1";
+
+		const api = await capture();
+
+		expect(api.cliArgs._).toEqual(["unit", "functional"]);
+		expect(api.cliArgs.listPinned).toBe(true);
 	});
 
 	it("hands over the emitter the runtime actually emits on", async () => {

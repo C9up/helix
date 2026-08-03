@@ -229,7 +229,10 @@ export async function configure(options: ConfigureOptions): Promise<void> {
 	if (resolvedConfig.importer !== undefined)
 		configuredDefaults.importer = resolvedConfig.importer;
 
-	for (const fn of setup) {
+	// Japa skips the global setup hooks under `--list-pinned`: nothing runs, so
+	// nothing should be opened.
+	const listing = cliArgs().listPinned === true;
+	for (const fn of listing ? [] : setup) {
 		// A `setup` hook may resolve to its own undo (the AdonisJS idiom); park it
 		// with the teardowns so it runs in reverse order with everything else.
 		const undo = await fn(runner);
