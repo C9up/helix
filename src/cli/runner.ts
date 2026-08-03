@@ -9,8 +9,8 @@
  */
 
 export {
-  BOOTSTRAP_FILENAMES,
-  resolveBootstrap,
+	BOOTSTRAP_FILENAMES,
+	resolveBootstrap,
 } from "../runtime/bootstrap.js";
 export type { Reporter } from "./reporter.js";
 export { makeReporters, makeReportersFrom } from "./reporter.js";
