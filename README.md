@@ -52,7 +52,12 @@ flags act on: `--watch` re-runs every selected suite on each change (one
 watcher for the whole sequence), `--bail` stops at the suite that failed,
 and the `--failed` cache holds every suite's failures.
 
-`files` entries are plain paths (a directory is walked with helix's
+`files` takes Japa's three forms — one pattern, an array of them, or a
+callback returning the URLs (`files: () => [pathToFileURL(…)]`), which
+runs in the CLI process and can therefore reach files no suffix-based
+discovery would find.
+
+Pattern entries are plain paths (a directory is walked with helix's
 suffix discovery) or globs — `*`, `**`, `?`, `{a,b}`, `(a|b)`, `[abc]`
 and the extglob quantifiers `@(a|b)`, `?(a|b)`, `*(a|b)`, `+(a|b)`,
 which covers AdonisJS's own defaults verbatim

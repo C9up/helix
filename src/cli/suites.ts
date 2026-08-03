@@ -24,7 +24,7 @@
 
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { type DiscoveryOptions, discover } from "./discover.js";
 import {
 	globBaseDir,
@@ -35,12 +35,20 @@ import {
 	withoutNegation,
 } from "./glob.js";
 
+/**
+ * A suite's file list — Japa's `TestFiles`, the three forms it accepts: one
+ * pattern, several, or a callback returning the URLs. The callback runs in the
+ * CLI process, where the config module was imported, so it can look wherever it
+ * likes for its files.
+ */
+export type SuiteFiles = string | string[] | (() => URL[] | Promise<URL[]>);
+
 /** One suite, as declared in the config file. */
 export interface SuiteDefinition {
 	/** Suite name — what `helix test <name>` selects. */
 	name: string;
-	/** Directories, file paths, or `dir/**​/*.suffix` entries. */
-	files: string[];
+	/** Paths, globs, or a callback returning the files (Japa `TestFiles`). */
+	files: SuiteFiles;
 	/** Per-test timeout for this suite (ms). */
 	timeout?: number;
 	/** Extra attempts on failure for this suite. */
@@ -88,18 +96,40 @@ function toConfig(imported: unknown): HelixConfig {
 	for (const entry of suites) {
 		if (entry === null || typeof entry !== "object") continue;
 		const name = Reflect.get(entry, "name");
-		const files = Reflect.get(entry, "files");
-		if (typeof name !== "string" || !Array.isArray(files)) continue;
+		const files = toSuiteFiles(Reflect.get(entry, "files"));
+		if (typeof name !== "string" || files === undefined) continue;
 		const timeout = Reflect.get(entry, "timeout");
 		const retries = Reflect.get(entry, "retries");
 		parsed.push({
 			name,
-			files: files.filter((f): f is string => typeof f === "string"),
+			files,
 			timeout: typeof timeout === "number" ? timeout : undefined,
 			retries: typeof retries === "number" ? retries : undefined,
 		});
 	}
 	return { ...runner, suites: parsed };
+}
+
+/** Narrow a declared `files` value to one of Japa's three accepted forms. */
+function toSuiteFiles(value: unknown): SuiteFiles | undefined {
+	if (typeof value === "string") return value;
+	if (typeof value === "function") {
+		return (): URL[] | Promise<URL[]> => {
+			const produced: unknown = value();
+			return normaliseUrls(produced);
+		};
+	}
+	if (Array.isArray(value)) {
+		return value.filter((entry): entry is string => typeof entry === "string");
+	}
+	return undefined;
+}
+
+/** A files-callback's return value, awaited and reduced to the URLs in it. */
+async function normaliseUrls(produced: unknown): Promise<URL[]> {
+	const resolved: unknown = await produced;
+	if (!Array.isArray(resolved)) return [];
+	return resolved.filter((entry): entry is URL => entry instanceof URL);
 }
 
 /**
@@ -173,11 +203,18 @@ export async function resolveSuiteFiles(
 	root: string,
 	discovery: DiscoveryOptions | undefined,
 ): Promise<string[]> {
+	// A callback picks the files itself (Japa `TestFiles`); there is no pattern
+	// to compile and nothing to exclude, so it short-circuits the whole loop.
+	if (typeof suite.files === "function") {
+		return [...new Set((await suite.files()).map((url) => fileURLToPath(url)))];
+	}
+	const entries = typeof suite.files === "string" ? [suite.files] : suite.files;
+
 	const out: string[] = [];
 	// `!pattern` entries subtract from whatever the selecting entries gathered,
 	// so they are applied once at the end regardless of where they were written.
 	const excluded: RegExp[] = [];
-	for (const entry of suite.files) {
+	for (const entry of entries) {
 		if (isNegated(entry)) {
 			const pattern = withoutNegation(entry);
 			const rejection = globRejection(pattern);

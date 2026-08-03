@@ -3,9 +3,10 @@
  * run a suite instead of a path.
  */
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	type HelixConfig,
@@ -31,13 +32,17 @@ afterEach(async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
-/** Write `<root>/<relative>`, creating parent directories. */
+/**
+ * Write `<root>/<relative>`, creating parent directories.
+ *
+ * It does NOT clear the parent first: `root` is a fresh temp dir per test, and
+ * wiping the directory would delete the sibling a test just wrote — which
+ * silently turns "this pattern excludes that file" into "that file was not
+ * there", i.e. a test that cannot fail.
+ */
 async function write(relative: string, body = ""): Promise<string> {
 	const abs = path.join(root, relative);
-	await rm(path.dirname(abs), { recursive: true, force: true }).catch(() => {});
-	await import("node:fs/promises").then((fs) =>
-		fs.mkdir(path.dirname(abs), { recursive: true }),
-	);
+	await mkdir(path.dirname(abs), { recursive: true });
 	await writeFile(abs, body, "utf8");
 	return abs;
 }
@@ -97,6 +102,51 @@ describe("loadHelixConfig", () => {
 		const config = await loadHelixConfig(root);
 
 		expect(config.suites?.map((s) => s.name)).toEqual(["ok"]);
+	});
+});
+
+describe("resolveSuiteFiles — Japa's three `files` forms", () => {
+	it("accepts a bare string, not just an array", async () => {
+		const spec = await write("tests/unit/a.spec.ts");
+		await write("tests/unit/helper.ts");
+
+		const files = await resolveSuiteFiles(
+			{ name: "unit", files: "tests/unit/**/*.spec.ts" },
+			root,
+			undefined,
+		);
+
+		expect(files).toEqual([spec]);
+	});
+
+	it("accepts a callback returning URLs", async () => {
+		// A callback picks the files itself, so it reaches what suffix-based
+		// discovery never would.
+		const picked = await write("custom/picked.ts");
+
+		const files = await resolveSuiteFiles(
+			{ name: "custom", files: () => [pathToFileURL(picked)] },
+			root,
+			undefined,
+		);
+
+		expect(files).toEqual([picked]);
+	});
+
+	it("awaits an async callback and ignores what is not a URL", async () => {
+		const picked = await write("custom/picked.ts");
+
+		const files = await resolveSuiteFiles(
+			{
+				name: "custom",
+				files: async () => [pathToFileURL(picked), pathToFileURL(picked)],
+			},
+			root,
+			undefined,
+		);
+
+		// Deduplicated, like every other entry form.
+		expect(files).toEqual([picked]);
 	});
 });
 
