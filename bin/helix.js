@@ -396,6 +396,18 @@ async function main() {
 		const helixConfig = await loadHelixConfig(process.cwd());
 		const selectedSuites = selectSuites(helixConfig, parsed.positional);
 
+		// AdonisJS `tests/bootstrap.ts`: resolved once here, imported by every
+		// worker before its test file. Forwarded through the env so it reaches
+		// the worker under BOTH orchestrators.
+		const bootstrapModule = pathToFileURL(
+			useDist
+				? path.resolve(here, "../dist/runtime/bootstrap.js")
+				: path.resolve(here, "../src/runtime/bootstrap.ts"),
+		).href;
+		const { resolveBootstrap } = await import(bootstrapModule);
+		process.env.HELIX_BOOTSTRAP =
+			resolveBootstrap(process.cwd(), helixConfig.bootstrap) ?? "";
+
 		const expanded = selectedSuites
 			? []
 			: filterByFileFilters(

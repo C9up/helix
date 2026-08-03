@@ -37,6 +37,11 @@ export interface SuiteDefinition {
 /** The shape of `helix.config.{ts,js,mjs}`. */
 export interface HelixConfig {
 	suites?: SuiteDefinition[];
+	/**
+	 * Path to the bootstrap module (AdonisJS `tests/bootstrap.ts`), relative to
+	 * the project root. Defaults to the conventional `tests/bootstrap.*`.
+	 */
+	bootstrap?: string;
 }
 
 /** Config file names probed at the project root, in order. */
@@ -53,8 +58,10 @@ function toConfig(imported: unknown): HelixConfig {
 			? (Reflect.get(imported, "default") ?? imported)
 			: imported;
 	if (source === null || typeof source !== "object") return {};
+	const rawBootstrap = Reflect.get(source, "bootstrap");
+	const bootstrap = typeof rawBootstrap === "string" ? rawBootstrap : undefined;
 	const suites = Reflect.get(source, "suites");
-	if (!Array.isArray(suites)) return {};
+	if (!Array.isArray(suites)) return { bootstrap };
 	const parsed: SuiteDefinition[] = [];
 	for (const entry of suites) {
 		if (entry === null || typeof entry !== "object") continue;
@@ -70,7 +77,7 @@ function toConfig(imported: unknown): HelixConfig {
 			retries: typeof retries === "number" ? retries : undefined,
 		});
 	}
-	return { suites: parsed };
+	return { suites: parsed, bootstrap };
 }
 
 /**

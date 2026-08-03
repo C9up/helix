@@ -81,6 +81,35 @@ serializes the full per-test summary and implements bail and the
 reporter chain itself. Only coverage, diff coverage and a pluggable
 reporter instance keep a run on the TypeScript pool.
 
+## Bootstrap
+
+`tests/bootstrap.ts` is the AdonisJS bootstrap module, with the same three
+exports — an Adonis one ports over unchanged:
+
+```ts
+// tests/bootstrap.ts
+export const plugins = [apiClient({ baseUrl })]
+export const runnerHooks = {
+  setup: [() => openPool()],
+  teardown: [() => closePool()],
+}
+export const configureSuite = (suite) => {
+  if (["functional", "e2e"].includes(suite.name)) {
+    return suite.setup(() => httpServer.start())
+  }
+}
+```
+
+It is picked up automatically (`helix.config`'s `bootstrap` overrides the
+path) and imported by each worker before its test file, so a plugin's
+context macros exist by the time the first test declares itself.
+
+Named deviation, forced by one process per FILE: the module is imported —
+and `runnerHooks.setup` therefore runs — once per worker process, not once
+per run. For what these hooks do (boot a server, open a pool) that is the
+only correct reading: a resource opened in the CLI process would not exist
+in the process where the tests run.
+
 ## Plugins
 
 A plugin is a function run once at `configure()` time, handed the same

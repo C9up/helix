@@ -16,6 +16,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { loadBootstrap } from "./bootstrap.js";
 import { envCount, envList, envMatchAll, envTags } from "./cli-args.js";
 import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
 import { type ExecuteOptions, executeRoot, type FileResult } from "./run.js";
@@ -128,6 +129,13 @@ export async function runTestFile(
 		options.freshImport === false
 			? baseUrl
 			: `${baseUrl}?helix=${Date.now()}-${++importCounter}`;
+	// `tests/bootstrap.ts` (AdonisJS) installs the run's plugins and hooks, so
+	// it must run BEFORE the test file: a plugin's context macros have to exist
+	// by the time the file's first test declares itself.
+	const suiteName = options.suite ?? process.env.HELIX_SUITE;
+	await loadBootstrap(
+		suiteName === undefined || suiteName === "" ? "default" : suiteName,
+	);
 	return withViContext(async () => {
 		const root = await withCollection(async () => {
 			await import(url);
