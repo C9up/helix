@@ -39,9 +39,11 @@ export type CleanupFn = (
  * (group hooks) as its argument (Japa parity); may return a {@link CleanupFn}.
  * Existing zero-argument hooks stay valid.
  */
-export type HookFn = (
-	subject?: TestInstance | GroupInstance,
-) => void | CleanupFn | Promise<void | CleanupFn>;
+export type HookFn =
+	| ((subject?: TestInstance | GroupInstance) => void | Promise<void>)
+	| ((
+			subject?: TestInstance | GroupInstance,
+	  ) => CleanupFn | Promise<CleanupFn>);
 
 export type HookType = "beforeAll" | "afterAll" | "beforeEach" | "afterEach";
 
