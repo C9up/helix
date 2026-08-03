@@ -193,3 +193,93 @@ pub async fn run(config: RunConfig) -> Result<SummaryPayload> {
         json,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ream_test_core::ipc::FileTotals;
+    use std::sync::{Arc, Mutex};
+
+    /// Appends every callback it receives to a shared log.
+    struct Spy {
+        tag: &'static str,
+        log: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Reporter for Spy {
+        fn on_file_start(&mut self, file: &str) {
+            self.log.lock().unwrap().push(format!("{}:start:{}", self.tag, file));
+        }
+        fn on_file_result(&mut self, result: &FileResult) {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("{}:result:{}", self.tag, result.file));
+        }
+        fn on_file_error(&mut self, error: &WorkerError) {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("{}:error:{}", self.tag, error.message));
+        }
+        fn on_summary(&mut self, _summary: &Summary) {
+            self.log.lock().unwrap().push(format!("{}:summary", self.tag));
+        }
+    }
+
+    fn file_result() -> FileResult {
+        FileResult {
+            file: "a.test.ts".into(),
+            suites: vec![],
+            tests: vec![],
+            totals: FileTotals { pass: 1, fail: 0, skip: 0, todo: 0 },
+            duration_ms: 1,
+        }
+    }
+
+    #[test]
+    fn multi_reporter_reaches_every_reporter_in_order() {
+        // `--reporters=spec,json` must feed BOTH; a fan-out that stopped at the
+        // first would silently drop the machine-readable half of the output.
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mut multi = MultiReporter::new(vec![
+            Box::new(Spy { tag: "a", log: log.clone() }),
+            Box::new(Spy { tag: "b", log: log.clone() }),
+        ]);
+
+        multi.on_file_start("a.test.ts");
+        multi.on_file_result(&file_result());
+        multi.on_file_error(&WorkerError {
+            file: None,
+            message: "boom".into(),
+            stack: None,
+        });
+        multi.on_summary(&Summary::default());
+
+        assert_eq!(
+            log.lock().unwrap().as_slice(),
+            [
+                "a:start:a.test.ts",
+                "b:start:a.test.ts",
+                "a:result:a.test.ts",
+                "b:result:a.test.ts",
+                "a:error:boom",
+                "b:error:boom",
+                "a:summary",
+                "b:summary",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_single_reporter_still_receives_everything() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mut multi = MultiReporter::new(vec![Box::new(Spy { tag: "only", log: log.clone() })]);
+
+        multi.on_file_start("a.test.ts");
+        multi.on_summary(&Summary::default());
+
+        assert_eq!(log.lock().unwrap().as_slice(), ["only:start:a.test.ts", "only:summary"]);
+    }
+
+}
