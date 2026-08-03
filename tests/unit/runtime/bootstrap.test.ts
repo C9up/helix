@@ -11,7 +11,10 @@ import {
 	resetBootstrap,
 	resolveBootstrap,
 } from "../../../src/runtime/bootstrap.js";
-import { drainRunnerTeardowns } from "../../../src/runtime/configure.js";
+import {
+	drainRunnerTeardowns,
+	getConfiguredDefaults,
+} from "../../../src/runtime/configure.js";
 import { TestContextRegistry } from "../../../src/runtime/context.js";
 
 let root: string;
@@ -145,9 +148,38 @@ describe("loadBootstrap", () => {
 		expect(readFileSync(log, "utf8")).toBe("imported\n");
 	});
 
-	it("tolerates a module exporting nothing helix knows about", async () => {
-		await bootstrapWith("export const unrelated = 42\n");
+	it("tolerates exports of the wrong shape", async () => {
+		await bootstrapWith(
+			[
+				"export const unrelated = 42",
+				'export const filters = "nope"',
+				"export const importer = 7",
+				"export const runnerHooks = { setup: 3 }",
+				"",
+			].join("\n"),
+		);
 
 		await expect(loadBootstrap("default")).resolves.toBeUndefined();
+	});
+
+	it("forwards `filters` and `importer` to configure()", async () => {
+		await bootstrapWith(
+			[
+				'export const filters = { tests: ["kept"], matchAll: true, tags: ["@slow"] }',
+				"export const importer = (file) => import(file.href)",
+				"",
+			].join("\n"),
+		);
+
+		await loadBootstrap("default");
+
+		const defaults = getConfiguredDefaults();
+		expect(defaults.filters).toEqual({
+			tests: ["kept"],
+			tags: ["@slow"],
+			groups: undefined,
+			matchAll: true,
+		});
+		expect(typeof defaults.importer).toBe("function");
 	});
 });

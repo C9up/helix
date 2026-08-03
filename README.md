@@ -104,6 +104,14 @@ It is picked up automatically (`helix.config`'s `bootstrap` overrides the
 path) and imported by each worker before its test file, so a plugin's
 context macros exist by the time the first test declares itself.
 
+Two more Japa `Config` fields live here too, since helix has no
+`bin/test.ts` to put them in: `filters` (`{ tests, groups, tags, matchAll }`
+— the CLI flags still win over them) and `importer`, the hook that replaces
+the plain dynamic import of a test file. Japa's `filters.files` /
+`filters.suites` stay CLI-side (`--files`, a suite positional): helix
+settles the file list before any worker — and so any bootstrap — exists,
+and filtering there still avoids the spawn.
+
 Named deviation, forced by one process per FILE: the module is imported —
 and `runnerHooks.setup` therefore runs — once per worker process, not once
 per run. For what these hooks do (boot a server, open a pool) that is the

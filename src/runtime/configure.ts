@@ -71,10 +71,40 @@ export interface PluginApi {
  */
 export type Plugin = (api: PluginApi) => void | Promise<void>;
 
+/**
+ * Filters applied to the tests a file declares (Japa `config.filters`).
+ *
+ * Named deviation: Japa's `filters` also carries `files` and `suites`. Those
+ * select which FILES run, and helix settles that list in the CLI process
+ * before any worker — and therefore any bootstrap — exists. They stay CLI-side
+ * (`--files`, and a suite positional), where they can still avoid a spawn.
+ */
+export interface ConfigureFilters {
+	/** Only tests carrying one of these tags (`~@tag`/`!@tag` excludes). */
+	tags?: string[];
+	/** Only groups with these exact titles. */
+	groups?: string[];
+	/** Only tests with these exact titles. */
+	tests?: string[];
+	/** Require EVERY tag in `tags` instead of any (Japa `--match-all`). */
+	matchAll?: boolean;
+}
+
 /** Runtime configuration passed to {@link configure}. */
 export interface ConfigureOptions {
 	/** Plugins to install — each extends the test context (Japa parity). */
 	plugins?: Plugin[];
+	/**
+	 * Filters to apply to this file's tests (Japa `config.filters`). The CLI
+	 * flags win: a filter typed at the prompt overrides the configured one.
+	 */
+	filters?: ConfigureFilters;
+	/**
+	 * How a test file is imported (Japa `config.importer`). Defaults to
+	 * `import(file.href)`. Receives the URL helix would have imported —
+	 * cache-busting query included, so repeated runs still re-evaluate.
+	 */
+	importer?: (file: URL) => void | Promise<void>;
 	/** Run once before the tests (Japa runner `setup`). */
 	setup?: RunnerHook[];
 	/** Run once after the tests, reverse order (Japa runner `teardown`). */
@@ -102,19 +132,19 @@ export interface ConfigureOptions {
 /** Teardowns to run after the run — from `configure({ teardown })` + `api.cleanup`. */
 const runnerTeardowns: RunnerHook[] = [];
 
-/** Run-level defaults from `configure({ timeout, retries, suite })`. */
-const configuredDefaults: {
+/** Run-level defaults from `configure({ timeout, retries, suite, filters })`. */
+interface ConfiguredDefaults {
 	timeout?: number;
 	retries?: number;
 	suite?: string;
-} = {};
+	filters?: ConfigureFilters;
+	importer?: (file: URL) => void | Promise<void>;
+}
 
-/** The `timeout`/`retries`/`suite` defaults set by {@link configure}, if any. */
-export function getConfiguredDefaults(): Readonly<{
-	timeout?: number;
-	retries?: number;
-	suite?: string;
-}> {
+const configuredDefaults: ConfiguredDefaults = {};
+
+/** The defaults set by {@link configure}, if any. */
+export function getConfiguredDefaults(): Readonly<ConfiguredDefaults> {
 	return configuredDefaults;
 }
 
@@ -158,6 +188,10 @@ export async function configure(options: ConfigureOptions): Promise<void> {
 	if (options.retries !== undefined)
 		configuredDefaults.retries = options.retries;
 	if (options.suite !== undefined) configuredDefaults.suite = options.suite;
+	if (options.filters !== undefined)
+		configuredDefaults.filters = options.filters;
+	if (options.importer !== undefined)
+		configuredDefaults.importer = options.importer;
 	for (const fn of options.setup ?? []) await fn();
 	for (const plugin of options.plugins ?? []) {
 		await plugin(api);

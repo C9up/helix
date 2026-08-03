@@ -13,8 +13,10 @@
  *       }
  *     }
  *
- * helix loads the same file with the same three exports, so an Adonis
- * `tests/bootstrap.ts` ports over unchanged. The CLI resolves it once and
+ * helix loads the same file with the same three exports — plus `filters` and
+ * `importer`, the two Japa `Config` fields Adonis sets in `bin/test.ts`, which
+ * helix has no equivalent of — so an Adonis `tests/bootstrap.ts` ports over
+ * unchanged. The CLI resolves it once and
  * forwards the absolute path as `HELIX_BOOTSTRAP`, so it reaches the worker
  * through BOTH orchestrators (the Rust engine and the TS pool spawn children
  * that inherit the CLI's env).
@@ -29,7 +31,12 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { configure, type Plugin, type RunnerHook } from "./configure.js";
+import {
+	type ConfigureFilters,
+	configure,
+	type Plugin,
+	type RunnerHook,
+} from "./configure.js";
 
 /** File names probed under the project root when none is configured. */
 export const BOOTSTRAP_FILENAMES = [
@@ -52,11 +59,37 @@ export interface SuiteHandle {
 	teardown(fn: RunnerHook): SuiteHandle;
 }
 
-/** The exports helix reads off the bootstrap module. */
+/**
+ * The exports helix reads off the bootstrap module. `plugins`, `runnerHooks`
+ * and `configureSuite` are Adonis's; `filters` and `importer` are Japa `Config`
+ * fields that Adonis sets in `bin/test.ts` — with no `bin/test.ts` in helix,
+ * the bootstrap module is where they belong.
+ */
 interface BootstrapModule {
 	plugins?: Plugin[];
 	runnerHooks?: { setup?: RunnerHook[]; teardown?: RunnerHook[] };
 	configureSuite?: (suite: SuiteHandle) => unknown;
+	filters?: ConfigureFilters;
+	importer?: (file: URL) => void | Promise<void>;
+}
+
+/** `filters` as exported — every field optional, so read each defensively. */
+function readFilters(imported: unknown): ConfigureFilters | undefined {
+	const source = Reflect.get(Object(imported), "filters");
+	if (source === null || typeof source !== "object") return undefined;
+	const matchAll = Reflect.get(source, "matchAll");
+	return {
+		tags: stringList(source, "tags"),
+		groups: stringList(source, "groups"),
+		tests: stringList(source, "tests"),
+		matchAll: typeof matchAll === "boolean" ? matchAll : undefined,
+	};
+}
+
+function stringList(source: object, key: string): string[] | undefined {
+	const value = Reflect.get(source, key);
+	if (!Array.isArray(value)) return undefined;
+	return value.filter((v): v is string => typeof v === "string");
 }
 
 /** Everything about the module is optional — read defensively, never cast. */
@@ -65,7 +98,13 @@ function readModule(imported: unknown): BootstrapModule {
 	const plugins = Reflect.get(imported, "plugins");
 	const hooks = Reflect.get(imported, "runnerHooks");
 	const configureSuite = Reflect.get(imported, "configureSuite");
+	const importer = Reflect.get(imported, "importer");
 	return {
+		filters: readFilters(imported),
+		importer:
+			typeof importer === "function"
+				? (file: URL): void | Promise<void> => importer(file)
+				: undefined,
 		plugins: Array.isArray(plugins)
 			? plugins.filter((p): p is Plugin => typeof p === "function")
 			: undefined,
@@ -148,6 +187,8 @@ async function applyBootstrap(file: string, suite: string): Promise<void> {
 	}
 	await configure({
 		plugins: module.plugins,
+		filters: module.filters,
+		importer: module.importer,
 		setup,
 		teardown,
 		suite,

@@ -138,7 +138,12 @@ export async function runTestFile(
 	);
 	return withViContext(async () => {
 		const root = await withCollection(async () => {
-			await import(url);
+			// `configure({ importer })` (Japa parity) replaces the plain dynamic
+			// import — the seam a consumer needs to compile or instrument a file
+			// on the way in.
+			const importer = getConfiguredDefaults().importer;
+			if (importer) await importer(new URL(url));
+			else await import(url);
 		});
 		try {
 			// Retries / grep / tags are per-test runtime filters. They're carried via
@@ -149,16 +154,20 @@ export async function runTestFile(
 			// `configure({ timeout, retries })` ran during the import above; its
 			// defaults sit BELOW explicit options / env (CLI wins), ABOVE the
 			// runtime's own `?? 0`.
+			// `configure({ filters })` (Japa parity) sits at the same level as the
+			// other configured defaults: BELOW an explicit option and below the
+			// CLI env, so a filter typed at the prompt still wins.
 			const defaults = getConfiguredDefaults();
+			const filters = defaults.filters;
 			const raw = await executeRoot(root, absolutePath, {
 				timeoutMs: options.timeoutMs ?? defaults.timeout,
 				retries:
 					options.retries ?? envCount("HELIX_RETRIES") ?? defaults.retries,
 				grep: options.grep ?? process.env.HELIX_GREP,
-				tags: options.tags ?? envTags(),
-				matchAll: options.matchAll ?? envMatchAll(),
-				tests: options.tests ?? envList("HELIX_TESTS"),
-				groups: options.groups ?? envList("HELIX_GROUPS"),
+				tags: options.tags ?? envTags() ?? filters?.tags,
+				matchAll: options.matchAll ?? envMatchAll() ?? filters?.matchAll,
+				tests: options.tests ?? envList("HELIX_TESTS") ?? filters?.tests,
+				groups: options.groups ?? envList("HELIX_GROUPS") ?? filters?.groups,
 				suite:
 					options.suite ??
 					process.env.HELIX_SUITE ??
