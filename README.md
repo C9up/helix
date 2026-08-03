@@ -42,8 +42,9 @@ export default {
 }
 ```
 
-A suite's name reaches the tests as `ctx.test.options.meta.suite` and
-rides on the `suite:*` events. Without a config file — or when a
+A suite's name reaches the tests as `ctx.test.options.meta.suite.name`
+and rides on the `suite:*` events — `meta.suite` is the suite object, as
+in Japa, not the bare string. Without a config file — or when a
 positional is not a suite name — positionals stay paths, exactly as
 before.
 

@@ -1,7 +1,7 @@
 {
   "name": "@c9up/helix",
   "version": "0.1.9",
-  "description": "Helix — framework-agnostic test runtime for the Ream ecosystem (Vitest-compatible runner, spies, container overrides, time-travel). Per-package fakes live in each package's /testing.",
+  "description": "Helix \u2014 framework-agnostic test runtime for the Ream ecosystem (Vitest-compatible runner, spies, container overrides, time-travel). Per-package fakes live in each package's /testing.",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
@@ -29,6 +29,10 @@
     "./runtime/worker": {
       "types": "./src/runtime/worker.ts",
       "import": "./src/runtime/worker.ts"
+    },
+    "./runner": {
+      "types": "./src/cli/runner.ts",
+      "import": "./src/cli/runner.ts"
     },
     "./bin/helix.js": "./bin/helix.js"
   },
@@ -84,6 +88,10 @@
       "./runtime/worker": {
         "types": "./dist/runtime/worker.d.ts",
         "import": "./dist/runtime/worker.js"
+      },
+      "./runner": {
+        "types": "./dist/cli/runner.d.ts",
+        "import": "./dist/cli/runner.js"
       },
       "./bin/helix.js": "./bin/helix.js"
     },

@@ -115,7 +115,7 @@ export interface ExecuteOptions {
 	/** Exact group titles to run (Japa `--groups`). A test runs only if its enclosing group is listed. */
 	groups?: string[];
 	/**
-	 * The suite these tests belong to — `ctx.test.options.meta.suite` and the
+	 * The suite these tests belong to — `ctx.test.options.meta.suite.name` and the
 	 * `suite:*` event payloads. Defaults to `"default"`, Japa's implicit suite.
 	 */
 	suite?: string;

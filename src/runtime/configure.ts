@@ -132,7 +132,7 @@ export interface ConfigureOptions {
 	retries?: number;
 	/**
 	 * The name of the suite these tests belong to — surfaced as
-	 * `ctx.test.options.meta.suite` and on the `suite:*` events. Defaults to
+	 * `ctx.test.options.meta.suite.name` and on the `suite:*` events. Defaults to
 	 * `"default"`, the name Japa gives its implicit suite. Overridden by
 	 * `--suite`.
 	 */
