@@ -8,12 +8,14 @@
  * (`TestStartNode`, `TestEndNode`, `GroupStartNode`, …) so a Japa reporter or
  * plugin can be ported without rewriting its listeners.
  *
- * Two named deviations from `@japa/core`:
- *   - `errors[].error` is a {@link SerializedError} (`{ name, message, stack }`),
- *     not an `Error` instance — helix serializes errors at the point of capture
- *     because results cross the worker→CLI IPC boundary.
- *   - `suite:start` / `suite:end` carry the test FILE name. Helix has no named
- *     suite layer (it runs one process per file), so the file is the suite.
+ * One named deviation from `@japa/core`: `suite:start` / `suite:end` carry the
+ * test FILE name. Helix runs one process per file, so the file is what a
+ * worker-side listener can see of a suite.
+ *
+ * `errors[].error` is the thrown `Error` itself, as in Japa — the emitter runs
+ * in the worker, where the original is still around. Only an error rebuilt from
+ * an IPC frame (which can carry data only) degrades to the {@link
+ * SerializedError} shape, which keeps the same `name`/`message`/`stack` fields.
  */
 
 import type { SerializedError } from "./run.js";
@@ -27,10 +29,14 @@ export type ErrorPhase =
 	| "teardown:cleanup"
 	| "test:cleanup";
 
-/** One captured failure, tagged with the phase it happened in. */
+/**
+ * One captured failure, tagged with the phase it happened in. `error` is the
+ * thrown `Error`; it degrades to {@link SerializedError} — same `name`,
+ * `message` and `stack` — only for a result rebuilt from an IPC frame.
+ */
 export interface EmittedError {
 	phase: ErrorPhase;
-	error: SerializedError;
+	error: Error | SerializedError;
 }
 
 /** A test title, before and after dataset interpolation (Japa parity). */

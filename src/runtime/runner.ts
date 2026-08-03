@@ -1,15 +1,22 @@
 /**
- * The `runner` handed to plugins — Japa's `Runner` reduced to the surface a
- * plugin actually consumes: `getSummary()`.
+ * The `runner` handed to plugins — Japa's `Runner`, minus what a worker cannot
+ * honestly own.
  *
- * Japa's Runner also owns suite registration and reporter activation. Helix
- * does neither here (the CLI owns file discovery and reporting, one process per
- * file), so exposing those would be dead API. What remains is real: the summary
- * is tracked by subscribing to the very events the runtime emits, so it can
- * never drift from what a reporter sees.
+ * Present, and identical to Japa: `getSummary()`, `failed`, `bail(toggle)`,
+ * `onSuite(callback)`. The summary is tracked by subscribing to the very events
+ * the runtime emits, so it can never drift from what a reporter sees.
+ *
+ * Absent, deliberately:
+ *   - `registerReporter` — reporters live in the CLI process, which is the only
+ *     one that sees every file. A reporter registered from a worker would
+ *     report one file and claim to be the run. Use `--reporters`, or
+ *     `run({ reporterInstance })` programmatically.
+ *   - `add` / `suites` / `start` / `exec` / `end` — the CLI discovers the files
+ *     and drives execution; a worker is handed one file to run.
  */
 
 import type { Emitter } from "./emitter.js";
+import { setBail } from "./suite-taps.js";
 
 /** Test counts for a run (Japa `summary.aggregates`). */
 export interface SummaryAggregates {
@@ -83,6 +90,21 @@ export class Runner {
 		this.#failedTestsTitles.length = 0;
 		this.#hasError = false;
 		this.#duration = 0;
+	}
+
+	/** Whether anything has failed so far (Japa `Runner#failed`). */
+	get failed(): boolean {
+		return this.#hasError || this.#aggregates.failed > 0;
+	}
+
+	/**
+	 * Stop at the first failure (Japa `Runner#bail`). A plugin runs before the
+	 * test file is collected, so this reaches the run it was called for; the
+	 * `--bail` flag still wins when both are set.
+	 */
+	bail(toggle = true): this {
+		setBail(toggle);
+		return this;
 	}
 
 	/**

@@ -37,6 +37,14 @@ import {
 	type Plugin,
 	type RunnerHook,
 } from "./configure.js";
+import {
+	type GroupHandle,
+	registerGroupTap,
+	registerTestTap,
+	resetTaps,
+	setBail,
+	type TestHandle,
+} from "./suite-taps.js";
 
 /** File names probed under the project root when none is configured. */
 export const BOOTSTRAP_FILENAMES = [
@@ -46,9 +54,11 @@ export const BOOTSTRAP_FILENAMES = [
 ];
 
 /**
- * What `configureSuite` receives. Japa hands its callback a `Suite` and reads
- * back the hooks registered on it; helix hands the same two registrars plus the
- * name, which is all Adonis's own `configureSuite` uses.
+ * What `configureSuite` receives — Japa's `Suite`, minus the members that only
+ * make sense to whoever OWNS execution (`add`, `stack`, `exec`, `failed`):
+ * helix builds the tree from the file's own `describe`/`test` and runs it
+ * itself, so a handle exposing those would be lying about what a callback can
+ * do. Everything a callback can genuinely configure is here.
  */
 export interface SuiteHandle {
 	/** The suite these files belong to (`--suite`, or a `helix.config` suite). */
@@ -57,6 +67,12 @@ export interface SuiteHandle {
 	setup(fn: RunnerHook): SuiteHandle;
 	/** Run after this suite's tests, in reverse registration order. */
 	teardown(fn: RunnerHook): SuiteHandle;
+	/** Configure every test of the suite before it runs (Japa `Suite#onTest`). */
+	onTest(callback: (test: TestHandle) => void): SuiteHandle;
+	/** Configure every group of the suite before it runs (Japa `Suite#onGroup`). */
+	onGroup(callback: (group: GroupHandle) => void): SuiteHandle;
+	/** Stop this suite at the first failure (Japa `Suite#bail`). */
+	bail(toggle?: boolean): SuiteHandle;
 }
 
 /**
@@ -182,6 +198,18 @@ async function applyBootstrap(file: string, suite: string): Promise<void> {
 				teardown.push(fn);
 				return handle;
 			},
+			onTest(callback) {
+				registerTestTap(callback);
+				return handle;
+			},
+			onGroup(callback) {
+				registerGroupTap(callback);
+				return handle;
+			},
+			bail(toggle = true) {
+				setBail(toggle);
+				return handle;
+			},
 		};
 		module.configureSuite(handle);
 	}
@@ -198,4 +226,5 @@ async function applyBootstrap(file: string, suite: string): Promise<void> {
 /** Test seam: forget that a bootstrap was loaded in this process. */
 export function resetBootstrap(): void {
 	loaded = undefined;
+	resetTaps();
 }

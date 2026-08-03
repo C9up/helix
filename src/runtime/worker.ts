@@ -21,6 +21,7 @@ import { envCount, envList, envMatchAll, envTags } from "./cli-args.js";
 import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
 import { type ExecuteOptions, executeRoot, type FileResult } from "./run.js";
 import { withCollection } from "./suite.js";
+import { applyTaps, tappedBail } from "./suite-taps.js";
 import { withViContext } from "./vi/index.js";
 
 export interface RunFileOptions extends ExecuteOptions {
@@ -145,6 +146,9 @@ export async function runTestFile(
 			if (importer) await importer(new URL(url));
 			else await import(url);
 		});
+		// `configureSuite`'s taps run between collection and execution — the
+		// point at which Japa's own `onTest`/`onGroup` fire.
+		applyTaps(root);
 		try {
 			// Retries / grep / tags are per-test runtime filters. They're carried via
 			// env vars (set by the CLI) so they reach the worker through ANY
@@ -173,7 +177,11 @@ export async function runTestFile(
 					process.env.HELIX_SUITE ??
 					defaults.suite ??
 					"default",
-				bail: options.bail ?? process.env.HELIX_BAIL === "1",
+				bail:
+					options.bail ??
+					(process.env.HELIX_BAIL === "1" ? true : undefined) ??
+					tappedBail() ??
+					false,
 				bailLayer: options.bailLayer ?? envBailLayer(),
 			});
 			return sanitize(raw);

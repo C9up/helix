@@ -32,6 +32,16 @@ export interface CLIArgs {
 	suite?: string;
 	/** `--files` — substrings matched against the test file path (Japa `--files`). */
 	files?: string[];
+	/** `--reporters` — the reporters activated for this run. */
+	reporters?: string[];
+	/** `--bail` — stop at the first failure. */
+	bail?: boolean;
+	/** `--bail-layer` — how far a bail reaches. */
+	bailLayer?: string;
+	/** `--failed` — this run replays the previous run's failures. */
+	failed?: boolean;
+	/** `--force-exit` — the CLI will `process.exit()` once the run ends. */
+	forceExit?: boolean;
 }
 
 /** Comma-separated env list → trimmed non-empty entries, or undefined. */
@@ -63,6 +73,11 @@ export function envMatchAll(): boolean | undefined {
 	return process.env.HELIX_MATCH_ALL === "1" ? true : undefined;
 }
 
+/** A boolean flag as forwarded by the CLI — absent stays `undefined`, as in Japa. */
+function envFlag(name: string): boolean | undefined {
+	return process.env[name] === "1" ? true : undefined;
+}
+
 /** Every CLI flag the current worker can see. */
 export function readCLIArgs(): CLIArgs {
 	return {
@@ -75,5 +90,10 @@ export function readCLIArgs(): CLIArgs {
 		grep: process.env.HELIX_GREP,
 		suite: process.env.HELIX_SUITE,
 		files: envList("HELIX_FILES"),
+		reporters: envList("HELIX_REPORTERS"),
+		bail: envFlag("HELIX_BAIL"),
+		bailLayer: process.env.HELIX_BAIL_LAYER,
+		failed: envFlag("HELIX_FAILED"),
+		forceExit: envFlag("HELIX_FORCE_EXIT"),
 	};
 }

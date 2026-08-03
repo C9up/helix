@@ -199,21 +199,54 @@ function isInGroups(node: TestNode, groups: Set<string>): boolean {
 	return title !== undefined && groups.has(title);
 }
 
+/**
+ * The value actually thrown, carried alongside its serialized form.
+ *
+ * A result crosses the worker→CLI IPC boundary, so it can only hold plain data.
+ * The EMITTER, though, runs in the worker — where the thrown `Error` still
+ * exists, and where a Japa reporter or plugin expects `errors[].error` to be an
+ * `Error` instance. A symbol key is invisible to `JSON.stringify` and to
+ * `Object.keys`, so the original rides along without ever reaching the frame.
+ */
+const THROWN = Symbol("helix.thrown");
+
+/** The value a {@link SerializedError} was built from, when it is still around. */
+export function thrownValue(error: SerializedError): unknown {
+	return Reflect.get(error, THROWN);
+}
+
+function withThrown(
+	serialized: SerializedError,
+	thrown: unknown,
+): SerializedError {
+	Object.defineProperty(serialized, THROWN, {
+		value: thrown,
+		enumerable: false,
+	});
+	return serialized;
+}
+
 function serializeError(err: unknown): SerializedError {
 	if (err instanceof AssertionError) {
-		return {
-			name: err.name,
-			message: err.message,
-			stack: err.stack,
-			actual: err.actual,
-			expected: err.expected,
-			operator: err.operator,
-		};
+		return withThrown(
+			{
+				name: err.name,
+				message: err.message,
+				stack: err.stack,
+				actual: err.actual,
+				expected: err.expected,
+				operator: err.operator,
+			},
+			err,
+		);
 	}
 	if (err instanceof Error) {
-		return { name: err.name, message: err.message, stack: err.stack };
+		return withThrown(
+			{ name: err.name, message: err.message, stack: err.stack },
+			err,
+		);
 	}
-	return { name: "NonError", message: String(err) };
+	return withThrown({ name: "NonError", message: String(err) }, err);
 }
 
 function hasOnly(node: SuiteNode | TestNode): boolean {
@@ -469,7 +502,12 @@ function toEmittedErrors(
 	error: SerializedError | undefined,
 	phase: ErrorPhase,
 ): EmittedError[] {
-	return error === undefined ? [] : [{ phase, error }];
+	if (error === undefined) return [];
+	// Japa types `errors[].error` as `Error`; hand listeners the real one when
+	// this process still has it, and fall back to the serialized shape for a
+	// result that was rebuilt from a frame.
+	const thrown = thrownValue(error);
+	return [{ phase, error: thrown instanceof Error ? thrown : error }];
 }
 
 /**

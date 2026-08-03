@@ -88,7 +88,7 @@ const FLAG_SPEC = {
 	},
 	"force-exit": {
 		kind: "boolean",
-		help: "Exit as soon as the run ends — helix always does, accepted for parity",
+		help: "process.exit() as soon as the run ends, without draining the event loop (Japa --force-exit)",
 	},
 	watch: { kind: "boolean", help: "Watch mode — re-run on file changes" },
 	"watch-debounce": {
@@ -277,7 +277,12 @@ function printHelp() {
 		"helix — Vitest-compatible test runner",
 		"",
 		"Usage:",
-		"  helix test [files...|dirs...]",
+		"  helix test [files...|dirs...|suites...]",
+		"",
+		"  Positionals name test files or directories. When every one of them",
+		"  matches a suite declared in helix.config.*, they name SUITES instead",
+		"  (AdonisJS `node ace test unit functional`). With no positional and a",
+		"  config present, every suite runs, in order.",
 		"",
 		"Flags:",
 	];
@@ -455,7 +460,7 @@ async function main() {
 			root: process.cwd(),
 			files: expanded,
 			threads: parsed.flags.threads,
-			timeoutMs: parsed.flags.timeout,
+			timeoutMs: parsed.flags.timeout ?? helixConfig.timeout,
 			reporter: parsed.flags.reporter,
 			reporters: parsed.flags.reporters
 				? String(parsed.flags.reporters)
@@ -530,6 +535,22 @@ async function main() {
 		}
 		if (parsed.flags.bail === true) {
 			process.env.HELIX_BAIL = "1";
+		}
+		// Flags a plugin reads off `api.cliArgs` but the runtime itself doesn't
+		// act on — forwarded for the same reason as the filters: Japa hands its
+		// plugins the whole flag set.
+		if (cfg.reporters !== undefined) {
+			process.env.HELIX_REPORTERS = cfg.reporters.join(",");
+		} else if (parsed.flags.reporter !== undefined) {
+			process.env.HELIX_REPORTERS = String(parsed.flags.reporter);
+		}
+		if (parsed.flags.failed === true) {
+			process.env.HELIX_FAILED = "1";
+		}
+		// `--force-exit`, or `forceExit` in the config (AdonisJS `tests.forceExit`).
+		// Read back by `finish()` below, and by a plugin off `api.cliArgs`.
+		if (parsed.flags["force-exit"] === true || helixConfig.forceExit === true) {
+			process.env.HELIX_FORCE_EXIT = "1";
 		}
 		if (parsed.flags["bail-layer"] !== undefined) {
 			process.env.HELIX_BAIL_LAYER = String(parsed.flags["bail-layer"]);
@@ -641,9 +662,25 @@ async function main() {
 	}
 }
 
+/**
+ * Japa semantics: the process exits on its own once the event loop drains, so a
+ * resource a test left open surfaces as a hang you can diagnose — rather than
+ * being swallowed by an unconditional `process.exit`, which also truncates
+ * pending stdout writes. `--force-exit` is the escape hatch, exactly as in Japa.
+ */
+function finish(code) {
+	process.exitCode = code;
+	// The env var carries the config-declared `forceExit`; the argv check also
+	// covers a failure that happened before the config was ever read.
+	const forced =
+		process.env.HELIX_FORCE_EXIT === "1" ||
+		process.argv.includes("--force-exit");
+	if (forced) process.exit(code);
+}
+
 main()
-	.then((code) => process.exit(code))
+	.then(finish)
 	.catch((err) => {
 		process.stderr.write(`helix: ${err instanceof Error ? err.stack : err}\n`);
-		process.exit(2);
+		finish(2);
 	});

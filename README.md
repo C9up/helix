@@ -32,8 +32,10 @@ With no positional, every suite runs, in order:
 ```ts
 // helix.config.ts
 export default {
+  timeout: 2_000,          // AdonisJS `tests.timeout`
+  forceExit: false,        // AdonisJS `tests.forceExit`
   suites: [
-    { name: "unit", files: ["tests/unit"], timeout: 2_000 },
+    { name: "unit", files: ["tests/unit/**/*.spec.(js|ts)"] },
     { name: "functional", files: ["tests/functional/**/*.spec.ts"], timeout: 30_000 },
   ],
 }
@@ -49,11 +51,12 @@ flags act on: `--watch` re-runs every selected suite on each change (one
 watcher for the whole sequence), `--bail` stops at the suite that failed,
 and the `--failed` cache holds every suite's failures.
 
-Named deviation from Adonis: `files` entries are directories or file
-paths resolved through helix's suffix-based discovery, not a glob
-engine. A trailing wildcard is understood (`tests/unit/**`, and
-`tests/**/*.spec.ts` also constrains the suffix); anything richer is
-rejected rather than half-honoured.
+`files` entries are plain paths (a directory is walked with helix's
+suffix discovery) or globs — `*`, `**`, `?`, `{a,b}`, `(a|b)`, `[abc]`,
+which covers AdonisJS's own defaults verbatim
+(`tests/unit/**/*.spec.(js|ts)`). Negation (`!…`) and extglob
+quantifiers (`+(…)`, `@(…)`) are reported rather than half-honoured, so
+a pattern never silently selects the wrong set.
 
 Filters follow Japa: `--tests` and `--groups` take exact titles,
 `--files` matches path segments (`--files=user`, `--files=unit/*`),
@@ -73,8 +76,10 @@ remaining file just to collect names.
 `--failed` re-runs only what failed last time, from the cache each run
 writes to `node_modules/.cache/helix/summary.json` (same `{ tests }`
 shape as Japa). `--reporters=spec,json` activates several reporters at
-once. `--force-exit` is accepted for parity and is a no-op: the helix
-CLI always exits as soon as the run ends.
+once. `--force-exit` (or `forceExit` in the config) calls
+`process.exit()` as soon as the run ends; without it the process exits
+on its own once the event loop drains, as in Japa — so a resource a test
+left open surfaces as a diagnosable hang instead of being swallowed.
 
 All of these work on BOTH orchestrators: the native (Rust) engine
 serializes the full per-test summary and implements bail and the
@@ -103,6 +108,13 @@ export const configureSuite = (suite) => {
 It is picked up automatically (`helix.config`'s `bootstrap` overrides the
 path) and imported by each worker before its test file, so a plugin's
 context macros exist by the time the first test declares itself.
+
+`configureSuite` receives Japa's `Suite` surface: `name`, `setup`,
+`teardown`, `bail`, and the `onTest` / `onGroup` taps — each mapped onto
+the node the runtime actually reads, so `suite.onTest(t => t.timeout(30_000))`
+really does change the timeout. What a callback cannot get is what only
+the owner of execution has (`add`, `stack`, `exec`, `failed`): helix
+builds the tree from the file's own `describe`/`test` and runs it itself.
 
 Two more Japa `Config` fields live here too, since helix has no
 `bin/test.ts` to put them in: `filters` (`{ tests, groups, tags, matchAll }`
@@ -136,9 +148,15 @@ await configure({
 ```
 
 - `config` — the resolved `configure()` options
-- `cliArgs` — the flags the CLI forwarded to this worker
-- `runner` — `getSummary()`: counts, `hasError`, failed titles
-- `emitter` — `runner:start` / `suite:*` / `group:*` / `test:*`
+- `cliArgs` — every flag the CLI forwarded to this worker (Japa's set:
+  `tags`, `tests`, `groups`, `files`, `matchAll`, `timeout`, `retries`,
+  `reporters`, `bail`, `bailLayer`, `failed`, `forceExit`, `suite`)
+- `runner` — `getSummary()`, `failed`, `bail()`. Not `registerReporter`:
+  reporters live in the CLI process, the only one that sees every file,
+  so a worker-registered reporter would report one file and claim to be
+  the run — use `--reporters` or `run({ reporterInstance })`
+- `emitter` — `runner:start` / `suite:*` / `group:*` / `test:*`, with
+  `errors[].error` the thrown `Error` itself
 - `context` — `macro` / `getter` (also on the `TestContext` class, as
   in Japa)
 - `cleanup` — a teardown run once the file's tests finish
