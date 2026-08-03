@@ -310,3 +310,164 @@ fn fill_os_random(_buf: &mut [u8]) -> bool {
 fn fill_os_random(_buf: &mut [u8]) -> bool {
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ream_test_core::summary::Summary;
+    use std::io::Write as _;
+
+    /// A stand-in worker: reads the instruction, echoes the nonce, and reports
+    /// a failure for any file whose name contains "red". Written to disk so the
+    /// pool spawns it exactly as it spawns the real one.
+    fn fake_worker(dir: &std::path::Path) -> String {
+        let entry = dir.join("fake-worker.mjs");
+        let mut f = std::fs::File::create(&entry).unwrap();
+        f.write_all(
+            br#"
+let raw = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (c) => { raw += c; });
+process.stdin.on("end", () => {
+  const instr = JSON.parse(raw.trim());
+  const fails = instr.file.includes("red");
+  const result = {
+    file: instr.file,
+    suites: [],
+    tests: [],
+    totals: { pass: fails ? 0 : 1, fail: fails ? 1 : 0, skip: 0, todo: 0 },
+    durationMs: 1,
+  };
+  process.stderr.write(
+    "__HELIX_RESULT__" +
+      JSON.stringify({ type: "result", nonce: instr.nonce, result }) +
+      "\n",
+  );
+});
+"#,
+        )
+        .unwrap();
+        entry.to_string_lossy().into_owned()
+    }
+
+    /// Records what the pool announced. The log is shared so the test can read
+    /// it back — the reporter itself is behind a `dyn` box by then.
+    struct RecordingReporter {
+        started: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl Reporter for RecordingReporter {
+        fn on_file_start(&mut self, file: &str) {
+            self.started.lock().unwrap().push(file.to_string());
+        }
+        fn on_file_result(&mut self, _result: &FileResult) {}
+        fn on_file_error(&mut self, _error: &WorkerError) {}
+        fn on_summary(&mut self, _summary: &Summary) {}
+    }
+
+    fn config(entry: String, bail: bool) -> PoolConfig {
+        PoolConfig {
+            node_bin: "node".into(),
+            node_args: vec![],
+            worker_entry: entry,
+            // One at a time, so "queued behind a failure" is deterministic
+            // rather than a race with the thread count.
+            threads: 1,
+            timeout: Duration::from_secs(20),
+            bail,
+        }
+    }
+
+    /// A reporter plus the log it writes to.
+    #[allow(clippy::type_complexity)]
+    fn recorder() -> (
+        Arc<Mutex<Box<dyn Reporter + Send>>>,
+        Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let reporter: Arc<Mutex<Box<dyn Reporter + Send>>> = Arc::new(Mutex::new(Box::new(
+            RecordingReporter { started: log.clone() },
+        )));
+        (reporter, log)
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("helix-pool-{}-{}", tag, std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// `green`, then `red`, then two more — the last two are what bail must drop.
+    fn files(dir: &std::path::Path) -> Vec<PathBuf> {
+        ["a-green.test.ts", "b-red.test.ts", "c-green.test.ts", "d-green.test.ts"]
+            .iter()
+            .map(|name| dir.join(name))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn runs_every_file_without_bail() {
+        let dir = temp_dir("nobail");
+        let entry = fake_worker(&dir);
+        let (reporter, _log) = recorder();
+
+        let (results, errors) =
+            run_pool(files(&dir), config(entry, false), reporter).await.unwrap();
+
+        assert_eq!(errors.len(), 0);
+        assert_eq!(results.len(), 4);
+        assert_eq!(results.iter().filter(|r| r.totals.fail > 0).count(), 1);
+    }
+
+    #[tokio::test]
+    async fn bail_drops_the_files_queued_behind_a_failure() {
+        let dir = temp_dir("bail");
+        let entry = fake_worker(&dir);
+        let (reporter, _log) = recorder();
+
+        let (results, errors) =
+            run_pool(files(&dir), config(entry, true), reporter).await.unwrap();
+
+        assert_eq!(errors.len(), 0);
+        // The green file, then the red one that closed the gate. The two behind
+        // it are dropped, not reported — helix runs one process per file, so
+        // naming them would mean spawning them.
+        assert_eq!(results.len(), 2);
+        assert_eq!(results.iter().filter(|r| r.totals.fail > 0).count(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_dropped_file_is_never_announced() {
+        let dir = temp_dir("announce");
+        let entry = fake_worker(&dir);
+        let (reporter, log) = recorder();
+
+        run_pool(files(&dir), config(entry, true), reporter).await.unwrap();
+
+        // `on_file_start` for a file the gate dropped would print a banner for
+        // a test that never ran — the reporter must not see it at all.
+        let started = log.lock().unwrap();
+        assert_eq!(started.len(), 2);
+        assert!(started[0].ends_with("a-green.test.ts"));
+        assert!(started[1].ends_with("b-red.test.ts"));
+    }
+
+    #[tokio::test]
+    async fn a_worker_that_never_frames_becomes_an_error_not_a_silent_pass() {
+        let dir = temp_dir("noframe");
+        let entry = dir.join("silent-worker.mjs");
+        std::fs::write(&entry, b"process.exit(0)\n").unwrap();
+        let (reporter, _log) = recorder();
+
+        let (results, errors) = run_pool(
+            vec![dir.join("a.test.ts")],
+            config(entry.to_string_lossy().into_owned(), false),
+            reporter,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(results.len(), 0);
+        assert_eq!(errors.len(), 1);
+    }
+}
