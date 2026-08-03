@@ -31,7 +31,7 @@ export function globRejection(entry: string): string | undefined {
 }
 
 /** Regex-escape one literal character. */
-function escape(char: string): string {
+function escapeChar(char: string): string {
 	return /[.+^$|\\]/.test(char) ? `\\${char}` : char;
 }
 
@@ -104,7 +104,7 @@ export function globToRegExp(entry: string): RegExp {
 				continue;
 			}
 		}
-		out += escape(char);
+		out += escapeChar(char);
 		i += 1;
 	}
 	return new RegExp(`^${out}$`);

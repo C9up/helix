@@ -78,7 +78,27 @@ function envFlag(name: string): boolean | undefined {
 	return process.env[name] === "1" ? true : undefined;
 }
 
-/** Every CLI flag the current worker can see. */
+/**
+ * The run's flags, as ONE object.
+ *
+ * Japa hands its plugins a `cliArgs` they may edit — that is a documented way
+ * to steer a run from a plugin. Rebuilding it from the environment on every
+ * access would silently drop those edits, so it is built once and every reader
+ * (the plugin API, and the runtime's own filter resolution) shares it.
+ */
+let materialised: CLIArgs | undefined;
+
+export function cliArgs(): CLIArgs {
+	materialised ??= readCLIArgs();
+	return materialised;
+}
+
+/** Test seam: rebuild from the environment on the next access. */
+export function resetCLIArgs(): void {
+	materialised = undefined;
+}
+
+/** Every CLI flag the current worker can see, read fresh from the environment. */
 export function readCLIArgs(): CLIArgs {
 	return {
 		tags: envTags(),

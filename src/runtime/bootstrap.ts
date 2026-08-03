@@ -37,14 +37,7 @@ import {
 	type Plugin,
 	type RunnerHook,
 } from "./configure.js";
-import {
-	type GroupHandle,
-	registerGroupTap,
-	registerTestTap,
-	resetTaps,
-	setBail,
-	type TestHandle,
-} from "./suite-taps.js";
+import { makeSuiteHandle, resetTaps, type SuiteHandle } from "./suite-taps.js";
 
 /** File names probed under the project root when none is configured. */
 export const BOOTSTRAP_FILENAMES = [
@@ -52,28 +45,6 @@ export const BOOTSTRAP_FILENAMES = [
 	"tests/bootstrap.js",
 	"tests/bootstrap.mjs",
 ];
-
-/**
- * What `configureSuite` receives — Japa's `Suite`, minus the members that only
- * make sense to whoever OWNS execution (`add`, `stack`, `exec`, `failed`):
- * helix builds the tree from the file's own `describe`/`test` and runs it
- * itself, so a handle exposing those would be lying about what a callback can
- * do. Everything a callback can genuinely configure is here.
- */
-export interface SuiteHandle {
-	/** The suite these files belong to (`--suite`, or a `helix.config` suite). */
-	readonly name: string;
-	/** Run before this suite's tests. */
-	setup(fn: RunnerHook): SuiteHandle;
-	/** Run after this suite's tests, in reverse registration order. */
-	teardown(fn: RunnerHook): SuiteHandle;
-	/** Configure every test of the suite before it runs (Japa `Suite#onTest`). */
-	onTest(callback: (test: TestHandle) => void): SuiteHandle;
-	/** Configure every group of the suite before it runs (Japa `Suite#onGroup`). */
-	onGroup(callback: (group: GroupHandle) => void): SuiteHandle;
-	/** Stop this suite at the first failure (Japa `Suite#bail`). */
-	bail(toggle?: boolean): SuiteHandle;
-}
 
 /**
  * The exports helix reads off the bootstrap module. `plugins`, `runnerHooks`
@@ -188,30 +159,7 @@ async function applyBootstrap(file: string, suite: string): Promise<void> {
 	const setup = [...(module.runnerHooks?.setup ?? [])];
 	const teardown = [...(module.runnerHooks?.teardown ?? [])];
 	if (module.configureSuite) {
-		const handle: SuiteHandle = {
-			name: suite,
-			setup(fn) {
-				setup.push(fn);
-				return handle;
-			},
-			teardown(fn) {
-				teardown.push(fn);
-				return handle;
-			},
-			onTest(callback) {
-				registerTestTap(callback);
-				return handle;
-			},
-			onGroup(callback) {
-				registerGroupTap(callback);
-				return handle;
-			},
-			bail(toggle = true) {
-				setBail(toggle);
-				return handle;
-			},
-		};
-		module.configureSuite(handle);
+		module.configureSuite(makeSuiteHandle(suite, setup, teardown));
 	}
 	await configure({
 		plugins: module.plugins,

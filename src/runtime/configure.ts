@@ -18,10 +18,11 @@
  * the other way round — the Japa "runner + plugins" topology.
  */
 
-import { type CLIArgs, readCLIArgs } from "./cli-args.js";
+import { type CLIArgs, cliArgs } from "./cli-args.js";
 import { type TestContext, TestContextRegistry } from "./context.js";
 import { type Emitter, emitter } from "./emitter.js";
 import { Runner } from "./runner.js";
+import { makeSuiteHandle, setCurrentSuite } from "./suite-taps.js";
 
 /**
  * What a plugin uses to extend the test context. Mirrors Japa's
@@ -46,8 +47,11 @@ export type RunnerHook = () => void | Promise<void>;
  * `TestContext` class) and `cleanup` (Japa uses `config.teardown`).
  */
 export interface PluginApi {
-	/** The resolved options this run was configured with (Japa `config`). */
-	config: Readonly<ConfigureOptions>;
+	/**
+	 * The options this run was configured with (Japa `config`). Mutable: Japa
+	 * plugins edit it, and helix reads it back once every plugin has run.
+	 */
+	config: ConfigureOptions;
 	/** The flags the CLI forwarded to this worker (Japa `cliArgs`). */
 	cliArgs: CLIArgs;
 	/** Run-level counters, readable once the run ends (Japa `runner`). */
@@ -156,12 +160,16 @@ let resolvedConfig: ConfigureOptions = {};
 
 const api: PluginApi = {
 	// A getter so a plugin reads the config of the `configure()` call it is
-	// running under, not an empty object captured at module load.
-	get config(): Readonly<ConfigureOptions> {
+	// running under, not an empty object captured at module load. Japa lets a
+	// plugin EDIT it (that is how a plugin raises the default timeout), so the
+	// object is handed over mutable and read back after every plugin has run.
+	get config(): ConfigureOptions {
 		return resolvedConfig;
 	},
+	// The same object every access, for the same reason: a plugin that writes
+	// `api.cliArgs.tags = [...]` must actually steer the run.
 	get cliArgs(): CLIArgs {
-		return readCLIArgs();
+		return cliArgs();
 	},
 	runner,
 	emitter,
@@ -175,28 +183,45 @@ const api: PluginApi = {
 };
 
 /**
- * Install plugins + runner hooks. Runs each plugin in order (awaiting async
- * ones) so every context extension is registered before the first test runs.
- * `setup` hooks run now; `teardown` hooks + `api.cleanup` fire after the run
- * (see {@link drainRunnerTeardowns}). Call once from a bootstrap file
+ * Install plugins + runner hooks. Call once from a bootstrap file
  * (Japa/AdonisJS `bin/test.ts` / `tests/bootstrap.ts`).
+ *
+ * Order follows Japa: PLUGINS first, then the run's `setup` hooks, then the
+ * `teardown` hooks are parked for after the run (see {@link
+ * drainRunnerTeardowns}). That ordering is what makes a plugin's edits count —
+ * it can raise `config.timeout`, push a `setup` hook, or reach for
+ * `runner.onSuite`, and the run picks all of it up because nothing has been
+ * read yet.
  */
 export async function configure(options: ConfigureOptions): Promise<void> {
 	resolvedConfig = options;
-	if (options.timeout !== undefined)
-		configuredDefaults.timeout = options.timeout;
-	if (options.retries !== undefined)
-		configuredDefaults.retries = options.retries;
-	if (options.suite !== undefined) configuredDefaults.suite = options.suite;
-	if (options.filters !== undefined)
-		configuredDefaults.filters = options.filters;
-	if (options.importer !== undefined)
-		configuredDefaults.importer = options.importer;
-	for (const fn of options.setup ?? []) await fn();
-	for (const plugin of options.plugins ?? []) {
+	// Hook arrays a plugin can append to (through `runner.onSuite`) — they must
+	// exist before the plugins run, and they are the very arrays drained below.
+	resolvedConfig.setup ??= [];
+	resolvedConfig.teardown ??= [];
+	const setup = resolvedConfig.setup;
+	const teardown = resolvedConfig.teardown;
+	setCurrentSuite(makeSuiteHandle(options.suite ?? "default", setup, teardown));
+
+	for (const plugin of resolvedConfig.plugins ?? []) {
 		await plugin(api);
 	}
-	for (const fn of options.teardown ?? []) runnerTeardowns.push(fn);
+
+	// Read the defaults back AFTER the plugins, so a plugin that edited the
+	// config steers the run rather than writing into a value already consumed.
+	if (resolvedConfig.timeout !== undefined)
+		configuredDefaults.timeout = resolvedConfig.timeout;
+	if (resolvedConfig.retries !== undefined)
+		configuredDefaults.retries = resolvedConfig.retries;
+	if (resolvedConfig.suite !== undefined)
+		configuredDefaults.suite = resolvedConfig.suite;
+	if (resolvedConfig.filters !== undefined)
+		configuredDefaults.filters = resolvedConfig.filters;
+	if (resolvedConfig.importer !== undefined)
+		configuredDefaults.importer = resolvedConfig.importer;
+
+	for (const fn of setup) await fn();
+	for (const fn of teardown) runnerTeardowns.push(fn);
 }
 
 /**

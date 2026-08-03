@@ -16,7 +16,7 @@
  */
 
 import type { Emitter } from "./emitter.js";
-import { setBail } from "./suite-taps.js";
+import { currentSuite, type SuiteHandle, setBail } from "./suite-taps.js";
 
 /** Test counts for a run (Japa `summary.aggregates`). */
 export interface SummaryAggregates {
@@ -104,6 +104,18 @@ export class Runner {
 	 */
 	bail(toggle = true): this {
 		setBail(toggle);
+		return this;
+	}
+
+	/**
+	 * Configure the suite before it runs (Japa `Runner#onSuite`). Japa calls the
+	 * callback once per suite; a worker runs exactly one, so it is called once,
+	 * immediately — plugins run before the suite's hooks, so what the callback
+	 * registers still takes effect.
+	 */
+	onSuite(callback: (suite: SuiteHandle) => void): this {
+		const suite = currentSuite();
+		if (suite) callback(suite);
 		return this;
 	}
 

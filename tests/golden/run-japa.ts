@@ -12,7 +12,7 @@
 import { pathToFileURL } from "node:url";
 import { configure, processCLIArgs, run } from "@japa/runner";
 import type { Emitter, Runner } from "@japa/runner/core";
-import { emitGolden } from "./journal.js";
+import { emitGolden, shapeOf } from "./journal.js";
 
 const file = process.argv[2];
 if (file === undefined) {
@@ -65,6 +65,7 @@ configure({
 							isSkipped: p.isSkipped === true,
 							isTodo: p.isTodo === true,
 							datasetIndex: p.dataset?.index,
+							keys: shapeOf(p),
 						}),
 					);
 					emitter.on("test:end", (p) =>
@@ -76,6 +77,10 @@ configure({
 							isTodo: p.isTodo === true,
 							retryAttempt: p.retryAttempt,
 							errorPhases: p.errors.map((entry) => entry.phase),
+							keys: shapeOf(p),
+							errorsAreErrors: p.errors.every(
+								(entry) => entry.error instanceof Error,
+							),
 						}),
 					);
 				},

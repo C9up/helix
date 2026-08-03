@@ -17,7 +17,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadBootstrap } from "./bootstrap.js";
-import { envCount, envList, envMatchAll, envTags } from "./cli-args.js";
+import { cliArgs } from "./cli-args.js";
 import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
 import { type ExecuteOptions, executeRoot, type FileResult } from "./run.js";
 import { withCollection } from "./suite.js";
@@ -133,7 +133,7 @@ export async function runTestFile(
 	// `tests/bootstrap.ts` (AdonisJS) installs the run's plugins and hooks, so
 	// it must run BEFORE the test file: a plugin's context macros have to exist
 	// by the time the file's first test declares itself.
-	const suiteName = options.suite ?? process.env.HELIX_SUITE;
+	const suiteName = options.suite ?? cliArgs().suite;
 	await loadBootstrap(
 		suiteName === undefined || suiteName === "" ? "default" : suiteName,
 	);
@@ -150,39 +150,32 @@ export async function runTestFile(
 		// point at which Japa's own `onTest`/`onGroup` fire.
 		applyTaps(root);
 		try {
-			// Retries / grep / tags are per-test runtime filters. They're carried via
-			// env vars (set by the CLI) so they reach the worker through ANY
-			// orchestrator — the Rust native engine forwards a fixed instruction
-			// shape, but child processes still inherit the CLI process env.
-			// Explicit options always win over the env fallback.
-			// `configure({ timeout, retries })` ran during the import above; its
-			// defaults sit BELOW explicit options / env (CLI wins), ABOVE the
-			// runtime's own `?? 0`.
-			// `configure({ filters })` (Japa parity) sits at the same level as the
-			// other configured defaults: BELOW an explicit option and below the
-			// CLI env, so a filter typed at the prompt still wins.
+			// Retries / grep / tags are per-test runtime filters. The CLI carries
+			// them in env vars so they reach the worker through ANY orchestrator —
+			// the Rust engine forwards a fixed instruction shape, but a child
+			// process still inherits the CLI's env.
+			//
+			// Precedence, highest first: an explicit `runTestFile` option, then the
+			// CLI flags, then what `configure()` set (`timeout`, `retries`,
+			// `filters`), then the runtime's own fallback. So a filter typed at the
+			// prompt always beats one written in a bootstrap.
 			const defaults = getConfiguredDefaults();
 			const filters = defaults.filters;
+			// Read through the shared `cliArgs` object rather than the env: a
+			// plugin may have edited it (Japa parity), and an edit that the
+			// runtime ignored would be worse than not offering it at all.
+			const flags = cliArgs();
 			const raw = await executeRoot(root, absolutePath, {
 				timeoutMs: options.timeoutMs ?? defaults.timeout,
-				retries:
-					options.retries ?? envCount("HELIX_RETRIES") ?? defaults.retries,
-				grep: options.grep ?? process.env.HELIX_GREP,
-				tags: options.tags ?? envTags() ?? filters?.tags,
-				matchAll: options.matchAll ?? envMatchAll() ?? filters?.matchAll,
-				tests: options.tests ?? envList("HELIX_TESTS") ?? filters?.tests,
-				groups: options.groups ?? envList("HELIX_GROUPS") ?? filters?.groups,
-				suite:
-					options.suite ??
-					process.env.HELIX_SUITE ??
-					defaults.suite ??
-					"default",
-				bail:
-					options.bail ??
-					(process.env.HELIX_BAIL === "1" ? true : undefined) ??
-					tappedBail() ??
-					false,
-				bailLayer: options.bailLayer ?? envBailLayer(),
+				retries: options.retries ?? flags.retries ?? defaults.retries,
+				grep: options.grep ?? flags.grep,
+				tags: options.tags ?? flags.tags ?? filters?.tags,
+				matchAll: options.matchAll ?? flags.matchAll ?? filters?.matchAll,
+				tests: options.tests ?? flags.tests ?? filters?.tests,
+				groups: options.groups ?? flags.groups ?? filters?.groups,
+				suite: options.suite ?? flags.suite ?? defaults.suite ?? "default",
+				bail: options.bail ?? flags.bail ?? tappedBail() ?? false,
+				bailLayer: options.bailLayer ?? asBailLayer(flags.bailLayer),
 			});
 			return sanitize(raw);
 		} finally {
@@ -194,8 +187,9 @@ export async function runTestFile(
 }
 
 /** `--bail-layer` as forwarded by the CLI; anything else falls back to runner. */
-function envBailLayer(): "group" | "suite" | "runner" | undefined {
-	const raw = process.env.HELIX_BAIL_LAYER;
+function asBailLayer(
+	raw: string | undefined,
+): "group" | "suite" | "runner" | undefined {
 	if (raw === "group" || raw === "suite" || raw === "runner") return raw;
 	return undefined;
 }

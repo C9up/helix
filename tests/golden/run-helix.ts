@@ -9,7 +9,7 @@
 
 import { emitter } from "../../src/runtime/emitter.js";
 import { runTestFile } from "../../src/runtime/worker.js";
-import { emitGolden } from "./journal.js";
+import { emitGolden, shapeOf } from "./journal.js";
 
 const file = process.argv[2];
 if (file === undefined) {
@@ -55,6 +55,7 @@ emitter.on("test:start", (p) =>
 		isSkipped: p.isSkipped === true,
 		isTodo: p.isTodo === true,
 		datasetIndex: p.dataset?.index,
+		keys: shapeOf(p),
 	}),
 );
 emitter.on("test:end", (p) =>
@@ -66,6 +67,8 @@ emitter.on("test:end", (p) =>
 		isTodo: p.isTodo === true,
 		retryAttempt: p.retryAttempt,
 		errorPhases: p.errors.map((entry) => entry.phase),
+		keys: shapeOf(p),
+		errorsAreErrors: p.errors.every((entry) => entry.error instanceof Error),
 	}),
 );
 

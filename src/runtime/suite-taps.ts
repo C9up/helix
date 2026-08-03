@@ -114,11 +114,13 @@ export function testHandle(node: TestNode): TestHandle {
 			return handle;
 		},
 		setup(fn) {
-			(node.setups ??= []).push(fn);
+			node.setups ??= [];
+			node.setups.push(fn);
 			return handle;
 		},
 		teardown(fn) {
-			(node.teardowns ??= []).push(fn);
+			node.teardowns ??= [];
+			node.teardowns.push(fn);
 			return handle;
 		},
 	};
@@ -162,6 +164,82 @@ export function groupHandle(node: SuiteNode): GroupHandle {
 	return handle;
 }
 
+/** A run-level hook, as `suite.setup()` / `suite.teardown()` take it. */
+export type SuiteHook = () => void | Promise<void>;
+
+/**
+ * What `configureSuite` and `runner.onSuite` receive — Japa's `Suite`, minus
+ * the members that only make sense to whoever OWNS execution (`add`, `stack`,
+ * `exec`, `failed`): helix builds the tree from the file's own `describe`/`test`
+ * and runs it itself, so a handle exposing those would be lying about what a
+ * callback can do. Everything a callback can genuinely configure is here.
+ */
+export interface SuiteHandle {
+	/** The suite these files belong to (`--suite`, or a `helix.config` suite). */
+	readonly name: string;
+	/** Run before this suite's tests. */
+	setup(fn: SuiteHook): SuiteHandle;
+	/** Run after this suite's tests, in reverse registration order. */
+	teardown(fn: SuiteHook): SuiteHandle;
+	/** Configure every test of the suite before it runs (Japa `Suite#onTest`). */
+	onTest(callback: (test: TestHandle) => void): SuiteHandle;
+	/** Configure every group of the suite before it runs (Japa `Suite#onGroup`). */
+	onGroup(callback: (group: GroupHandle) => void): SuiteHandle;
+	/** Stop this suite at the first failure (Japa `Suite#bail`). */
+	bail(toggle?: boolean): SuiteHandle;
+}
+
+/**
+ * A handle whose `setup`/`teardown` append to the given arrays — the caller
+ * owns when those hooks run, so the same handle serves the bootstrap's
+ * `configureSuite` and a plugin's `runner.onSuite`.
+ */
+export function makeSuiteHandle(
+	name: string,
+	setup: SuiteHook[],
+	teardown: SuiteHook[],
+): SuiteHandle {
+	const handle: SuiteHandle = {
+		name,
+		setup(fn) {
+			setup.push(fn);
+			return handle;
+		},
+		teardown(fn) {
+			teardown.push(fn);
+			return handle;
+		},
+		onTest(callback) {
+			registerTestTap(callback);
+			return handle;
+		},
+		onGroup(callback) {
+			registerGroupTap(callback);
+			return handle;
+		},
+		bail(toggle = true) {
+			setBail(toggle);
+			return handle;
+		},
+	};
+	return handle;
+}
+
+/**
+ * The suite the current `configure()` call is running for. Set before plugins
+ * run so `runner.onSuite` has something to hand back — a worker runs exactly
+ * one suite, so Japa's "called once per suite" is "called once".
+ */
+let current: SuiteHandle | undefined;
+
+export function setCurrentSuite(handle: SuiteHandle | undefined): void {
+	current = handle;
+}
+
+export function currentSuite(): SuiteHandle | undefined {
+	return current;
+}
+
 /**
  * Callbacks registered before the file is imported (`configureSuite`, and a
  * plugin reaching for `runner.bail`), applied once the tree exists. Process-wide,
@@ -198,6 +276,7 @@ export function resetTaps(): void {
 	taps.onTest.length = 0;
 	taps.onGroup.length = 0;
 	taps.bail = undefined;
+	current = undefined;
 }
 
 /**

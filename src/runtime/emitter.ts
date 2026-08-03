@@ -52,16 +52,26 @@ export interface EmittedDataset {
 	row: unknown;
 }
 
-/** Shared shape of `test:start` / `test:end` (Japa `TestOptions`). */
+/**
+ * Shared shape of `test:start` / `test:end` — Japa's `TestOptions`, field for
+ * field. Only `title`, `tags`, `timeout`, `meta` and `isPinned` always carry a
+ * value; the rest appear when the corresponding modifier was used, so a
+ * reporter that probes for a key sees what Japa would show it.
+ */
 interface TestNodeBase {
 	title: EmittedTitle;
 	tags: string[];
 	timeout: number;
+	waitsForDone?: boolean;
+	/** The test body, as Japa hands it over. Absent on a `todo`. */
+	executor?: (...args: never[]) => unknown;
 	retries?: number;
 	retryAttempt?: number;
 	isTodo?: boolean;
 	isSkipped?: boolean;
 	isFailing?: boolean;
+	skipReason?: string;
+	failReason?: string;
 	isPinned: boolean;
 	meta: Record<string, unknown>;
 	dataset?: EmittedDataset;

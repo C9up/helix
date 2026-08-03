@@ -31,6 +31,25 @@ export interface GoldenEvent {
 	retryAttempt?: number;
 	datasetIndex?: number;
 	errorPhases?: string[];
+	/** The payload's own keys — the node's RAW shape, not a normalization of it. */
+	keys?: string[];
+	/** Whether `errors[].error` is an `Error` instance, as Japa types it. */
+	errorsAreErrors?: boolean;
+}
+
+/**
+ * The keys a payload actually carries a value under, sorted.
+ *
+ * Comparing this alongside the normalized fields is what turns "the two runners
+ * agree on the semantics we chose to look at" into "the two runners hand a
+ * reporter the same OBJECT". A key present on one side only shows up as a
+ * journal diff. Keys explicitly set to `undefined` are skipped: an absent key
+ * and a key holding `undefined` read the same to every consumer.
+ */
+export function shapeOf(node: object): string[] {
+	return Object.keys(node)
+		.filter((key) => Reflect.get(node, key) !== undefined)
+		.sort();
 }
 
 /** Marks a journal line so harness/runner noise on stdout can be skipped. */

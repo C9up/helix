@@ -226,6 +226,9 @@ function withThrown(
 	return serialized;
 }
 
+/** The reason Japa attaches to a test skipped because the run bailed. */
+const BAIL_SKIP_REASON = "Skipped due to bail mode";
+
 function serializeError(err: unknown): SerializedError {
 	if (err instanceof AssertionError) {
 		return withThrown(
@@ -483,14 +486,24 @@ function buildTestStartNode(
 	dataset: EmittedDataset | undefined,
 	flags: { isTodo: boolean; isSkipped: boolean },
 ): TestStartNode {
+	// Japa's `TestOptions`, field for field. `title`, `tags`, `timeout`, `meta`,
+	// `isPinned` — and, as its `Test` constructor initialises them, `isTodo` and
+	// `retries` — always carry a value. The rest appear only when the matching
+	// modifier was used, so a reporter reading `"isSkipped" in node` sees what
+	// Japa would show it. Pinned down by the golden tests, which compare the raw
+	// key set of both runners' nodes.
 	return {
 		title: { original: node.name, expanded: expandedTitle },
 		tags: node.tags ?? [],
 		timeout: node.timeoutMs ?? ctx.timeoutMs,
-		retries: node.retries,
+		retries: node.retries ?? inheritedEach(node, "eachRetries") ?? ctx.retries,
+		waitsForDone: node.waitForDone === true ? true : undefined,
+		executor: node.fn ?? node.datasetBody,
 		isTodo: flags.isTodo,
-		isSkipped: flags.isSkipped,
-		isFailing: node.failing === true,
+		isSkipped: flags.isSkipped ? true : undefined,
+		isFailing: node.failing === true ? true : undefined,
+		skipReason: flags.isSkipped ? node.reason : undefined,
+		failReason: node.failing === true ? node.reason : undefined,
 		isPinned: node.pinned === true,
 		meta: testMeta(node, ctx),
 		dataset,
@@ -596,6 +609,10 @@ async function runTest(
 	// what is left — Japa marks them `skip`, it does not drop them.
 	const nodeSkipped =
 		node.mode === "skip" || deferredSkip || filteredOut || ctx.bailed;
+	// Japa marks a bailed-over test with `skip(true, "Skipped due to bail mode")`,
+	// so the reason travels on the node and reaches `skipReason` on the events.
+	// Mirrored here, on the same node, for the same reason.
+	if (ctx.bailed && node.reason === undefined) node.reason = BAIL_SKIP_REASON;
 
 	const makeSkip = (
 		name: string,

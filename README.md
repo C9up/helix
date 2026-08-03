@@ -151,15 +151,21 @@ await configure({
 - `cliArgs` — every flag the CLI forwarded to this worker (Japa's set:
   `tags`, `tests`, `groups`, `files`, `matchAll`, `timeout`, `retries`,
   `reporters`, `bail`, `bailLayer`, `failed`, `forceExit`, `suite`)
-- `runner` — `getSummary()`, `failed`, `bail()`. Not `registerReporter`:
-  reporters live in the CLI process, the only one that sees every file,
-  so a worker-registered reporter would report one file and claim to be
-  the run — use `--reporters` or `run({ reporterInstance })`
+- `runner` — `getSummary()`, `failed`, `bail()`, `onSuite()`. Not
+  `registerReporter`: reporters live in the CLI process, the only one
+  that sees every file, so a worker-registered reporter would report one
+  file and claim to be the run — use `--reporters`, or
+  `run({ reporterInstance })`
 - `emitter` — `runner:start` / `suite:*` / `group:*` / `test:*`, with
   `errors[].error` the thrown `Error` itself
 - `context` — `macro` / `getter` (also on the `TestContext` class, as
   in Japa)
 - `cleanup` — a teardown run once the file's tests finish
+
+`config` and `cliArgs` are handed over MUTABLE and read back once every
+plugin has run, so a plugin can raise `config.timeout`, push a `setup`
+hook or narrow `cliArgs.tags` and have the run follow — Japa's contract.
+Plugins therefore run BEFORE the run's `setup` hooks, as in Japa.
 
 In `package.json`, call the `helix` bin directly — in npm scripts it resolves to
 `node_modules/.bin/helix` and bootstraps the TS loader itself, so the verbose
@@ -194,7 +200,7 @@ vitest suite.
 `tests/golden/` runs helix against the **real `@japa/runner`**. Every
 spec under `specs/helix/` has a byte-identical twin under
 `specs/japa/` — only the runner import differs. Each pair is executed
-by its own runner; both harnesses write the same normalized event
+by its own runner; both harnesses write the same event
 journal (`runner:start`, `group:start`, `test:start`, `test:end`, …)
 and the journals must match event for event:
 
@@ -207,6 +213,13 @@ and the journals must match event for event:
 | `macros` | `test.macro(callback)` + `t.cleanup` |
 | `group_identity` | `test.group()` returns the instance its hooks get |
 | `filters` | `--tags` (OR), `--match-all`, `~@tag`, `--tests`, `--groups` |
+
+Each journal entry also carries the payload's RAW key set, so the
+comparison is not "the two runners agree on the fields we chose to look
+at" but "they hand a reporter the same object". That is what pinned
+`isTodo`/`retries` to always-present, `isSkipped`/`isFailing`/
+`skipReason` to only-when-set, and the bail skip reason to Japa's own
+wording.
 
 The filter matrix runs the same flags through both runners, including
 the rules that a group — or a whole suite — with no runnable test
