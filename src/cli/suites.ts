@@ -21,7 +21,14 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { type DiscoveryOptions, discover } from "./discover.js";
-import { globBaseDir, globRejection, globToRegExp, isGlob } from "./glob.js";
+import {
+	globBaseDir,
+	globRejection,
+	globToRegExp,
+	isGlob,
+	isNegated,
+	withoutNegation,
+} from "./glob.js";
 
 /** One suite, as declared in the config file. */
 export interface SuiteDefinition {
@@ -153,7 +160,8 @@ async function resolveGlobEntry(
  * Resolve a suite's `files` into absolute test file paths. A plain path is a
  * directory to walk (helix's suffix discovery) or a file; anything with a
  * pattern character goes through the glob matcher, so AdonisJS's own
- * `tests/unit/**​/*.spec.(js|ts)` ports over verbatim.
+ * `tests/unit/**​/*.spec.(js|ts)` ports over verbatim. A `!pattern` entry
+ * subtracts from what the others selected.
  */
 export async function resolveSuiteFiles(
 	suite: SuiteDefinition,
@@ -161,7 +169,22 @@ export async function resolveSuiteFiles(
 	discovery: DiscoveryOptions | undefined,
 ): Promise<string[]> {
 	const out: string[] = [];
+	// `!pattern` entries subtract from whatever the selecting entries gathered,
+	// so they are applied once at the end regardless of where they were written.
+	const excluded: RegExp[] = [];
 	for (const entry of suite.files) {
+		if (isNegated(entry)) {
+			const pattern = withoutNegation(entry);
+			const rejection = globRejection(pattern);
+			if (rejection !== undefined) {
+				process.stderr.write(
+					`helix: suite "${suite.name}": ${entry}: ${rejection}\n`,
+				);
+				continue;
+			}
+			excluded.push(globToRegExp(pattern));
+			continue;
+		}
 		if (isGlob(entry)) {
 			out.push(...(await resolveGlobEntry(entry, suite.name, root, discovery)));
 			continue;
@@ -180,7 +203,12 @@ export async function resolveSuiteFiles(
 		out.push(abs);
 	}
 	// A file listed by two entries runs once.
-	return [...new Set(out)];
+	const selected = [...new Set(out)];
+	if (excluded.length === 0) return selected;
+	return selected.filter((file) => {
+		const relative = toPosix(path.relative(root, file));
+		return !excluded.some((pattern) => pattern.test(relative));
+	});
 }
 
 /**

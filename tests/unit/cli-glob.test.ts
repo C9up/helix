@@ -9,6 +9,8 @@ import {
 	globRejection,
 	globToRegExp,
 	isGlob,
+	isNegated,
+	withoutNegation,
 } from "../../src/cli/glob.js";
 
 /** Does `pattern` select `file`? */
@@ -81,15 +83,52 @@ describe("globToRegExp", () => {
 	});
 });
 
-describe("globRejection", () => {
-	it("refuses what it cannot honour, instead of half-matching", () => {
-		expect(globRejection("!tests/unit/**")).toMatch(/negation/);
-		expect(globRejection("tests/+(a|b)/*.ts")).toMatch(/extglob/);
-		expect(globRejection("tests/@(a|b)/*.ts")).toMatch(/extglob/);
+describe("extglob quantifiers", () => {
+	it("@( ) matches exactly one alternative", () => {
+		expect(matches("tests/@(unit|e2e)/a.ts", "tests/unit/a.ts")).toBe(true);
+		expect(matches("tests/@(unit|e2e)/a.ts", "tests/api/a.ts")).toBe(false);
 	});
 
-	it("accepts the shapes it does compile", () => {
+	it("?( ) makes the group optional", () => {
+		expect(matches("tests/a?(.spec).ts", "tests/a.spec.ts")).toBe(true);
+		expect(matches("tests/a?(.spec).ts", "tests/a.ts")).toBe(true);
+		expect(matches("tests/a?(.spec).ts", "tests/a.spec.spec.ts")).toBe(false);
+	});
+
+	it("*( ) and +( ) repeat the group", () => {
+		expect(matches("tests/a*(.x).ts", "tests/a.ts")).toBe(true);
+		expect(matches("tests/a*(.x).ts", "tests/a.x.x.ts")).toBe(true);
+		expect(matches("tests/a+(.x).ts", "tests/a.ts")).toBe(false);
+		expect(matches("tests/a+(.x).ts", "tests/a.x.x.ts")).toBe(true);
+	});
+
+	it("still reads a bare `*` or `?` as a wildcard", () => {
+		expect(matches("tests/*.ts", "tests/a.ts")).toBe(true);
+		expect(matches("tests/a?.ts", "tests/ab.ts")).toBe(true);
+	});
+});
+
+describe("negated entries", () => {
+	it("tells an exclusion entry from a pattern", () => {
+		expect(isNegated("!tests/unit/**")).toBe(true);
+		expect(withoutNegation("!tests/unit/**")).toBe("tests/unit/**");
+		expect(isNegated("tests/unit/**")).toBe(false);
+		expect(withoutNegation("tests/unit/**")).toBe("tests/unit/**");
+		// `!(…)` is a group, not an exclusion entry.
+		expect(isNegated("!(a|b)/x.ts")).toBe(false);
+	});
+});
+
+describe("globRejection", () => {
+	it("refuses the one form with no faithful rendering", () => {
+		expect(globRejection("tests/!(a|b)/*.ts")).toMatch(/negated extglob/);
+	});
+
+	it("accepts everything it does compile", () => {
 		expect(globRejection("tests/unit/**/*.spec.(js|ts)")).toBeUndefined();
 		expect(globRejection("tests/{a,b}/*.ts")).toBeUndefined();
+		expect(globRejection("tests/+(a|b)/*.ts")).toBeUndefined();
+		expect(globRejection("tests/@(a|b)/*.ts")).toBeUndefined();
+		expect(globRejection("tests/unit/**")).toBeUndefined();
 	});
 });

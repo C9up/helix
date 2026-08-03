@@ -52,11 +52,16 @@ watcher for the whole sequence), `--bail` stops at the suite that failed,
 and the `--failed` cache holds every suite's failures.
 
 `files` entries are plain paths (a directory is walked with helix's
-suffix discovery) or globs — `*`, `**`, `?`, `{a,b}`, `(a|b)`, `[abc]`,
+suffix discovery) or globs — `*`, `**`, `?`, `{a,b}`, `(a|b)`, `[abc]`
+and the extglob quantifiers `@(a|b)`, `?(a|b)`, `*(a|b)`, `+(a|b)`,
 which covers AdonisJS's own defaults verbatim
-(`tests/unit/**/*.spec.(js|ts)`). Negation (`!…`) and extglob
-quantifiers (`+(…)`, `@(…)`) are reported rather than half-honoured, so
-a pattern never silently selects the wrong set.
+(`tests/unit/**/*.spec.(js|ts)`). An entry starting with `!` subtracts
+from what the others selected (`"!tests/unit/slow/**"`).
+
+One form is refused rather than approximated: the negated extglob GROUP
+`!(a|b)`. Its semantics have no faithful regex rendering, and a
+near-miss would silently select the wrong files — the one thing a file
+selector must not do. Write a `!pattern` entry instead.
 
 Filters follow Japa: `--tests` and `--groups` take exact titles,
 `--files` matches path segments (`--files=user`, `--files=unit/*`),
@@ -95,7 +100,7 @@ exports — an Adonis one ports over unchanged:
 // tests/bootstrap.ts
 export const plugins = [apiClient({ baseUrl })]
 export const runnerHooks = {
-  setup: [() => openPool()],
+  setup: [(runner) => migrate()],   // may resolve to its own undo
   teardown: [() => closePool()],
 }
 export const configureSuite = (suite) => {
@@ -108,6 +113,11 @@ export const configureSuite = (suite) => {
 It is picked up automatically (`helix.config`'s `bootstrap` overrides the
 path) and imported by each worker before its test file, so a plugin's
 context macros exist by the time the first test declares itself.
+
+A `setup` hook receives the `runner` and may RESOLVE TO ITS OWN UNDO —
+the AdonisJS idiom (`setup: [() => testUtils.db().migrate()]`, where
+`migrate()` resolves to the rollback). Returned undos unwind first, then
+the declared teardowns, both in reverse order.
 
 `configureSuite` receives Japa's `Suite` surface: `name`, `setup`,
 `teardown`, `bail`, and the `onTest` / `onGroup` taps — each mapped onto

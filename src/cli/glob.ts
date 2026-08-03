@@ -3,12 +3,17 @@
  *
  * AdonisJS declares suites with real globs — its own defaults are
  * `tests/unit/**​/*.spec.(js|ts)` — so an `adonisrc.ts` suite list has to be
- * portable verbatim. This compiles the subset those patterns use (`*`, `**`,
- * `?`, `{a,b}`, `(a|b)`, `[abc]`) to a `RegExp` over root-relative POSIX paths.
+ * portable verbatim. Compiles to a `RegExp` over root-relative POSIX paths:
+ * `*`, `**`, `?`, `{a,b}`, `(a|b)`, `[abc]`, and the extglob quantifiers with an
+ * exact regex equivalent — `@(a|b)`, `?(a|b)`, `*(a|b)`, `+(a|b)`.
  *
- * Not a general glob engine: no `!` negation and no extglob quantifiers
- * (`+(a)`, `@(a)`, …). An entry using one is reported rather than
- * half-honoured, so a pattern never silently selects the wrong set.
+ * An ENTRY may also start with `!` to exclude what it matches from the suite,
+ * the way a file list is usually written.
+ *
+ * One form stays refused: `!(a|b)`, the negated extglob GROUP. Its semantics
+ * ("anything in this segment other than a or b", composing with whatever
+ * follows) have no faithful regex rendering, and a near-miss would silently
+ * select the wrong files — the one thing a file selector must not do.
  */
 
 const GLOB_CHARS = /[*?{}()[\]]/;
@@ -18,16 +23,33 @@ export function isGlob(entry: string): boolean {
 	return GLOB_CHARS.test(entry);
 }
 
-/** Extglob quantifiers — recognised only to be refused. */
-const EXTGLOB = /[!+@]\(/;
+/** The negated extglob group, the one form with no exact regex equivalent. */
+const NEGATED_GROUP = /!\(/;
+
+/** Whether an entry excludes rather than selects (a leading `!`). */
+export function isNegated(entry: string): boolean {
+	return entry.startsWith("!") && !entry.startsWith("!(");
+}
+
+/** The pattern an entry carries, with any leading `!` stripped. */
+export function withoutNegation(entry: string): string {
+	return isNegated(entry) ? entry.slice(1) : entry;
+}
 
 /** The reason an entry cannot be compiled, or `undefined` when it can. */
 export function globRejection(entry: string): string | undefined {
-	if (entry.startsWith("!")) return "negation (`!`) is not supported";
-	if (EXTGLOB.test(entry)) {
-		return "extglob quantifiers (`+(…)`, `@(…)`, `!(…)`) are not supported";
+	if (NEGATED_GROUP.test(entry)) {
+		return "the negated extglob group `!(…)` is not supported — write a `!pattern` entry to exclude";
 	}
 	return undefined;
+}
+
+/** The regex quantifier an extglob prefix stands for. */
+function quantifierFor(prefix: string): string {
+	if (prefix === "?") return "?";
+	if (prefix === "*") return "*";
+	if (prefix === "+") return "+";
+	return "";
 }
 
 /** Regex-escape one literal character. */
@@ -56,6 +78,20 @@ export function globToRegExp(entry: string): RegExp {
 	let i = 0;
 	while (i < entry.length) {
 		const char = entry[i];
+		// `@(a|b)`, `?(a|b)`, `*(a|b)`, `+(a|b)` — the prefix quantifies the group
+		// rather than standing on its own, so it is consumed here before the `*`
+		// and `?` cases could claim it.
+		if (
+			(char === "@" || char === "?" || char === "*" || char === "+") &&
+			entry[i + 1] === "("
+		) {
+			const close = matchingParen(entry, i + 1);
+			if (close !== -1) {
+				out += `(?:${bodyToRegExp(entry.slice(i + 2, close))})${quantifierFor(char)}`;
+				i = close + 1;
+				continue;
+			}
+		}
 		if (char === "*") {
 			if (entry[i + 1] === "*") {
 				i += 2;
@@ -108,4 +144,46 @@ export function globToRegExp(entry: string): RegExp {
 		i += 1;
 	}
 	return new RegExp(`^${out}$`);
+}
+
+/** Index of the `)` closing the `(` at `open`, or `-1` when unbalanced. */
+function matchingParen(entry: string, open: number): number {
+	let depth = 0;
+	for (let i = open; i < entry.length; i += 1) {
+		if (entry[i] === "(") depth += 1;
+		else if (entry[i] === ")") {
+			depth -= 1;
+			if (depth === 0) return i;
+		}
+	}
+	return -1;
+}
+
+/**
+ * Compile a quantified group's body. Each alternative is a pattern in its own
+ * right, so `@(a|b)` and `@(a,b)` both read as "a or b" — the two separators
+ * glob syntax uses for the same thing.
+ */
+function bodyToRegExp(body: string): string {
+	return splitAlternatives(body)
+		.map((alternative) => globToRegExp(alternative).source.slice(1, -1))
+		.join("|");
+}
+
+/** Split a group body on its TOP-LEVEL separators, so nesting survives. */
+function splitAlternatives(body: string): string[] {
+	const parts: string[] = [];
+	let depth = 0;
+	let start = 0;
+	for (let i = 0; i < body.length; i += 1) {
+		const char = body[i];
+		if (char === "(" || char === "{" || char === "[") depth += 1;
+		else if (char === ")" || char === "}" || char === "]") depth -= 1;
+		else if ((char === "|" || char === ",") && depth === 0) {
+			parts.push(body.slice(start, i));
+			start = i + 1;
+		}
+	}
+	parts.push(body.slice(start));
+	return parts;
 }

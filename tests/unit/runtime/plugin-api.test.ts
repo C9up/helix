@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cliArgs, resetCLIArgs } from "../../../src/runtime/cli-args.js";
 import {
 	configure,
+	drainRunnerTeardowns,
 	getConfiguredDefaults,
 	type PluginApi,
 } from "../../../src/runtime/configure.js";
@@ -245,6 +246,39 @@ describe("plugin API — what a plugin can steer", () => {
 		});
 
 		expect(tappedBail()).toBe(true);
+	});
+
+	it("a setup hook gets the runner and its returned undo is honoured", async () => {
+		// The AdonisJS idiom: `setup: [() => testUtils.db().migrate()]`, where
+		// migrate() resolves to the rollback. Ignoring the return would leave the
+		// migration in place after the run.
+		const order: string[] = [];
+		let sawRunner = false;
+
+		await configure({
+			setup: [
+				(runner) => {
+					sawRunner = typeof runner.getSummary === "function";
+					order.push("setup");
+					return () => {
+						order.push("undo");
+					};
+				},
+			],
+			teardown: [
+				() => {
+					order.push("teardown");
+				},
+			],
+		});
+
+		expect(sawRunner).toBe(true);
+		expect(order).toEqual(["setup"]);
+
+		await drainRunnerTeardowns();
+		// The undo unwinds before the explicit teardown — it is the innermost
+		// thing that was opened.
+		expect(order).toEqual(["setup", "undo", "teardown"]);
 	});
 
 	it("runner.failed reflects the run", async () => {

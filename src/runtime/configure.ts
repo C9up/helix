@@ -22,7 +22,12 @@ import { type CLIArgs, cliArgs } from "./cli-args.js";
 import { type TestContext, TestContextRegistry } from "./context.js";
 import { type Emitter, emitter } from "./emitter.js";
 import { Runner } from "./runner.js";
-import { makeSuiteHandle, setCurrentSuite } from "./suite-taps.js";
+import {
+	makeSuiteHandle,
+	type SuiteHook,
+	type SuiteHookCleanup,
+	setCurrentSuite,
+} from "./suite-taps.js";
 
 /**
  * What a plugin uses to extend the test context. Mirrors Japa's
@@ -35,8 +40,9 @@ export interface PluginContext {
 	getter(name: string, fn: (ctx: TestContext) => unknown): void;
 }
 
-/** A runner-level hook (setup/teardown), run once around the whole run. */
-export type RunnerHook = () => void | Promise<void>;
+/** A runner-level hook — Japa's shape, defined once in `suite-taps.ts`. */
+export type RunnerHook = SuiteHook;
+export type RunnerHookCleanup = SuiteHookCleanup;
 
 /**
  * The API handed to each plugin at {@link configure} time.
@@ -136,6 +142,9 @@ export interface ConfigureOptions {
 /** Teardowns to run after the run — from `configure({ teardown })` + `api.cleanup`. */
 const runnerTeardowns: RunnerHook[] = [];
 
+/** Undos returned by `setup` hooks — drained BEFORE the teardowns. */
+const runnerCleanups: RunnerHookCleanup[] = [];
+
 /** Run-level defaults from `configure({ timeout, retries, suite, filters })`. */
 interface ConfiguredDefaults {
 	timeout?: number;
@@ -220,7 +229,12 @@ export async function configure(options: ConfigureOptions): Promise<void> {
 	if (resolvedConfig.importer !== undefined)
 		configuredDefaults.importer = resolvedConfig.importer;
 
-	for (const fn of setup) await fn();
+	for (const fn of setup) {
+		// A `setup` hook may resolve to its own undo (the AdonisJS idiom); park it
+		// with the teardowns so it runs in reverse order with everything else.
+		const undo = await fn(runner);
+		if (typeof undo === "function") runnerCleanups.push(undo);
+	}
 	for (const fn of teardown) runnerTeardowns.push(fn);
 }
 
@@ -230,9 +244,20 @@ export async function configure(options: ConfigureOptions): Promise<void> {
  * so one bad teardown can't hide the test results.
  */
 export async function drainRunnerTeardowns(): Promise<void> {
+	// Cleanups returned by `setup` unwind first — they are the innermost thing
+	// that was opened. `null` for the error: the drain only happens once the run
+	// itself has finished, so there is no setup failure left to report.
+	for (let i = runnerCleanups.length - 1; i >= 0; i -= 1) {
+		try {
+			await runnerCleanups[i](null, runner);
+		} catch (err) {
+			console.error("[helix] runner cleanup failed:", err);
+		}
+	}
+	runnerCleanups.length = 0;
 	for (let i = runnerTeardowns.length - 1; i >= 0; i -= 1) {
 		try {
-			await runnerTeardowns[i]();
+			await runnerTeardowns[i](runner);
 		} catch (err) {
 			console.error("[helix] runner teardown failed:", err);
 		}

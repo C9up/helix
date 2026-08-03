@@ -18,6 +18,7 @@
  * handle that pretended otherwise would be lying about what a callback can do.
  */
 
+import type { Runner } from "./runner.js";
 import type { SuiteNode, TestNode } from "./suite.js";
 
 /** A hook body, as `test.setup()` / `group.setup()` take it. */
@@ -164,8 +165,28 @@ export function groupHandle(node: SuiteNode): GroupHandle {
 	return handle;
 }
 
-/** A run-level hook, as `suite.setup()` / `suite.teardown()` take it. */
-export type SuiteHook = () => void | Promise<void>;
+/**
+ * What a `setup` hook may return so it gets undone afterwards — Japa's
+ * `@poppinss/hooks` cleanup handler, called with `(error, runner)`.
+ */
+export type SuiteHookCleanup = (
+	error: Error | null,
+	runner: Runner,
+) => void | Promise<void>;
+
+/**
+ * A run-level hook, as `suite.setup()` / `suite.teardown()` take it.
+ *
+ * Japa hands it the `runner`, and lets a `setup` hook RETURN its own undo — the
+ * idiom AdonisJS is written in (`setup: [() => testUtils.db().migrate()]`,
+ * where `migrate()` resolves to the rollback). Both are honoured.
+ *
+ * The `Runner` import is type-only, so this module stays a leaf at runtime even
+ * though `runner.ts` imports it.
+ */
+export type SuiteHook =
+	| ((runner: Runner) => void | Promise<void>)
+	| ((runner: Runner) => SuiteHookCleanup | Promise<SuiteHookCleanup>);
 
 /**
  * What `configureSuite` and `runner.onSuite` receive — Japa's `Suite`, minus
