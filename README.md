@@ -177,7 +177,12 @@ await configure({
 })
 ```
 
-- `config` — the resolved `configure()` options
+- `config` — Japa's `BaseConfig`, filled in with what this run actually is:
+  `cwd`, `timeout`, `retries`, `filters`, `configureSuite`, `reporters`,
+  `plugins`, `importer`, `refiner`, `forceExit`, `setup`, `teardown`. What a
+  plugin can STEER is marked as such below; `filters.files` / `filters.suites`
+  and `reporters.activated` report what the CLI decided, because the file list
+  and the reporter chain are settled before a worker exists
 - `cliArgs` — every flag the CLI forwarded to this worker (Japa's set:
   `tags`, `tests`, `groups`, `files`, `matchAll`, `timeout`, `retries`,
   `reporters`, `bail`, `bailLayer`, `failed`, `forceExit`, `suite`)
@@ -194,8 +199,10 @@ await configure({
 
 `config` and `cliArgs` are handed over MUTABLE and read back once every
 plugin has run, so a plugin can raise `config.timeout`, push a `setup`
-hook or narrow `cliArgs.tags` and have the run follow — Japa's contract.
-Plugins therefore run BEFORE the run's `setup` hooks, as in Japa.
+hook, narrow `cliArgs.tags`, call `config.refiner.add("tags", […])` or
+replace `config.configureSuite` and have the run follow — Japa's contract.
+Plugins therefore run BEFORE both the run's `setup` hooks and
+`configureSuite`, as in Japa.
 
 In `package.json`, call the `helix` bin directly — in npm scripts it resolves to
 `node_modules/.bin/helix` and bootstraps the TS loader itself, so the verbose

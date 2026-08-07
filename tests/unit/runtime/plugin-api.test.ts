@@ -169,6 +169,64 @@ describe("plugin API — Japa surface", () => {
 });
 
 describe("plugin API — what a plugin can steer", () => {
+	it("hands a plugin the rest of Japa's BaseConfig, filled in", async () => {
+		// `undefined` where Japa has a value is what makes a plugin branch wrong.
+		process.env.HELIX_REPORTERS = "spec,json";
+		process.env.HELIX_FILES = "user";
+		process.env.HELIX_SUITE = "functional";
+		process.env.HELIX_FORCE_EXIT = "1";
+		resetCLIArgs();
+
+		const api = await capture();
+
+		expect(typeof api.config.cwd).toBe("string");
+		expect(api.config.reporters?.activated).toEqual(["spec", "json"]);
+		expect(api.config.forceExit).toBe(true);
+		expect(api.config.filters?.files).toEqual(["user"]);
+		expect(api.config.filters?.suites).toEqual(["functional"]);
+	});
+
+	it("refiner.add writes through to the filters that steer the run", async () => {
+		// Two doors, one room: a plugin using Japa's refiner must land in the same
+		// place as one setting `config.filters` directly.
+		let api: PluginApi | undefined;
+		await configure({
+			plugins: [
+				(received) => {
+					api = received;
+					received.config.refiner?.add("tags", ["@from-refiner"]);
+					received.config.refiner?.matchAllTags();
+				},
+			],
+		});
+
+		expect(api?.config.filters?.tags).toEqual(["@from-refiner"]);
+		expect(api?.config.filters?.matchAll).toBe(true);
+		expect(getConfiguredDefaults().filters?.tags).toEqual(["@from-refiner"]);
+	});
+
+	it("configureSuite runs AFTER the plugins, so one can replace it", async () => {
+		const order: string[] = [];
+		await configure({
+			suite: "functional",
+			configureSuite: () => {
+				order.push("declared");
+			},
+			plugins: [
+				(received) => {
+					order.push("plugin");
+					received.config.configureSuite = (suite) => {
+						order.push(`replaced:${suite.name}`);
+					};
+				},
+			],
+		});
+
+		// The plugin ran first and its replacement is what took effect — the
+		// declared one never ran at all.
+		expect(order).toEqual(["plugin", "replaced:functional"]);
+	});
+
 	it("a plugin's edit to config.timeout reaches the run", async () => {
 		// Japa documents config as something a plugin edits, so the defaults have
 		// to be read back AFTER the plugins — not before them.

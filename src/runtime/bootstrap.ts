@@ -38,7 +38,7 @@ import {
 	type RunnerHook,
 } from "./configure.js";
 import { applySuiteConfigure } from "./suite-config.js";
-import { makeSuiteHandle, resetTaps, type SuiteHandle } from "./suite-taps.js";
+import { resetTaps, type SuiteHandle } from "./suite-taps.js";
 
 /** File names probed under the project root when none is configured. */
 export const BOOTSTRAP_FILENAMES = [
@@ -164,18 +164,18 @@ async function applyBootstrap(file: string, suite: string): Promise<void> {
 		file === "" ? {} : readModule(await import(pathToFileURL(file).href));
 	const setup = [...(module.runnerHooks?.setup ?? [])];
 	const teardown = [...(module.runnerHooks?.teardown ?? [])];
-	// Both callbacks get the SAME handle, so hooks either of them registers land
-	// in the arrays `configure()` is about to consume. The bootstrap's runs
-	// first: it is the run-wide one, and a per-suite tweak reads as an override.
-	const handle = makeSuiteHandle(suite, setup, teardown);
-	if (module.configureSuite) {
-		module.configureSuite(handle);
-	}
-	await applySuiteConfigure(suite, handle);
+	// `configureSuite` is handed to `configure()` rather than called here, so it
+	// runs where Japa runs it: after the plugins, which is what lets a plugin
+	// read it or replace it. The per-suite callback chains onto it — both get
+	// the same handle, so hooks either registers reach the arrays below.
 	await configure({
 		plugins: module.plugins,
 		filters: module.filters,
 		importer: module.importer,
+		configureSuite: async (handle) => {
+			module.configureSuite?.(handle);
+			await applySuiteConfigure(suite, handle);
+		},
 		setup,
 		teardown,
 		suite,

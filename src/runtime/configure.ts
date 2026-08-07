@@ -24,6 +24,7 @@ import { type Emitter, emitter } from "./emitter.js";
 import { Runner } from "./runner.js";
 import {
 	makeSuiteHandle,
+	type SuiteHandle,
 	type SuiteHook,
 	type SuiteHookCleanup,
 	setCurrentSuite,
@@ -84,12 +85,21 @@ export type Plugin = (api: PluginApi) => void | Promise<void>;
 /**
  * Filters applied to the tests a file declares (Japa `config.filters`).
  *
- * Named deviation: Japa's `filters` also carries `files` and `suites`. Those
- * select which FILES run, and helix settles that list in the CLI process
- * before any worker — and therefore any bootstrap — exists. They stay CLI-side
- * (`--files`, and a suite positional), where they can still avoid a spawn.
+ * `files` and `suites` are reported, not honoured: they select which FILES run,
+ * and helix settles that list in the CLI process before any worker — and
+ * therefore any bootstrap — exists. Setting them here cannot un-spawn a worker
+ * that is already running, so they carry what the CLI decided and the CLI-side
+ * flags (`--files`, a suite positional) remain the way to decide it.
  */
 export interface ConfigureFilters {
+	/**
+	 * Path fragments the CLI matched files against (Japa `filters.files`).
+	 * Read-only here: helix settles the file list before a worker exists, so
+	 * this reports what was selected rather than selecting.
+	 */
+	files?: string[];
+	/** Suite names the run was limited to (Japa `filters.suites`). Read-only. */
+	suites?: string[];
 	/** Only tests carrying one of these tags (`~@tag`/`!@tag` excludes). */
 	tags?: string[];
 	/** Only groups with these exact titles. */
@@ -100,10 +110,68 @@ export interface ConfigureFilters {
 	matchAll?: boolean;
 }
 
+/**
+ * Japa's `Refiner`, as much of it as means anything here: a handle that ADDS
+ * filters. It writes straight into {@link ConfigureOptions.filters}, so a
+ * plugin calling `refiner.add("tags", [...])` steers the run exactly as setting
+ * the filter would — the object is a different door to the same room, not a
+ * second mechanism.
+ */
+export interface Refiner {
+	/** Add filter values for a layer (Japa `refiner.add`). */
+	add(layer: "tests" | "groups" | "tags", values: string[]): void;
+	/** Require every tag instead of any (Japa `refiner.matchAllTags`). */
+	matchAllTags(toggle?: boolean): void;
+}
+
+/** Build a {@link Refiner} writing into `filters`. */
+function makeRefiner(filters: ConfigureFilters): Refiner {
+	return {
+		add(layer, values) {
+			filters[layer] = [...(filters[layer] ?? []), ...values];
+		},
+		matchAllTags(toggle = true) {
+			filters.matchAll = toggle;
+		},
+	};
+}
+
 /** Runtime configuration passed to {@link configure}. */
 export interface ConfigureOptions {
 	/** Plugins to install — each extends the test context (Japa parity). */
 	plugins?: Plugin[];
+	/**
+	 * The directory the run was launched from (Japa `cwd`). Filled in by the
+	 * runtime, so a plugin resolving a path against the project reads the same
+	 * root the CLI discovered from.
+	 */
+	cwd?: string;
+	/**
+	 * Configure the suite before it runs (Japa `configureSuite`). Applied AFTER
+	 * the plugins, which is both Japa's order and what lets a plugin read it or
+	 * put its own in place.
+	 *
+	 * May return a promise — Japa's is synchronous, but helix's per-suite
+	 * `configure` has to re-import the config module, and hooks it registers must
+	 * exist before the setup hooks are drained.
+	 */
+	configureSuite?: (suite: SuiteHandle) => void | Promise<void>;
+	/**
+	 * The reporters this run activated (Japa `reporters.activated`). Read-only
+	 * truth: reporters live in the CLI process, so naming one here would not
+	 * make it run.
+	 */
+	reporters?: { activated: string[] };
+	/** `process.exit()` once the run ends (Japa `forceExit`). */
+	forceExit?: boolean;
+	/** Directories discovery skipped (Japa `exclude`). */
+	exclude?: string[];
+	/**
+	 * The filter object (Japa `refiner`). Writes through to
+	 * {@link ConfigureOptions.filters}, so `refiner.add("tags", [...])` from a
+	 * plugin steers the run exactly as setting the filter would.
+	 */
+	refiner?: Refiner;
 	/**
 	 * Filters to apply to this file's tests (Japa `config.filters`). The CLI
 	 * flags win: a filter typed at the prompt overrides the configured one.
@@ -210,11 +278,29 @@ export async function configure(options: ConfigureOptions): Promise<void> {
 	resolvedConfig.teardown ??= [];
 	const setup = resolvedConfig.setup;
 	const teardown = resolvedConfig.teardown;
-	setCurrentSuite(makeSuiteHandle(options.suite ?? "default", setup, teardown));
+	const handle = makeSuiteHandle(options.suite ?? "default", setup, teardown);
+	setCurrentSuite(handle);
+
+	// The rest of Japa's `BaseConfig`, filled with what this run actually is, so
+	// a plugin reading `api.config` is told the truth rather than `undefined`.
+	const flags = cliArgs();
+	resolvedConfig.cwd ??= process.cwd();
+	resolvedConfig.reporters ??= { activated: flags.reporters ?? [] };
+	resolvedConfig.forceExit ??= flags.forceExit === true;
+	resolvedConfig.filters ??= {};
+	resolvedConfig.filters.files ??= flags.files;
+	resolvedConfig.filters.suites ??=
+		flags.suite === undefined ? undefined : [flags.suite];
+	resolvedConfig.refiner ??= makeRefiner(resolvedConfig.filters);
 
 	for (const plugin of resolvedConfig.plugins ?? []) {
 		await plugin(api);
 	}
+
+	// Japa order: plugins, THEN `runner.onSuite(config.configureSuite)`, then the
+	// setup hooks. Applying it here rather than earlier is what lets a plugin
+	// read it — or put its own in place — and still have it take effect.
+	await resolvedConfig.configureSuite?.(handle);
 
 	// Read the defaults back AFTER the plugins, so a plugin that edited the
 	// config steers the run rather than writing into a value already consumed.

@@ -7,9 +7,11 @@
  * a fixed instruction shape. Reading them back here is what lets both the
  * runtime and a plugin (`api.cliArgs`, Japa parity) see the same filters.
  *
- * Named deviation from Japa's `CLIArgs`: values are parsed (`string[]`,
- * `number`, `boolean`) rather than kept as raw CLI strings — they have already
- * been through the parser once, on the CLI side.
+ * One named deviation from Japa's `CLIArgs`: values are parsed (`string[]`,
+ * `number`, `boolean`) rather than kept as raw CLI strings. They have been
+ * through the parser once already, on the CLI side, and handing a plugin
+ * `"500"` to re-parse would be worse — Japa's own raw form exists because its
+ * CLI hands the config manager unparsed argv, which helix's does not.
  */
 
 /** Parsed CLI flags for the current run. */
@@ -46,6 +48,19 @@ export interface CLIArgs {
 	failed?: boolean;
 	/** `--force-exit` — the CLI will `process.exit()` once the run ends. */
 	forceExit?: boolean;
+	/**
+	 * `--help`. Always absent in a worker: the CLI prints its help and exits
+	 * before spawning anything, so nothing here could ever have seen it. Declared
+	 * for the same reason Japa declares it — a plugin reading `cliArgs.help`
+	 * should get `undefined`, not a type error.
+	 */
+	help?: boolean;
+	/**
+	 * Japa's open record. A host that forwards its own `HELIX_*` variable, or a
+	 * plugin that stashes something for another, has somewhere to put it without
+	 * the type standing in the way.
+	 */
+	[flag: string]: string | string[] | number | boolean | undefined;
 }
 
 /** Comma-separated env list → trimmed non-empty entries, or undefined. */
