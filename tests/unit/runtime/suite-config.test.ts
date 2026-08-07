@@ -99,7 +99,9 @@ describe("applySuiteConfigure", () => {
 	});
 
 	it("tolerates a suite that declares no configure", async () => {
-		await configWith('export default { suites: [{ name: "e2e", files: "x" }] }\n');
+		await configWith(
+			'export default { suites: [{ name: "e2e", files: "x" }] }\n',
+		);
 		const setup: Array<() => unknown> = [];
 
 		await expect(

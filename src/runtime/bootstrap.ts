@@ -21,11 +21,10 @@
  * through BOTH orchestrators (the Rust engine and the TS pool spawn children
  * that inherit the CLI's env).
  *
- * Named deviation, forced by helix running one process per FILE: the module is
- * imported — and `runnerHooks.setup` therefore runs — once per worker process,
- * not once per run. For what these hooks actually do (boot an HTTP server, open
- * a DB pool) that is the only correct reading: a resource opened in the CLI
- * process would not exist in the process where the tests run.
+ * `runnerHooks` run ONCE for the whole run, in the process that spawns the
+ * workers — Japa's semantics. See `global-hooks.ts`. Everything else here is
+ * per worker because it has to be: a context macro, a filter, an importer only
+ * mean anything in the process that loads the test file.
  */
 
 import { existsSync } from "node:fs";
@@ -37,6 +36,7 @@ import {
 	type Plugin,
 	type RunnerHook,
 } from "./configure.js";
+import { globalHooksHandledByParent } from "./global-hooks.js";
 import { applySuiteConfigure } from "./suite-config.js";
 import { resetTaps, type SuiteHandle } from "./suite-taps.js";
 
@@ -162,8 +162,15 @@ export async function loadBootstrap(suite: string): Promise<void> {
 async function applyBootstrap(file: string, suite: string): Promise<void> {
 	const module: BootstrapModule =
 		file === "" ? {} : readModule(await import(pathToFileURL(file).href));
-	const setup = [...(module.runnerHooks?.setup ?? [])];
-	const teardown = [...(module.runnerHooks?.teardown ?? [])];
+	// `runnerHooks` belong to the run, not to this file. When the parent ran
+	// them — which it does whenever a bootstrap exists — the worker must not run
+	// them again: that is the difference between migrating once and migrating
+	// once per test file.
+	const parentRanThem = globalHooksHandledByParent();
+	const setup = parentRanThem ? [] : [...(module.runnerHooks?.setup ?? [])];
+	const teardown = parentRanThem
+		? []
+		: [...(module.runnerHooks?.teardown ?? [])];
 	// `configureSuite` is handed to `configure()` rather than called here, so it
 	// runs where Japa runs it: after the plugins, which is what lets a plugin
 	// read it or replace it. The per-suite callback chains onto it — both get

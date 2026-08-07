@@ -154,11 +154,12 @@ the plain dynamic import of a test file. Japa's `filters.files` /
 settles the file list before any worker — and so any bootstrap — exists,
 and filtering there still avoids the spawn.
 
-Named deviation, forced by one process per FILE: the module is imported —
-and `runnerHooks.setup` therefore runs — once per worker process, not once
-per run. For what these hooks do (boot a server, open a pool) that is the
-only correct reading: a resource opened in the CLI process would not exist
-in the process where the tests run.
+`runnerHooks` run ONCE for the whole run, in the process that spawns the
+workers — Japa's semantics. A migration in `setup` migrates once, not once
+per test file. Everything else in the bootstrap is per worker because it has
+to be: a context macro, a filter, an importer only mean anything in the
+process that loads the test file, which is why `plugins` are where an
+in-memory resource belongs.
 
 ## Plugins
 

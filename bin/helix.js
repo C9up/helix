@@ -417,6 +417,13 @@ async function main() {
 				: path.resolve(here, "../src/runtime/bootstrap.ts"),
 		).href;
 		const { resolveBootstrap } = await import(bootstrapModule);
+		const { runGlobalHooks } = await import(
+			pathToFileURL(
+				useDist
+					? path.resolve(here, "../dist/runtime/global-hooks.js")
+					: path.resolve(here, "../src/runtime/global-hooks.ts"),
+			).href
+		);
 		process.env.HELIX_BOOTSTRAP =
 			resolveBootstrap(process.cwd(), helixConfig.bootstrap) ?? "";
 		// A `suites[].configure` callback lives in the config module; the worker
@@ -599,9 +606,18 @@ async function main() {
 			}
 		}
 
+		// `runnerHooks` run ONCE around the whole run, here, and the workers are
+		// told to skip them — Japa's semantics, and the difference between
+		// migrating once and migrating once per test file.
+		const dropGlobalHooks = await runGlobalHooks(process.env.HELIX_BOOTSTRAP);
+
 		if (!selectedSuites) {
-			const outcome = await run(cfg);
-			return outcome.exitCode;
+			try {
+				const outcome = await run(cfg);
+				return outcome.exitCode;
+			} finally {
+				await dropGlobalHooks();
+			}
 		}
 
 		// Suites run one after another (Japa runs them in sequence too), each
@@ -636,8 +652,12 @@ async function main() {
 				},
 			});
 		}
-		const outcome = await runSuites(steps, cfg);
-		return outcome.exitCode;
+		try {
+			const outcome = await runSuites(steps, cfg);
+			return outcome.exitCode;
+		} finally {
+			await dropGlobalHooks();
+		}
 	} catch (err) {
 		// Re-exec under tsx when Node can't satisfy the TS-source imports
 		// natively. Two failure shapes seen in the wild:
