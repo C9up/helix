@@ -659,7 +659,7 @@ async function runTest(
 		}
 		const results: TestResult[] = [];
 		for (let i = 0; i < rows.length; i += 1) {
-			const title = interpolateDatasetTitle(node.name, rows[i], i, rows.length);
+			const title = interpolateDatasetTitle(node.name, rows[i], i);
 			const fullName = joinName(parentFullName, title);
 			const dataset: EmittedDataset = {
 				size: rows.length,

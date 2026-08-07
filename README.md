@@ -261,10 +261,9 @@ asserts helix exposes every public assertion of the installed
 implementations and requires the same verdict (this is what pinned
 `sameMembers` to strict equality and `sameDeepMembers` to structural).
 
-One named deviation, intentional: a dataset title with no interpolation
-token gets a `(row N)` suffix so titles stay unique, where Japa repeats
-the same title. And since helix runs one process per FILE, `suite:*`
-fires once per file rather than once for a multi-file suite.
+Since helix runs one process per FILE, `suite:*` fires once per file
+rather than once for a multi-file suite. That is the only deviation the
+golden journals still carry.
 
 ### Vitest parity proofs
 

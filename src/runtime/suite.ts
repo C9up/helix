@@ -784,19 +784,20 @@ function interpolateEach(
  *   - `{$i}`   → the 1-based row index
  *   - `{$self}`→ the row itself (stringified) — for primitive/array rows
  *   - `{prop}` / `{a.b}` → a (dotted) property lookup on an object row
- * Unknown `{tokens}` are left verbatim. When the template has no token at all,
- * a multi-row dataset appends ` (row N)` so per-row names don't collide.
+ * Unknown `{tokens}` are left verbatim. A template with no token at all is
+ * returned unchanged and therefore repeats for every row — Japa's behaviour,
+ * and what the golden dataset spec pins down.
  */
 export function interpolateDatasetTitle(
 	template: string,
 	row: unknown,
 	index: number,
-	rowCount: number,
 ): string {
-	const hasToken = /\{[^}]+\}/.test(template);
-	if (!hasToken) {
-		return rowCount > 1 ? `${template} (row ${index + 1})` : template;
-	}
+	// No token: Japa returns the title unchanged and repeats it for every row.
+	// helix used to append ` (row N)` to keep them distinct; that made titles a
+	// reporter shows — and `--tests` never matched on, since filtering reads the
+	// declared name — differ from Japa's for the same spec.
+	if (!/\{[^}]+\}/.test(template)) return template;
 	return template.replace(/\{([^}]+)\}/g, (match, tokenRaw: string) => {
 		const token = tokenRaw.trim();
 		if (token === "$i") return String(index + 1);
