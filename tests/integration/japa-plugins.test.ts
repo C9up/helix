@@ -334,3 +334,72 @@ describe("the alias can be turned back off", () => {
 		}
 	}, 60_000);
 });
+
+describe("the alias is turned off even when the run cannot start", () => {
+	it("does not stay on after a setup hook throws", async () => {
+		// The happy path was fixed first and the error path left behind, which is
+		// the same leak with a worse trigger: the run that failed is exactly the
+		// one whose next attempt will look unexplainable.
+		const local = path.resolve(here, "../../.tmp-alias-fail");
+		await rm(local, { recursive: true, force: true });
+		await mkdir(local, { recursive: true });
+		try {
+			const marker = path.join(local, "who.txt");
+			await writeFile(
+				path.join(local, "boom.ts"),
+				[
+					"export const runnerHooks = {",
+					'  setup: [() => { throw new Error("setup boom") }],',
+					"}",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+			await writeFile(
+				path.join(local, "after.ts"),
+				[
+					'import { appendFileSync } from "node:fs"',
+					'import { Test } from "@japa/runner/core"',
+					`appendFileSync(${JSON.stringify(marker)}, String(Test.isHelixShim === true))`,
+					"export const runnerHooks = { setup: [() => {}] }",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+
+			const script = [
+				`import { runGlobalHooks } from "${path.resolve(here, "../../src/runtime/global-hooks.ts")}"`,
+				`try { await runGlobalHooks(${JSON.stringify(path.join(local, "boom.ts"))}, { japaPlugins: true }) } catch {}`,
+				`await (await runGlobalHooks(${JSON.stringify(path.join(local, "after.ts"))}, { japaPlugins: false }))()`,
+			].join("\n");
+
+			const loader = tsxLoader();
+			await new Promise<void>((resolve, reject) => {
+				const child = spawn(
+					process.execPath,
+					[
+						...(loader === undefined ? [] : ["--import", loader]),
+						"--input-type=module",
+						"-e",
+						script,
+					],
+					{ stdio: ["ignore", "ignore", "pipe"] },
+				);
+				let err = "";
+				child.stderr?.on("data", (c) => {
+					err += String(c);
+				});
+				child.on("exit", (code) =>
+					code === 0
+						? resolve()
+						: reject(new Error(`child exited ${code}: ${err.slice(0, 400)}`)),
+				);
+			});
+
+			const { readFileSync } = await import("node:fs");
+			expect(readFileSync(marker, "utf8")).toBe("false");
+		} finally {
+			await rm(local, { recursive: true, force: true });
+		}
+	}, 60_000);
+});

@@ -128,6 +128,54 @@ describe("runGlobalHooks", () => {
 		expect(globalHooksHandledByParent()).toBe(false);
 	});
 
+	it("unwinds what already ran when a setup hook throws", async () => {
+		// Half-way through: the first hook opened something, the second fails. Its
+		// undo has to run anyway, or the failure leaves the process changed.
+		const log = path.join(root, "unwound.json");
+		const file = await bootstrap(
+			[
+				'import { appendFileSync } from "node:fs"',
+				`const write = (m) => appendFileSync(${JSON.stringify(log)}, m)`,
+				"export const runnerHooks = {",
+				"  setup: [",
+				'    () => { write("first"); return () => write("|undone") },',
+				'    () => { throw new Error("setup boom") },',
+				"  ],",
+				"}",
+				"",
+			].join("\n"),
+		);
+
+		await expect(runGlobalHooks(file)).rejects.toThrow("setup boom");
+
+		const { readFileSync } = await import("node:fs");
+		expect(readFileSync(log, "utf8")).toBe("first|undone");
+	});
+
+	it("leaves the flag alone when setup fails", async () => {
+		const file = await bootstrap(
+			[
+				"export const runnerHooks = {",
+				'  setup: [() => { throw new Error("setup boom") }],',
+				"}",
+				"",
+			].join("\n"),
+		);
+
+		await expect(runGlobalHooks(file)).rejects.toThrow("setup boom");
+
+		// A run that could not set itself up must not tell the workers their hooks
+		// were already handled.
+		expect(globalHooksHandledByParent()).toBe(false);
+	});
+
+	it("does not swallow an unimportable bootstrap", async () => {
+		const file = path.join(root, "missing-bootstrap.ts");
+
+		await expect(runGlobalHooks(file)).rejects.toThrow();
+		expect(globalHooksHandledByParent()).toBe(false);
+	});
+
 	it("a failing teardown is reported, not thrown at the run", async () => {
 		const file = await bootstrap(
 			[

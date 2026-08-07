@@ -66,48 +66,72 @@ export async function runGlobalHooks(
 		dropAlias = () => setJapaAlias(false);
 	}
 
-	const module: unknown = await import(pathToFileURL(bootstrap).href);
-	const hooks = Reflect.get(Object(module), "runnerHooks");
-	const setup = hookList(hooks, "setup");
-	const teardown = hookList(hooks, "teardown");
-	if (setup.length === 0 && teardown.length === 0) {
-		return async () => {
-			dropAlias?.();
-		};
-	}
-
-	// The hooks take a runner (Japa parity). This one tracks the parent's own
-	// emitter, which sees no test events — the argument exists so a hook's
-	// signature works, not to report from here.
+	// Everything past the alias needs unwinding if it throws: the import can
+	// fail, and so can a setup hook — half-way through, with earlier hooks
+	// already having opened something. Leaving the alias on and the undos
+	// pending is the failure mode this whole file exists to avoid.
+	const previous = process.env[GLOBAL_HOOKS_ENV];
 	const runner = new Runner(emitter);
 	const undos: SuiteHookCleanup[] = [];
-	for (const fn of setup) {
-		const undo = await fn(runner);
-		if (typeof undo === "function") undos.push(undo);
+	let teardown: SuiteHook[] = [];
+
+	try {
+		const module: unknown = await import(pathToFileURL(bootstrap).href);
+		const hooks = Reflect.get(Object(module), "runnerHooks");
+		const setup = hookList(hooks, "setup");
+		teardown = hookList(hooks, "teardown");
+
+		for (const fn of setup) {
+			const undo = await fn(runner);
+			if (typeof undo === "function") undos.push(undo);
+		}
+		if (setup.length > 0 || teardown.length > 0) {
+			process.env[GLOBAL_HOOKS_ENV] = "1";
+		}
+	} catch (err) {
+		// Unwind what did run, then hand the failure on: a run that could not set
+		// itself up must not start, and must not leave the process changed.
+		await unwind(undos, [], runner);
+		dropAlias?.();
+		restoreEnv(previous);
+		throw err;
 	}
-	// Restored by the teardown below. The CLI exits right after and would not
-	// notice, but a host calling this twice in one process would: the second run
-	// would inherit the flag and skip its own hooks in every worker.
-	const previous = process.env[GLOBAL_HOOKS_ENV];
-	process.env[GLOBAL_HOOKS_ENV] = "1";
 
 	return async () => {
 		dropAlias?.();
-		if (previous === undefined) delete process.env[GLOBAL_HOOKS_ENV];
-		else process.env[GLOBAL_HOOKS_ENV] = previous;
-		for (let i = undos.length - 1; i >= 0; i -= 1) {
-			try {
-				await undos[i](null, runner);
-			} catch (err) {
-				console.error("[helix] global cleanup failed:", err);
-			}
-		}
-		for (let i = teardown.length - 1; i >= 0; i -= 1) {
-			try {
-				await teardown[i](runner);
-			} catch (err) {
-				console.error("[helix] global teardown failed:", err);
-			}
-		}
+		restoreEnv(previous);
+		await unwind(undos, teardown, runner);
 	};
+}
+
+/** Put `HELIX_GLOBAL_HOOKS` back the way it was found. */
+function restoreEnv(previous: string | undefined): void {
+	if (previous === undefined) delete process.env[GLOBAL_HOOKS_ENV];
+	else process.env[GLOBAL_HOOKS_ENV] = previous;
+}
+
+/**
+ * Unwind what a setup opened: the undos it resolved to, then the declared
+ * teardowns, both in reverse. Failures are reported rather than thrown — one
+ * broken teardown must not hide the rest, nor turn a finished run red.
+ */
+async function unwind(
+	undos: SuiteHookCleanup[],
+	teardown: SuiteHook[],
+	runner: Runner,
+): Promise<void> {
+	for (let i = undos.length - 1; i >= 0; i -= 1) {
+		try {
+			await undos[i](null, runner);
+		} catch (err) {
+			console.error("[helix] global cleanup failed:", err);
+		}
+	}
+	for (let i = teardown.length - 1; i >= 0; i -= 1) {
+		try {
+			await teardown[i](runner);
+		} catch (err) {
+			console.error("[helix] global teardown failed:", err);
+		}
+	}
 }
