@@ -395,9 +395,12 @@ async function main() {
 				? path.resolve(here, "../dist/cli/suites.js")
 				: path.resolve(here, "../src/cli/suites.ts"),
 		).href;
-		const { loadHelixConfig, resolveSuiteFiles, selectSuites } = await import(
-			suitesModule
-		);
+		const {
+			loadHelixConfig,
+			resolveHelixConfig,
+			resolveSuiteFiles,
+			selectSuites,
+		} = await import(suitesModule);
 
 		// AdonisJS parity: positionals may name SUITES declared in
 		// `helix.config.*` (`helix test unit`). When they don't — or there is no
@@ -416,6 +419,16 @@ async function main() {
 		const { resolveBootstrap } = await import(bootstrapModule);
 		process.env.HELIX_BOOTSTRAP =
 			resolveBootstrap(process.cwd(), helixConfig.bootstrap) ?? "";
+		// A `suites[].configure` callback lives in the config module; the worker
+		// re-imports it by path, since the function itself cannot be forwarded.
+		// Only named when a suite actually declares one, so a project without any
+		// pays nothing.
+		const declaresConfigure = (helixConfig.suites ?? []).some(
+			(suite) => typeof suite.configure === "function",
+		);
+		process.env.HELIX_SUITE_CONFIG = declaresConfigure
+			? (resolveHelixConfig(process.cwd()) ?? "")
+			: "";
 
 		const expanded = selectedSuites
 			? []

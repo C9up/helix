@@ -37,6 +37,7 @@ import {
 	type Plugin,
 	type RunnerHook,
 } from "./configure.js";
+import { applySuiteConfigure } from "./suite-config.js";
 import { makeSuiteHandle, resetTaps, type SuiteHandle } from "./suite-taps.js";
 
 /** File names probed under the project root when none is configured. */
@@ -149,18 +150,28 @@ let loaded: Promise<void> | undefined;
  */
 export async function loadBootstrap(suite: string): Promise<void> {
 	const file = process.env.HELIX_BOOTSTRAP;
-	if (file === undefined || file === "") return;
-	loaded ??= applyBootstrap(file, suite);
+	const hasSuiteConfig = (process.env.HELIX_SUITE_CONFIG ?? "") !== "";
+	// The suite's own `configure` is applied here too, so it reaches the same
+	// hook arrays before `configure()` drains them. That means this runs even
+	// with no bootstrap file — a project may declare one without the other.
+	if ((file === undefined || file === "") && !hasSuiteConfig) return;
+	loaded ??= applyBootstrap(file ?? "", suite);
 	return loaded;
 }
 
 async function applyBootstrap(file: string, suite: string): Promise<void> {
-	const module = readModule(await import(pathToFileURL(file).href));
+	const module: BootstrapModule =
+		file === "" ? {} : readModule(await import(pathToFileURL(file).href));
 	const setup = [...(module.runnerHooks?.setup ?? [])];
 	const teardown = [...(module.runnerHooks?.teardown ?? [])];
+	// Both callbacks get the SAME handle, so hooks either of them registers land
+	// in the arrays `configure()` is about to consume. The bootstrap's runs
+	// first: it is the run-wide one, and a per-suite tweak reads as an override.
+	const handle = makeSuiteHandle(suite, setup, teardown);
 	if (module.configureSuite) {
-		module.configureSuite(makeSuiteHandle(suite, setup, teardown));
+		module.configureSuite(handle);
 	}
+	await applySuiteConfigure(suite, handle);
 	await configure({
 		plugins: module.plugins,
 		filters: module.filters,

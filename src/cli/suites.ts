@@ -25,6 +25,7 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type { SuiteHandle } from "../runtime/suite-taps.js";
 import { type DiscoveryOptions, discover } from "./discover.js";
 import {
 	globBaseDir,
@@ -53,6 +54,16 @@ export interface SuiteDefinition {
 	timeout?: number;
 	/** Extra attempts on failure for this suite. */
 	retries?: number;
+	/**
+	 * Configure the suite before it runs (Japa `TestSuite.configure`). Receives
+	 * the same handle as the bootstrap's `configureSuite`, and runs after it.
+	 *
+	 * Costs an import of this config module in every worker, since a function
+	 * cannot cross the process boundary — `configureSuite` in
+	 * `tests/bootstrap.ts` does the same job for free, and is what AdonisJS
+	 * itself uses.
+	 */
+	configure?: (suite: SuiteHandle) => void;
 }
 
 /** The shape of `helix.config.{ts,js,mjs}`. */
@@ -100,11 +111,18 @@ function toConfig(imported: unknown): HelixConfig {
 		if (typeof name !== "string" || files === undefined) continue;
 		const timeout = Reflect.get(entry, "timeout");
 		const retries = Reflect.get(entry, "retries");
+		const configure = Reflect.get(entry, "configure");
 		parsed.push({
 			name,
 			files,
 			timeout: typeof timeout === "number" ? timeout : undefined,
 			retries: typeof retries === "number" ? retries : undefined,
+			configure:
+				typeof configure === "function"
+					? (suite: SuiteHandle): void => {
+							configure(suite);
+						}
+					: undefined,
 		});
 	}
 	return { ...runner, suites: parsed };
@@ -138,13 +156,23 @@ async function normaliseUrls(produced: unknown): Promise<URL[]> {
  * set of tests.
  */
 export async function loadHelixConfig(root: string): Promise<HelixConfig> {
+	const file = resolveHelixConfig(root);
+	if (file === undefined) return {};
+	const imported: unknown = await import(pathToFileURL(file).href);
+	return toConfig(imported);
+}
+
+/**
+ * The config file helix would load, or `undefined` when there is none. Exposed
+ * because a `suites[].configure` callback has to be re-imported in the worker —
+ * a function does not cross a process boundary.
+ */
+export function resolveHelixConfig(root: string): string | undefined {
 	for (const name of CONFIG_FILENAMES) {
 		const candidate = path.join(root, name);
-		if (!existsSync(candidate)) continue;
-		const imported: unknown = await import(pathToFileURL(candidate).href);
-		return toConfig(imported);
+		if (existsSync(candidate)) return candidate;
 	}
-	return {};
+	return undefined;
 }
 
 /**

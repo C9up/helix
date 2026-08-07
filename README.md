@@ -48,6 +48,13 @@ in Japa, not the bare string. Without a config file — or when a
 positional is not a suite name — positionals stay paths, exactly as
 before.
 
+A suite may carry `configure(suite)` — Japa's `TestSuite.configure` — which
+gets the same handle as the bootstrap's `configureSuite` and runs after it.
+It costs an import of the config module in EVERY worker, because a function
+cannot cross the process boundary: `configureSuite` in `tests/bootstrap.ts`
+does the same job for free, and is what AdonisJS itself uses. Nothing is
+imported when no suite declares one.
+
 Suites run one after another, and the sequence is what the run-wide
 flags act on: `--watch` re-runs every selected suite on each change (one
 watcher for the whole sequence), `--bail` stops at the suite that failed,
