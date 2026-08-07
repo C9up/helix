@@ -129,6 +129,8 @@ export interface TestInstance {
 		tags: readonly string[];
 		/** Whether this is a `todo` test. Always `false` inside a running test. */
 		isTodo: boolean;
+		/** Whether the test is expected to throw — `test.fails()` (Japa parity). */
+		isFailing: boolean;
 		/**
 		 * Free-form metadata bag (Japa `options.meta`): `fileName`, `group` (the
 		 * enclosing {@link Group} instance, or `undefined` outside a group),

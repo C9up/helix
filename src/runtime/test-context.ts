@@ -45,6 +45,8 @@ interface TestFrame {
 	assertions: AssertionState;
 	/** The running test's instance (Japa `ctx.test`), threaded into cleanups. */
 	test: TestInstance | undefined;
+	/** The injected context — what a Japa `Test.executed` hook reads as `test.context`. */
+	context: unknown;
 	/** Whether the test body/hooks errored — passed to cleanups as `hasError`. */
 	hadError: boolean;
 }
@@ -58,6 +60,7 @@ export async function withTestContext<T>(body: () => Promise<T>): Promise<T> {
 		onFailed: [],
 		assertions: { count: 0, expected: undefined, hasAssertions: false },
 		test: undefined,
+		context: undefined,
 		hadError: false,
 	};
 	try {
@@ -171,6 +174,34 @@ export function onTestFailed(cb: TestCleanup): void {
 	registerOnTestFailed(cb);
 }
 
+/**
+ * Callbacks registered for EVERY test of the run (Japa `Test.executed`). Japa
+ * plugins use it to check after each test that something held — `@japa/assert`
+ * validates its planned-assertion count there.
+ */
+type ExecutedHook = (
+	test: { options: unknown; context: unknown },
+	hasError: boolean,
+) => void | Promise<void>;
+
+const executedHooks: ExecutedHook[] = [];
+
+/** Register a per-test hook for the whole run (Japa `Test.executed`). */
+export function registerExecutedHook(fn: ExecutedHook): void {
+	executedHooks.push(fn);
+}
+
+/** Test seam: drop every registered `executed` hook. */
+export function resetExecutedHooks(): void {
+	executedHooks.length = 0;
+}
+
+/** Attach the injected context to the current frame. */
+export function setFrameContext(context: unknown): void {
+	const frame = storage.getStore();
+	if (frame) frame.context = context;
+}
+
 /** Drain the `onTestFinished`/`onTestFailed` callbacks for the current frame. */
 export async function drainTestOutcomeHooks(failed: boolean): Promise<void> {
 	const frame = storage.getStore();
@@ -191,6 +222,18 @@ export async function drainTestOutcomeHooks(failed: boolean): Promise<void> {
 			await frame.onFinished[i](failed, frame.test);
 		} catch (err) {
 			console.error("[helix] onTestFinished callback threw:", err);
+		}
+	}
+	// Run-wide hooks last, so a plugin checking an invariant sees the state the
+	// test's own callbacks left behind.
+	if (frame.test !== undefined) {
+		const view = { options: frame.test.options, context: frame.context };
+		for (const hook of executedHooks) {
+			try {
+				await hook(view, failed);
+			} catch (err) {
+				console.error("[helix] Test.executed hook threw:", err);
+			}
 		}
 	}
 }

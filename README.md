@@ -161,6 +161,33 @@ to be: a context macro, a filter, an importer only mean anything in the
 process that loads the test file, which is why `plugins` are where an
 in-memory resource belongs.
 
+## Official Japa plugins
+
+`japaPlugins: true` in `helix.config` points `@japa/runner/core` at a helix
+shim in every worker, so a plugin written for Japa instruments helix:
+
+```ts
+// helix.config.ts
+export default { japaPlugins: true }
+
+// tests/bootstrap.ts
+import { assert } from "@japa/assert"
+export const plugins = [assert()]
+```
+
+This is what "not drop-in" meant for the whole of this package's life, and
+it was never an API-shape problem: a plugin does not talk to the runner
+through an interface, it imports `Test` / `TestContext` and mutates them.
+Nothing helix does at runtime can change what that import already resolved
+to — module resolution can.
+
+Off by default: redirecting a package specifier is not something to do
+behind a user's back, and a project with no Japa plugin gains nothing. The
+shim carries only the STATIC surface a plugin uses (`TestContext.getter` /
+`.macro`, `Test.executed` / `.macro`); anything else is absent rather than
+wrong. ESM only — under a CJS build the import is a `require`, which an ESM
+resolve hook never sees.
+
 ## Plugins
 
 A plugin is a function run once at `configure()` time, handed the same

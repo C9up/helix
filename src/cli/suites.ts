@@ -78,6 +78,15 @@ export interface HelixConfig {
 	timeout?: number;
 	/** `process.exit()` once the run ends — AdonisJS `tests.forceExit`. */
 	forceExit?: boolean;
+	/**
+	 * Point `@japa/runner/core` at helix's shim in every worker, so an official
+	 * Japa plugin (`@japa/assert`, …) instruments helix instead of a Japa that is
+	 * not running.
+	 *
+	 * Off by default: redirecting a package specifier is not something to do
+	 * behind a user's back, and a project with no Japa plugin gains nothing.
+	 */
+	japaPlugins?: boolean;
 }
 
 /** Config file names probed at the project root, in order. */
@@ -100,7 +109,9 @@ function toConfig(imported: unknown): HelixConfig {
 	const timeout = typeof rawTimeout === "number" ? rawTimeout : undefined;
 	const forceExit =
 		Reflect.get(source, "forceExit") === true ? true : undefined;
-	const runner = { bootstrap, timeout, forceExit };
+	const japaPlugins =
+		Reflect.get(source, "japaPlugins") === true ? true : undefined;
+	const runner = { bootstrap, timeout, forceExit, japaPlugins };
 	const suites = Reflect.get(source, "suites");
 	if (!Array.isArray(suites)) return runner;
 	const parsed: SuiteDefinition[] = [];

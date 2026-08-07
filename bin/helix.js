@@ -500,10 +500,25 @@ async function main() {
 				suffixes: parsed.flags.include,
 				hardExcludes: parsed.flags.exclude,
 			},
-			nodeArgs:
-				parsed.flags.tsx === false || !tsxLoader
-					? undefined
-					: ["--import", tsxLoader],
+			// `japaPlugins` points `@japa/runner/core` at helix's shim in every
+			// worker, so an official Japa plugin instruments helix. Appended to
+			// the loader list rather than replacing it: the test files still need
+			// their TS loader.
+			nodeArgs: [
+				...(parsed.flags.tsx === false || !tsxLoader
+					? []
+					: ["--import", tsxLoader]),
+				...(helixConfig.japaPlugins === true
+					? [
+							"--import",
+							pathToFileURL(
+								useDist
+									? path.resolve(here, "../dist/japa/japa-alias.mjs")
+									: path.resolve(here, "../src/japa/japa-alias.mjs"),
+							).href,
+						]
+					: []),
+			],
 			coverage: parsed.flags.coverage
 				? {
 						enabled: true,

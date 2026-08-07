@@ -34,6 +34,7 @@
       "types": "./src/cli/runner.ts",
       "import": "./src/cli/runner.ts"
     },
+    "./japa-alias": "./src/japa/japa-alias.mjs",
     "./bin/helix.js": "./bin/helix.js"
   },
   "scripts": {
@@ -93,6 +94,7 @@
         "types": "./dist/cli/runner.d.ts",
         "import": "./dist/cli/runner.js"
       },
+      "./japa-alias": "./dist/japa/japa-alias.mjs",
       "./bin/helix.js": "./bin/helix.js"
     },
     "access": "public"

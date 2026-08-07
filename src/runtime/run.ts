@@ -31,6 +31,7 @@ import {
 	drainTestOutcomeHooks,
 	getAssertionState,
 	registerTestCleanup,
+	setFrameContext,
 	setFrameOutcome,
 	setFrameTest,
 	withTestContext,
@@ -822,6 +823,9 @@ async function runAttempt(
 			retries,
 			tags: node.tags ?? [],
 			isTodo: false,
+			// `test.fails()` — a Japa plugin reads it to know an error was the
+			// point (`@japa/assert` skips its assertion check for such a test).
+			isFailing: node.failing === true,
 			meta,
 		},
 		dataset: dataset ?? node.dataset,
@@ -837,6 +841,9 @@ async function runAttempt(
 	// it as `$test.context` (Japa parity) — the SAME context flows to the body.
 	// Built inside the per-test frame so `ctx.cleanup` / getters bind here.
 	const context = buildTestContext(testInstance);
+	// A Japa `Test.executed` hook reads `test.context` — `@japa/assert` validates
+	// its assertion count through it after every test.
+	setFrameContext(context);
 	testInstance.context = context;
 
 	const beforeErr = await runHooks(before, true, testInstance);
