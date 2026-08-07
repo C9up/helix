@@ -1,5 +1,6 @@
 /**
- * `japa-alias.mjs` registers a resolve hook and exports nothing. Declared so
- * importing it for its side effect does not fall through to an implicit `any`.
+ * `japa-alias.mjs` registers the resolve hook on import and exposes the switch
+ * that turns it back off — `node:module.register()` has no counterpart, so a
+ * host running several times in one process needs one.
  */
-export {};
+export declare function setJapaAlias(enabled: boolean): void;

@@ -14,7 +14,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -264,5 +264,73 @@ describe("the parent resolves @japa/runner/core like the workers", () => {
 
 		const { readFileSync } = await import("node:fs");
 		expect(readFileSync(marker, "utf8")).toBe("true");
+	}, 60_000);
+});
+
+describe("the alias can be turned back off", () => {
+	it("does not leak into a later run in the same process", async () => {
+		// `node:module.register()` has no counterpart, so a hook installed once
+		// stays. A host running twice in one process would keep resolving
+		// `@japa/runner/core` to the shim after asking for the real one — silently,
+		// which is the worst version of it.
+		//
+		// The fixture lives inside the package so `@japa/runner` IS resolvable:
+		// the second run must resolve the REAL module, not merely fail to find one.
+		const local = path.resolve(here, "../../.tmp-alias-scope");
+		await rm(local, { recursive: true, force: true });
+		await mkdir(local, { recursive: true });
+		try {
+			const marker = path.join(local, "who.txt");
+			for (const n of [1, 2]) {
+				await writeFile(
+					path.join(local, `bootstrap${n}.ts`),
+					[
+						'import { appendFileSync } from "node:fs"',
+						'import { Test } from "@japa/runner/core"',
+						`appendFileSync(${JSON.stringify(marker)}, String(Test.isHelixShim === true) + "\\n")`,
+						"export const runnerHooks = { setup: [() => {}] }",
+						"",
+					].join("\n"),
+					"utf8",
+				);
+			}
+
+			const script = [
+				`import { runGlobalHooks } from "${path.resolve(here, "../../src/runtime/global-hooks.ts")}"`,
+				`await (await runGlobalHooks(${JSON.stringify(path.join(local, "bootstrap1.ts"))}, { japaPlugins: true }))()`,
+				`await (await runGlobalHooks(${JSON.stringify(path.join(local, "bootstrap2.ts"))}, { japaPlugins: false }))()`,
+			].join("\n");
+
+			const loader = tsxLoader();
+			await new Promise<void>((resolve, reject) => {
+				const child = spawn(
+					process.execPath,
+					[
+						...(loader === undefined ? [] : ["--import", loader]),
+						"--input-type=module",
+						"-e",
+						script,
+					],
+					{ stdio: ["ignore", "ignore", "pipe"] },
+				);
+				let err = "";
+				child.stderr?.on("data", (c) => {
+					err += String(c);
+				});
+				child.on("exit", (code) =>
+					code === 0
+						? resolve()
+						: reject(new Error(`child exited ${code}: ${err.slice(0, 400)}`)),
+				);
+			});
+
+			const { readFileSync } = await import("node:fs");
+			expect(readFileSync(marker, "utf8").trim().split("\n")).toEqual([
+				"true",
+				"false",
+			]);
+		} finally {
+			await rm(local, { recursive: true, force: true });
+		}
 	}, 60_000);
 });

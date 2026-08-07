@@ -56,8 +56,14 @@ export async function runGlobalHooks(
 	// bootstrap that registers at the top level registers on a class nothing
 	// reads. When `@japa/runner` is not installed at all, the parent simply
 	// cannot import the file.
+	let dropAlias: (() => void) | undefined;
 	if (options.japaPlugins === true) {
-		await import("../japa/japa-alias.mjs");
+		const { setJapaAlias } = await import("../japa/japa-alias.mjs");
+		setJapaAlias(true);
+		// Turned off with the teardown: `register()` cannot be undone, so a host
+		// running twice in one process would otherwise keep resolving
+		// `@japa/runner/core` to the shim after asking for the real one.
+		dropAlias = () => setJapaAlias(false);
 	}
 
 	const module: unknown = await import(pathToFileURL(bootstrap).href);
@@ -65,7 +71,9 @@ export async function runGlobalHooks(
 	const setup = hookList(hooks, "setup");
 	const teardown = hookList(hooks, "teardown");
 	if (setup.length === 0 && teardown.length === 0) {
-		return async () => {};
+		return async () => {
+			dropAlias?.();
+		};
 	}
 
 	// The hooks take a runner (Japa parity). This one tracks the parent's own
@@ -84,6 +92,7 @@ export async function runGlobalHooks(
 	process.env[GLOBAL_HOOKS_ENV] = "1";
 
 	return async () => {
+		dropAlias?.();
 		if (previous === undefined) delete process.env[GLOBAL_HOOKS_ENV];
 		else process.env[GLOBAL_HOOKS_ENV] = previous;
 		for (let i = undos.length - 1; i >= 0; i -= 1) {

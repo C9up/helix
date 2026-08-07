@@ -194,7 +194,10 @@ resolve to?", a question that otherwise costs an afternoon.
 The alias goes into the PARENT too, not just the workers: the parent
 imports the bootstrap for `runnerHooks`, and two processes resolving that
 specifier differently is how a top-level registration lands on a class
-nothing reads. ESM only — under a CJS build the import is a `require`, which an ESM
+nothing reads. It is switched off again when the run ends —
+`node:module.register()` has no counterpart, so a host running twice in one
+process would otherwise keep resolving to the shim after asking for the
+real module. ESM only — under a CJS build the import is a `require`, which an ESM
 resolve hook never sees.
 
 A `Test.executed` hook is a VERDICT: what it throws fails the test, which is
