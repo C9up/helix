@@ -214,11 +214,13 @@ await configure({
 - `cliArgs` — every flag the CLI forwarded to this worker (Japa's set:
   `tags`, `tests`, `groups`, `files`, `matchAll`, `timeout`, `retries`,
   `reporters`, `bail`, `bailLayer`, `failed`, `forceExit`, `suite`)
-- `runner` — `getSummary()`, `failed`, `bail()`, `onSuite()`. Not
-  `registerReporter`: reporters live in the CLI process, the only one
-  that sees every file, so a worker-registered reporter would report one
-  file and claim to be the run — use `--reporters`, or
-  `run({ reporterInstance })`
+- `runner` — `getSummary()`, `failed`, `bail()`, `onSuite()`, `suites`,
+  and `registerReporter()`, which hands a Japa reporter this worker's
+  runner and emitter. It observes THIS FILE; run-wide output is the CLI's
+  (`--reporters`, `run({ reporterInstance })`). `add` / `start` / `exec` /
+  `end` throw a `RunnerNotDrivableError` explaining that the CLI owns
+  discovery and execution — a sentence rather than the missing-property
+  crash they would otherwise be
 - `emitter` — `runner:start` / `suite:*` / `group:*` / `test:*`, with
   `errors[].error` the thrown `Error` itself
 - `context` — `macro` / `getter` (also on the `TestContext` class, as

@@ -13,6 +13,7 @@ import {
 	type PluginApi,
 } from "../../../src/runtime/configure.js";
 import { executeRoot } from "../../../src/runtime/run.js";
+import { RunnerNotDrivableError } from "../../../src/runtime/runner.js";
 import { resetRoot, test } from "../../../src/runtime/suite.js";
 import { resetTaps, tappedBail } from "../../../src/runtime/suite-taps.js";
 
@@ -367,5 +368,63 @@ describe("plugin API — what a plugin can steer", () => {
 		});
 		await executeRoot(red, "inline");
 		expect(api.runner.failed).toBe(true);
+	});
+});
+
+describe("plugin API — the runner surface", () => {
+	it("registerReporter hands a Japa reporter this worker's runner and emitter", async () => {
+		// A Japa reporter is `(runner, emitter) => void`. It observes THIS file —
+		// the whole run is only visible from the CLI process — but it observes it
+		// for real, which is what a worker can honestly offer.
+		const seen: string[] = [];
+		const api = await capture();
+
+		api.runner.registerReporter((runner, emitter) => {
+			expect(runner).toBe(api.runner);
+			emitter.on("test:end", (t) => seen.push(t.title.expanded));
+		});
+
+		const root = resetRoot();
+		test("watched", () => {});
+		await executeRoot(root, "inline");
+
+		expect(seen).toEqual(["watched"]);
+	});
+
+	it("accepts Japa's named-reporter form too", async () => {
+		const seen: string[] = [];
+		const api = await capture();
+
+		api.runner.registerReporter({
+			name: "named",
+			handler: (_runner, emitter) => {
+				emitter.on("test:end", (t) => seen.push(t.title.expanded));
+			},
+		});
+
+		const root = resetRoot();
+		test("also watched", () => {});
+		await executeRoot(root, "inline");
+
+		expect(seen).toEqual(["also watched"]);
+	});
+
+	it("reports the one suite this worker runs", async () => {
+		const api = await capture({ suite: "functional" });
+
+		expect(api.runner.suites.map((suite) => suite.name)).toEqual([
+			"functional",
+		]);
+	});
+
+	it("refuses to be driven, with a sentence rather than a TypeError", async () => {
+		// Absent, these would surface as `runner.start is not a function` with
+		// nothing saying why. The CLI owns discovery and execution.
+		const api = await capture();
+
+		for (const method of ["add", "start", "exec", "end"] as const) {
+			expect(() => api.runner[method]()).toThrow(RunnerNotDrivableError);
+			expect(() => api.runner[method]()).toThrow(/one process per test file/);
+		}
 	});
 });

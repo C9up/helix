@@ -6,17 +6,47 @@
  * `onSuite(callback)`. The summary is tracked by subscribing to the very events
  * the runtime emits, so it can never drift from what a reporter sees.
  *
- * Absent, deliberately:
- *   - `registerReporter` — reporters live in the CLI process, which is the only
- *     one that sees every file. A reporter registered from a worker would
- *     report one file and claim to be the run. Use `--reporters`, or
- *     `run({ reporterInstance })` programmatically.
- *   - `add` / `suites` / `start` / `exec` / `end` — the CLI discovers the files
- *     and drives execution; a worker is handed one file to run.
+ * `registerReporter` works, with its scope stated: a Japa reporter is
+ * `(runner, emitter) => void`, and the emitter it gets is this worker's, which
+ * sees this worker's FILE. That is what a worker can honestly offer, and it
+ * beats the alternative — the method being absent, so a Japa plugin calling it
+ * dies on a `TypeError` with nothing explaining why. Run-wide output stays the
+ * CLI's job: `--reporters`, or `run({ reporterInstance })`.
+ *
+ * `add` / `start` / `exec` / `end` THROW instead of being absent, for the same
+ * reason: they drive execution, which the CLI owns, and a plugin reaching for
+ * them deserves a sentence rather than a missing-property crash.
  */
 
-import type { Emitter } from "./emitter.js";
+import { type Emitter, emitter } from "./emitter.js";
 import { currentSuite, type SuiteHandle, setBail } from "./suite-taps.js";
+
+/** A Japa reporter: a handler, or a named one wrapping it. */
+export type ReporterHandler = (
+	runner: Runner,
+	emitter: Emitter,
+) => void | Promise<void>;
+
+export type ReporterContract =
+	| ReporterHandler
+	| { readonly name: string; handler: ReporterHandler };
+
+/**
+ * Raised when a plugin drives the runner. The CLI owns discovery and execution;
+ * a worker is handed one file and told to run it. Thrown rather than left
+ * absent so the plugin gets a sentence instead of a missing-property crash.
+ */
+export class RunnerNotDrivableError extends Error {
+	constructor(method: string) {
+		super(
+			`runner.${method}() is not available: helix runs one process per test ` +
+				"file, so the CLI owns discovery and execution and a worker only runs " +
+				"the file it was given. Reporting is the CLI's too — use `--reporters` " +
+				"or `run({ reporterInstance })`.",
+		);
+		this.name = "RunnerNotDrivableError";
+	}
+}
 
 /** Test counts for a run (Japa `summary.aggregates`). */
 export interface SummaryAggregates {
@@ -117,6 +147,44 @@ export class Runner {
 		const suite = currentSuite();
 		if (suite) callback(suite);
 		return this;
+	}
+
+	/**
+	 * Register a Japa reporter (Japa `Runner#registerReporter`). It is handed
+	 * this runner and this worker's emitter, so it observes THIS FILE — the
+	 * whole run is only visible from the CLI process.
+	 */
+	registerReporter(reporter: ReporterContract): this {
+		const handler =
+			typeof reporter === "function" ? reporter : reporter.handler;
+		void handler(this, emitter);
+		return this;
+	}
+
+	/** The suites this worker runs — exactly one (Japa `Runner#suites`). */
+	get suites(): SuiteHandle[] {
+		const suite = currentSuite();
+		return suite === undefined ? [] : [suite];
+	}
+
+	/** Not available — see {@link RunnerNotDrivableError}. */
+	add(): never {
+		throw new RunnerNotDrivableError("add");
+	}
+
+	/** Not available — see {@link RunnerNotDrivableError}. */
+	start(): never {
+		throw new RunnerNotDrivableError("start");
+	}
+
+	/** Not available — see {@link RunnerNotDrivableError}. */
+	exec(): never {
+		throw new RunnerNotDrivableError("exec");
+	}
+
+	/** Not available — see {@link RunnerNotDrivableError}. */
+	end(): never {
+		throw new RunnerNotDrivableError("end");
 	}
 
 	/**
