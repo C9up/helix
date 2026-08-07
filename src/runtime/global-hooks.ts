@@ -44,9 +44,20 @@ function hookList(source: unknown, key: string): SuiteHook[] {
  */
 export async function runGlobalHooks(
 	bootstrap: string | undefined,
+	options: { japaPlugins?: boolean } = {},
 ): Promise<() => Promise<void>> {
 	if (bootstrap === undefined || bootstrap === "") {
 		return async () => {};
+	}
+
+	// The parent imports the bootstrap too, so it needs the same alias the
+	// workers get. Without it the two processes resolve `@japa/runner/core`
+	// differently — the parent to the real Japa, the workers to the shim — and a
+	// bootstrap that registers at the top level registers on a class nothing
+	// reads. When `@japa/runner` is not installed at all, the parent simply
+	// cannot import the file.
+	if (options.japaPlugins === true) {
+		await import("../japa/japa-alias.mjs");
 	}
 
 	const module: unknown = await import(pathToFileURL(bootstrap).href);

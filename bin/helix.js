@@ -624,7 +624,9 @@ async function main() {
 		// `runnerHooks` run ONCE around the whole run, here, and the workers are
 		// told to skip them — Japa's semantics, and the difference between
 		// migrating once and migrating once per test file.
-		const dropGlobalHooks = await runGlobalHooks(process.env.HELIX_BOOTSTRAP);
+		const dropGlobalHooks = await runGlobalHooks(process.env.HELIX_BOOTSTRAP, {
+			japaPlugins: helixConfig.japaPlugins === true,
+		});
 
 		if (!selectedSuites) {
 			try {

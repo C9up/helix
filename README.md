@@ -183,9 +183,18 @@ to — module resolution can.
 
 Off by default: redirecting a package specifier is not something to do
 behind a user's back, and a project with no Japa plugin gains nothing. The
-shim carries only the STATIC surface a plugin uses (`TestContext.getter` /
-`.macro`, `Test.executed` / `.macro`); anything else is absent rather than
-wrong. ESM only — under a CJS build the import is a `require`, which an ESM
+shim exports every name the real module does — a missing one is an
+ImportError before any test runs, not a degraded experience. `Emitter` is
+helix's own and `Refiner` collects for real; `BaseReporter`, `Group`,
+`Suite` and `Runner` exist so imports resolve and `instanceof` answers
+`false` (a helix group is not a Japa `Group`), and throw on construction
+with the reason. `Test.isHelixShim` answers "which module did this import
+resolve to?", a question that otherwise costs an afternoon.
+
+The alias goes into the PARENT too, not just the workers: the parent
+imports the bootstrap for `runnerHooks`, and two processes resolving that
+specifier differently is how a top-level registration lands on a class
+nothing reads. ESM only — under a CJS build the import is a `require`, which an ESM
 resolve hook never sees.
 
 A `Test.executed` hook is a VERDICT: what it throws fails the test, which is

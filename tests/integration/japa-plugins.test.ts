@@ -12,6 +12,7 @@
  * helix ships its own `assert` and would satisfy a naive check either way.
  */
 
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -208,5 +209,60 @@ describe("official Japa plugins", () => {
 
 	it("do nothing without the alias — which is what makes the test above mean something", async () => {
 		expect(await runFixture(false)).toBe(1);
+	}, 60_000);
+});
+
+describe("the parent resolves @japa/runner/core like the workers", () => {
+	it("applies the alias before importing the bootstrap for global hooks", async () => {
+		// The parent imports the bootstrap too, for `runnerHooks`. Without the
+		// alias the two processes resolve that specifier differently — the parent
+		// to the real Japa, the workers to the shim — so a bootstrap registering
+		// at the top level registers on a class nothing reads. A project that
+		// installed only `@japa/assert` cannot even import it in the parent.
+		//
+		// Checked in a spawned process: a resolve hook registered inside the test
+		// runner's own module graph never reaches its imports.
+		const marker = path.join(root, "who.txt");
+		await writeFile(
+			path.join(root, "package.json"),
+			JSON.stringify({ name: "japa-parent", type: "module", private: true }),
+			"utf8",
+		);
+		await writeFile(
+			path.join(root, "bootstrap.ts"),
+			[
+				'import { appendFileSync } from "node:fs"',
+				'import { Test } from "@japa/runner/core"',
+				`appendFileSync(${JSON.stringify(marker)}, String(Test.isHelixShim === true))`,
+				"export const runnerHooks = { setup: [() => {}] }",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const script = [
+			`import { runGlobalHooks } from "${path.resolve(here, "../../src/runtime/global-hooks.ts")}"`,
+			`await runGlobalHooks(${JSON.stringify(path.join(root, "bootstrap.ts"))}, { japaPlugins: true })`,
+		].join("\n");
+
+		const loader = tsxLoader();
+		await new Promise<void>((resolve, reject) => {
+			const child = spawn(
+				process.execPath,
+				[
+					...(loader === undefined ? [] : ["--import", loader]),
+					"--input-type=module",
+					"-e",
+					script,
+				],
+				{ stdio: ["ignore", "ignore", "inherit"] },
+			);
+			child.on("exit", (code) =>
+				code === 0 ? resolve() : reject(new Error(`child exited ${code}`)),
+			);
+		});
+
+		const { readFileSync } = await import("node:fs");
+		expect(readFileSync(marker, "utf8")).toBe("true");
 	}, 60_000);
 });
