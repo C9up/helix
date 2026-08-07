@@ -86,6 +86,31 @@ describe("runGlobalHooks", () => {
 		]);
 	});
 
+	it("restores the flag afterwards, so a second run is not skipped", async () => {
+		// The CLI exits right after and would never notice. A host calling this
+		// twice in one process would: the second run would inherit the flag and
+		// skip its own hooks in every worker.
+		const log = path.join(root, "log.json");
+		const file = await bootstrap(
+			[
+				'import { appendFileSync } from "node:fs"',
+				"export const runnerHooks = {",
+				`  setup: [() => appendFileSync(${JSON.stringify(log)}, "x")],`,
+				"}",
+				"",
+			].join("\n"),
+		);
+
+		await (await runGlobalHooks(file))();
+		expect(globalHooksHandledByParent()).toBe(false);
+
+		// Second run: the hooks must run again, not be skipped.
+		await (await runGlobalHooks(file))();
+
+		const { readFileSync } = await import("node:fs");
+		expect(readFileSync(log, "utf8")).toBe("xx");
+	});
+
 	it("does not mark anything when the bootstrap declares no hooks", async () => {
 		const file = await bootstrap("export const plugins = []\n");
 

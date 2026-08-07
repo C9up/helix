@@ -66,9 +66,15 @@ export async function runGlobalHooks(
 		const undo = await fn(runner);
 		if (typeof undo === "function") undos.push(undo);
 	}
+	// Restored by the teardown below. The CLI exits right after and would not
+	// notice, but a host calling this twice in one process would: the second run
+	// would inherit the flag and skip its own hooks in every worker.
+	const previous = process.env[GLOBAL_HOOKS_ENV];
 	process.env[GLOBAL_HOOKS_ENV] = "1";
 
 	return async () => {
+		if (previous === undefined) delete process.env[GLOBAL_HOOKS_ENV];
+		else process.env[GLOBAL_HOOKS_ENV] = previous;
 		for (let i = undos.length - 1; i >= 0; i -= 1) {
 			try {
 				await undos[i](null, runner);
