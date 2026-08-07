@@ -202,10 +202,19 @@ export function setFrameContext(context: unknown): void {
 	if (frame) frame.context = context;
 }
 
-/** Drain the `onTestFinished`/`onTestFailed` callbacks for the current frame. */
-export async function drainTestOutcomeHooks(failed: boolean): Promise<void> {
+/**
+ * Drain the `onTestFinished`/`onTestFailed` callbacks for the current frame,
+ * then the run-wide `Test.executed` hooks.
+ *
+ * Returns what an `executed` hook threw, if one did. That hook IS a verdict —
+ * `@japa/assert` validates `assert.plan(n)` there and throws when the count is
+ * wrong — so swallowing it would let a plugin's whole reason for existing pass
+ * green. The frame's own callbacks keep being logged rather than thrown: they
+ * are teardown, and a broken one must not invent a failure.
+ */
+export async function drainTestOutcomeHooks(failed: boolean): Promise<unknown> {
 	const frame = storage.getStore();
-	if (!frame) return;
+	if (!frame) return undefined;
 	// `onTestFailed` first (diagnostics), then `onTestFinished` — both in
 	// reverse insertion order to mirror Vitest teardown semantics.
 	if (failed) {
@@ -225,17 +234,20 @@ export async function drainTestOutcomeHooks(failed: boolean): Promise<void> {
 		}
 	}
 	// Run-wide hooks last, so a plugin checking an invariant sees the state the
-	// test's own callbacks left behind.
+	// test's own callbacks left behind. The FIRST throw is the verdict; the rest
+	// still run, so one plugin's failure does not hide another's.
+	let verdict: unknown;
 	if (frame.test !== undefined) {
 		const view = { options: frame.test.options, context: frame.context };
 		for (const hook of executedHooks) {
 			try {
 				await hook(view, failed);
 			} catch (err) {
-				console.error("[helix] Test.executed hook threw:", err);
+				if (verdict === undefined) verdict = err;
 			}
 		}
 	}
+	return verdict;
 }
 
 /** Increment the assertion counter for the active test (no-op outside a test). */

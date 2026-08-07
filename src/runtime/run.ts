@@ -941,15 +941,23 @@ async function runAttempt(
 	// Record the outcome BEFORE the frame's cleanup drain (finally) fires, so
 	// `ctx.cleanup((hasError, test) => …)` sees the right `hasError`.
 	setFrameOutcome(finalErr !== undefined);
-	await drainTestOutcomeHooks(finalErr !== undefined);
+	// A `Test.executed` hook is a verdict, not a teardown: `@japa/assert`
+	// validates `assert.plan(n)` there. Its throw has to reach the result, or a
+	// plugin's whole reason for existing passes green.
+	const executedErr = await drainTestOutcomeHooks(finalErr !== undefined);
+	const outcome =
+		executedErr === undefined
+			? finalErr
+			: combineErrors(finalErr, serializeError(executedErr));
 	return {
 		name: title,
 		fullName,
-		status: finalErr ? "fail" : "pass",
+		status: outcome ? "fail" : "pass",
 		durationMs: Date.now() - start,
-		error: finalErr,
-		// A failure with no recorded phase came from the teardown chain.
-		errorPhase: finalErr === undefined ? undefined : (errorPhase ?? "teardown"),
+		error: outcome,
+		// A failure with no recorded phase came from the teardown chain, or from a
+		// `Test.executed` hook, which runs at the same point.
+		errorPhase: outcome === undefined ? undefined : (errorPhase ?? "teardown"),
 	};
 }
 

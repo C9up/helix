@@ -32,6 +32,7 @@ export type ExecutedCallback = (
  * Japa's `Test` — the static hooks a plugin registers on it. Instances come
  * from helix's own runtime, so nothing here constructs a test.
  */
+// biome-ignore lint/complexity/noStaticOnlyClass: stands in for a class Japa exports — an object literal breaks the day a plugin writes `instanceof` or `extends`, which is the one place being a class is the point.
 export class Test {
 	/** Run after every test of the run (Japa `Test.executed`). */
 	static executed(callback: ExecutedCallback): void {
@@ -48,6 +49,7 @@ export class Test {
  * Japa's `TestContext` — the registrars a plugin uses to put something on every
  * test's context.
  */
+// biome-ignore lint/complexity/noStaticOnlyClass: same as `Test` above — it replaces an exported class, not a namespace.
 export class TestContext {
 	/**
 	 * Add a lazily-computed property (Japa `TestContext.getter`). Japa's third

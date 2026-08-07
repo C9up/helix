@@ -121,7 +121,12 @@ export const TestContextRegistry = {
  */
 export function buildTestContext(test: TestInstance): TestContext {
 	const ctx = new TestContext(test);
-	const reserved = new Set(["cleanup", "assert", "test"]);
+	// `cleanup` and `test` are structural — the runtime hands them to the body
+	// and nothing may take their place. `assert` is NOT: helix ships one, and a
+	// project installing `@japa/assert` is asking for that one instead. Refusing
+	// the override left the plugin registered but never reached, which is how
+	// `plugins: [assert()]` could look wired and do nothing.
+	const reserved = new Set(["cleanup", "test"]);
 
 	for (const [name, value] of macros) {
 		if (reserved.has(name)) continue;

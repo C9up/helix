@@ -188,6 +188,12 @@ shim carries only the STATIC surface a plugin uses (`TestContext.getter` /
 wrong. ESM only — under a CJS build the import is a `require`, which an ESM
 resolve hook never sees.
 
+A `Test.executed` hook is a VERDICT: what it throws fails the test, which is
+how `@japa/assert` enforces `assert.plan(n)`. And a plugin may replace
+`assert` — helix ships one, but a project installing `@japa/assert` is
+asking for that one. `cleanup` and `test` stay helix's: the runtime hands
+them to the body, and a test with someone else's `cleanup` is not a test.
+
 ## Plugins
 
 A plugin is a function run once at `configure()` time, handed the same

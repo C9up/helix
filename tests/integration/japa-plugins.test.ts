@@ -117,6 +117,90 @@ async function runFixture(withAlias: boolean): Promise<number> {
 	return outcome.exitCode;
 }
 
+/**
+ * A fixture whose plugin throws from `Test.executed` — a verdict, not a
+ * teardown. `@japa/assert` validates `assert.plan(n)` exactly there.
+ */
+async function verdictProject(shouldThrow: boolean): Promise<string> {
+	await writeFile(
+		path.join(root, "package.json"),
+		JSON.stringify({ name: "japa-fixture", type: "module", private: true }),
+		"utf8",
+	);
+	await writeFile(
+		path.join(root, "bootstrap.ts"),
+		[
+			'import { Test } from "@japa/runner/core"',
+			"export const plugins = [",
+			"  () => {",
+			"    Test.executed((_test, hasError) => {",
+			`      if (!hasError && ${shouldThrow}) throw new Error("plugin verdict")`,
+			"    })",
+			"  },",
+			"]",
+			"",
+		].join("\n"),
+		"utf8",
+	);
+	const spec = path.join(root, "a.test.ts");
+	await writeFile(
+		spec,
+		[
+			`import { test } from "${path.resolve(here, "../../src/runtime/index.ts")}"`,
+			'test("passes on its own", () => {})',
+			"",
+		].join("\n"),
+		"utf8",
+	);
+	process.env.HELIX_BOOTSTRAP = path.join(root, "bootstrap.ts");
+	return spec;
+}
+
+describe("Test.executed is a verdict", () => {
+	it("fails a test that passed on its own", async () => {
+		// Swallowed, this makes every assertion-plan check inert: the plugin
+		// validates, throws, and the run stays green.
+		const spec = await verdictProject(true);
+		const loader = tsxLoader();
+		const outcome = await run({
+			root,
+			files: [spec],
+			threads: 1,
+			workerEntry,
+			reporterInstance: silent,
+			nodeArgs: [
+				...(loader === undefined ? [] : ["--import", loader]),
+				"--import",
+				`file://${aliasLoader}`,
+			],
+		});
+
+		expect(outcome.exitCode).toBe(1);
+		expect(outcome.summary.files[0]?.tests[0]?.error?.message).toBe(
+			"plugin verdict",
+		);
+	}, 60_000);
+
+	it("leaves a passing test alone when it does not throw", async () => {
+		const spec = await verdictProject(false);
+		const loader = tsxLoader();
+		const outcome = await run({
+			root,
+			files: [spec],
+			threads: 1,
+			workerEntry,
+			reporterInstance: silent,
+			nodeArgs: [
+				...(loader === undefined ? [] : ["--import", loader]),
+				"--import",
+				`file://${aliasLoader}`,
+			],
+		});
+
+		expect(outcome.exitCode).toBe(0);
+	}, 60_000);
+});
+
 describe("official Japa plugins", () => {
 	it("instrument helix when @japa/runner/core is aliased", async () => {
 		expect(await runFixture(true)).toBe(0);
