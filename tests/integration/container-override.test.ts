@@ -28,7 +28,10 @@ class StubContainer {
 	singleton(token: unknown, factory: () => unknown): void {
 		this.#factories.set(token, factory);
 	}
-	resolve(token: unknown): unknown {
+	// ASYNC, mirroring `@c9up/ream`'s Container (`resolve(): Promise<T>`). A
+	// synchronous mirror is not a mirror: it hides a missing `await` in the code
+	// under test.
+	async resolve(token: unknown): Promise<unknown> {
 		if (this.#overrides.has(token)) return this.#overrides.get(token);
 		const factory = this.#factories.get(token);
 		if (!factory) throw new Error(`no binding for ${String(token)}`);
@@ -62,11 +65,11 @@ describe("helix.override — facade auto-restore", () => {
 
 		await withTestContext(async () => {
 			override("svc", "fake");
-			expect(container.resolve("svc")).toBe("fake");
+			await expect(container.resolve("svc")).resolves.toBe("fake");
 		});
 
 		// withTestContext drained the cleanup queue → original is back.
-		expect(container.resolve("svc")).toBe("real");
+		await expect(container.resolve("svc")).resolves.toBe("real");
 	});
 
 	it("overrideOn() targets a specific container instance", async () => {
@@ -77,12 +80,12 @@ describe("helix.override — facade auto-restore", () => {
 
 		await withTestContext(async () => {
 			overrideOn(c1, "svc", "c1-fake");
-			expect(c1.resolve("svc")).toBe("c1-fake");
-			expect(c2.resolve("svc")).toBe("c2-real");
+			await expect(c1.resolve("svc")).resolves.toBe("c1-fake");
+			await expect(c2.resolve("svc")).resolves.toBe("c2-real");
 		});
 
-		expect(c1.resolve("svc")).toBe("c1-real");
-		expect(c2.resolve("svc")).toBe("c2-real");
+		await expect(c1.resolve("svc")).resolves.toBe("c1-real");
+		await expect(c2.resolve("svc")).resolves.toBe("c2-real");
 	});
 
 	it("auto-restore unwinds in reverse insertion order", async () => {
@@ -128,17 +131,17 @@ describe("helix.override — facade auto-restore", () => {
 			useContainer(c2);
 			// Inside the frame, override resolves on c2.
 			override("svc", "c2-fake");
-			expect(c2.resolve("svc")).toBe("c2-fake");
+			await expect(c2.resolve("svc")).resolves.toBe("c2-fake");
 		});
 
 		// Frame closed → activeContainer is back to c1, c2's override drained.
-		expect(c2.resolve("svc")).toBe("c2-real");
+		await expect(c2.resolve("svc")).resolves.toBe("c2-real");
 		// Re-issue override on the (now-active) c1 to prove c1 survived.
 		await withTestContext(async () => {
 			override("svc", "c1-fake");
-			expect(c1.resolve("svc")).toBe("c1-fake");
+			await expect(c1.resolve("svc")).resolves.toBe("c1-fake");
 		});
-		expect(c1.resolve("svc")).toBe("c1-real");
+		await expect(c1.resolve("svc")).resolves.toBe("c1-real");
 	});
 
 	it("async cleanup is awaited before the frame returns (M4)", async () => {
