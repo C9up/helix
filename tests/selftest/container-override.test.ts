@@ -60,7 +60,7 @@ describe("helix.override — value injection", () => {
 		useContainer(container);
 
 		override("svc", "fake");
-		await expect(container.resolve("svc")).resolves.toBe("fake");
+		expect(container.resolve("svc")).toBe("fake");
 	});
 
 	test("override() with a class token injects a stub instance", () => {
@@ -149,7 +149,7 @@ describe("helix.overrideOn — specific container instance", () => {
 		useContainer(c1);
 
 		overrideOn(c2, "svc", "c2-fake");
-		await expect(c1.resolve("svc")).resolves.toBe("c1-real");
-		await expect(c2.resolve("svc")).resolves.toBe("c2-fake");
+		expect(c1.resolve("svc")).toBe("c1-real");
+		expect(c2.resolve("svc")).toBe("c2-fake");
 	});
 });
