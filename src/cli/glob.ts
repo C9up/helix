@@ -143,7 +143,17 @@ export function globToRegExp(entry: string): RegExp {
 		out += escapeChar(char);
 		i += 1;
 	}
-	return new RegExp(`^${out}$`);
+	try {
+		return new RegExp(`^${out}$`);
+	} catch (cause) {
+		// An unbalanced `{`, `(` or `[` compiles to an unbalanced regex. Raw, the
+		// failure reads as an internal regex the author never wrote — name their
+		// pattern instead, since that is what they have to fix.
+		throw new Error(
+			`Cannot read "${entry}" as a glob pattern — check that every {, ( and [ is closed.`,
+			{ cause },
+		);
+	}
 }
 
 /** Index of the `)` closing the `(` at `open`, or `-1` when unbalanced. */
