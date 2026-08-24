@@ -10,6 +10,8 @@
  * are supported via the `strict` option.
  */
 
+import { isAsymmetricMatcher } from "./asymmetric-brand.js";
+
 export interface EqualsOptions {
 	/** `toStrictEqual` semantics — prototypes matched, undefined keys distinguished from missing. */
 	strict?: boolean;
@@ -17,24 +19,13 @@ export interface EqualsOptions {
 
 type Seen = WeakMap<object, WeakSet<object>>;
 
-interface AsymmetricLike {
-	asymmetricMatch(actual: unknown): boolean;
-}
-
 /**
- * Duck-type an asymmetric matcher (`expect.objectContaining`, `expect.any`, …).
- * Checked inline rather than importing `./asymmetric.js` to avoid a module
- * cycle (asymmetric.ts imports this file).
+ * Recognise an asymmetric matcher (`expect.objectContaining`, `expect.any`, …).
+ *
+ * From `./asymmetric-brand.js`, not `./asymmetric.js`: the latter imports this
+ * file, so the brand lives in a third module both can reach.
  */
-function isAsymmetric(value: unknown): value is AsymmetricLike {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		(value as { __helixAsymmetricMatcher?: unknown })
-			.__helixAsymmetricMatcher === true &&
-		typeof (value as AsymmetricLike).asymmetricMatch === "function"
-	);
-}
+const isAsymmetric = isAsymmetricMatcher;
 
 export function equals(
 	a: unknown,

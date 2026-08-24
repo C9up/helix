@@ -8,28 +8,16 @@
  * asymmetric matcher can appear anywhere inside an expected value.
  */
 
+import {
+	ASYMMETRIC_BRAND,
+	type AsymmetricMatcher,
+	isAsymmetricMatcher,
+} from "./asymmetric-brand.js";
 import { equals, partialEquals } from "./equals.js";
 
-const BRAND = "__helixAsymmetricMatcher";
+export { type AsymmetricMatcher, isAsymmetricMatcher };
 
-export interface AsymmetricMatcher {
-	readonly [BRAND]: true;
-	/** Return `true` when `actual` satisfies this matcher. */
-	asymmetricMatch(actual: unknown): boolean;
-	/** Human-readable label used in failure diagnostics. */
-	toString(): string;
-}
-
-export function isAsymmetricMatcher(
-	value: unknown,
-): value is AsymmetricMatcher {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		(value as Partial<AsymmetricMatcher>)[BRAND] === true &&
-		typeof (value as AsymmetricMatcher).asymmetricMatch === "function"
-	);
-}
+const BRAND = ASYMMETRIC_BRAND;
 
 function make(
 	label: string,
