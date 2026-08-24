@@ -19,6 +19,7 @@ import { pathToFileURL } from "node:url";
 import { loadBootstrap } from "./bootstrap.js";
 import { cliArgs } from "./cli-args.js";
 import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
+import { FRAME_PREFIX } from "./ipc-protocol.js";
 import { type ExecuteOptions, executeRoot, type FileResult } from "./run.js";
 import { type SuiteNode, withCollection } from "./suite.js";
 import { applyTaps, tappedBail } from "./suite-taps.js";
@@ -239,8 +240,6 @@ interface WorkerError {
 }
 
 type WorkerMessage = WorkerOutgoing | WorkerError;
-
-const FRAME_PREFIX = "__HELIX_RESULT__";
 
 function send(msg: WorkerMessage): void {
 	if (typeof process.send === "function") {

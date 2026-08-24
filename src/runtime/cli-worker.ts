@@ -24,10 +24,8 @@
 
 import { writeSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { FRAME_PREFIX, PRE_HANDSHAKE_NONCE } from "./ipc-protocol.js";
 import { runTestFile } from "./worker.js";
-
-const FRAME_PREFIX = "__HELIX_RESULT__";
-const PRE_HANDSHAKE_NONCE = "__helix_pre_handshake__";
 
 interface RunMessage {
 	type: "run";

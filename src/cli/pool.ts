@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { StringDecoder } from "node:string_decoder";
+import { FRAME_PREFIX, PRE_HANDSHAKE_NONCE } from "../runtime/ipc-protocol.js";
 import type { FileResult } from "../runtime/run.js";
 import type { Reporter } from "./reporter.js";
 
@@ -65,15 +66,8 @@ export type FileOutcome =
 	| { kind: "result"; result: FileResult }
 	| { kind: "error"; error: WorkerErrorMessage };
 
-const FRAME_PREFIX = "__HELIX_RESULT__";
 /** Maximum stderr buffering before we give up and mark the file errored. */
 const MAX_STDERR_BUFFER_BYTES = 4 * 1024 * 1024; // 4 MiB
-/**
- * Magic nonce the worker uses for errors it emits BEFORE receiving the
- * instruction (so before it knows the real nonce). Accepted by the parent
- * only for `type === "error"` frames so a fixture can't spoof results.
- */
-const PRE_HANDSHAKE_NONCE = "__helix_pre_handshake__";
 
 interface ActiveChild {
 	kill(): void;
