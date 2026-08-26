@@ -50,6 +50,15 @@ export type HookType = "beforeAll" | "afterAll" | "beforeEach" | "afterEach";
 export interface Hook {
 	type: HookType;
 	fn: HookFn;
+	/**
+	 * Hook timeout in ms. `0` disables it; absent falls back to the run-wide
+	 * test timeout.
+	 *
+	 * Without one a hook that never settles hangs the whole file forever, with
+	 * no output saying which one — the failure mode a boot that cannot reach
+	 * its database produces.
+	 */
+	timeoutMs?: number;
 }
 
 export type RunMode = "run" | "skip" | "only" | "todo";
@@ -960,11 +969,20 @@ export const describe: SuiteApi = describeFn;
 export const test: TestApi = testFn;
 export const it: TestApi = testFn;
 
-export function addHook(type: HookType, fn: HookFn): void {
-	current().hooks.push({ type, fn });
+export function addHook(type: HookType, fn: HookFn, timeoutMs?: number): void {
+	current().hooks.push({ type, fn, timeoutMs });
 }
 
-export const beforeAll = (fn: HookFn): void => addHook("beforeAll", fn);
-export const afterAll = (fn: HookFn): void => addHook("afterAll", fn);
-export const beforeEach = (fn: HookFn): void => addHook("beforeEach", fn);
-export const afterEach = (fn: HookFn): void => addHook("afterEach", fn);
+/**
+ * The optional second argument is the hook's timeout in ms, as in Vitest and
+ * Jest — `beforeAll(fn, 30_000)`. It used to be accepted by neither the types
+ * nor the runner: the value was dropped and the hook ran unbounded.
+ */
+export const beforeAll = (fn: HookFn, timeoutMs?: number): void =>
+	addHook("beforeAll", fn, timeoutMs);
+export const afterAll = (fn: HookFn, timeoutMs?: number): void =>
+	addHook("afterAll", fn, timeoutMs);
+export const beforeEach = (fn: HookFn, timeoutMs?: number): void =>
+	addHook("beforeEach", fn, timeoutMs);
+export const afterEach = (fn: HookFn, timeoutMs?: number): void =>
+	addHook("afterEach", fn, timeoutMs);

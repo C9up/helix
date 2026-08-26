@@ -22,6 +22,7 @@ import type {
 	Group,
 	GroupInstance,
 	Hook,
+	HookType,
 	SuiteNode,
 	TestInstance,
 	TestNode,
@@ -34,6 +35,7 @@ import {
 	setFrameContext,
 	setFrameOutcome,
 	setFrameTest,
+	type TestCleanup,
 	withTestContext,
 } from "./test-context.js";
 
@@ -286,7 +288,7 @@ function pathLeadsToOnly(node: SuiteNode | TestNode): boolean {
 function collectHookChain(
 	leaf: SuiteNode,
 	type: "beforeEach" | "afterEach",
-): Hook["fn"][] {
+): Hook[] {
 	// beforeEach: outermost first; afterEach: innermost first.
 	const suites: SuiteNode[] = [];
 	let cursor: SuiteNode | undefined = leaf;
@@ -295,28 +297,64 @@ function collectHookChain(
 		cursor = cursor.parent;
 	}
 	const ordered = type === "beforeEach" ? [...suites].reverse() : suites;
-	const chain: Hook["fn"][] = [];
+	const chain: Hook[] = [];
 	for (const s of ordered) {
 		for (const h of s.hooks) {
-			if (h.type === type) chain.push(h.fn);
+			if (h.type === type) chain.push(h);
 		}
 	}
 	return chain;
 }
 
+/**
+ * Run one hook under its timeout.
+ *
+ * A hook used to be awaited unbounded: one that never settles hung the file
+ * with nothing naming it. The deadline is the hook's own, falling back to the
+ * run-wide test timeout; `0` on either disables it, which is how a deliberately
+ * long boot opts out.
+ */
+/** A group hook's return that is a group-scoped cleanup (Japa parity). */
+function isCleanupFn(value: unknown): value is CleanupFn {
+	return typeof value === "function";
+}
+
+/** Lift the bare `test.setup` / `test.teardown` callbacks into hook records. */
+function asHooks(fns: Hook["fn"][] | undefined, type: HookType): Hook[] {
+	return (fns ?? []).map((fn) => ({ type, fn }));
+}
+
+/** A `beforeEach` return that is a cleanup callback (Vitest/Japa parity). */
+function isTestCleanup(value: unknown): value is TestCleanup {
+	return typeof value === "function";
+}
+
+async function callHook(
+	hook: Hook,
+	subject?: TestInstance | GroupInstance,
+	fallbackMs = 0,
+): Promise<unknown> {
+	const ms = hook.timeoutMs ?? fallbackMs;
+	if (ms <= 0) return hook.fn(subject);
+	return makeTimeoutController(ms, `${hook.type} hook`).race(
+		Promise.resolve(hook.fn(subject)),
+	);
+}
+
 async function runHooks(
-	hooks: Hook["fn"][],
+	hooks: Hook[],
 	registerCleanups = false,
 	subject?: TestInstance | GroupInstance,
+	fallbackMs = 0,
 ): Promise<SerializedError | undefined> {
 	for (const h of hooks) {
 		try {
 			// Japa parity: test hooks receive the Test instance, group hooks the
 			// Group instance. Zero-arg hooks simply ignore it.
-			const ret = await h(subject);
+			const ret = await callHook(h, subject, fallbackMs);
 			// A `beforeEach` returning a function registers it as a test-scoped
 			// cleanup (Vitest/Japa parity). Ignored for `afterEach`.
-			if (registerCleanups && typeof ret === "function") {
+			if (registerCleanups && isTestCleanup(ret)) {
 				registerTestCleanup(ret);
 			}
 		} catch (err) {
@@ -800,8 +838,8 @@ async function runAttempt(
 	node: TestNode,
 	title: string,
 	fullName: string,
-	before: Hook["fn"][],
-	after: Hook["fn"][],
+	before: Hook[],
+	after: Hook[],
 	timeoutMs: number,
 	retries: number,
 	start: number,
@@ -866,7 +904,12 @@ async function runAttempt(
 
 	// Per-test setup hooks (`test.setup`) run after the group `each.setup` chain,
 	// just before the body. A failing setup fails the test without running it.
-	const setupErr = await runHooks(node.setups ?? [], true, testInstance);
+	// `test.setup(fn)` carries no timeout of its own, so it inherits the test's.
+	const setupErr = await runHooks(
+		asHooks(node.setups, "beforeEach"),
+		true,
+		testInstance,
+	);
 	if (setupErr) {
 		testErr = setupErr;
 		errorPhase = "setup";
@@ -935,7 +978,11 @@ async function runAttempt(
 	}
 
 	// Per-test teardown hooks (`test.teardown`) run before the group `each.teardown`.
-	const teardownErr = await runHooks(node.teardowns ?? [], false, testInstance);
+	const teardownErr = await runHooks(
+		asHooks(node.teardowns, "afterEach"),
+		false,
+		testInstance,
+	);
 	const afterErr = await runHooks(after, false, testInstance);
 	const finalErr = combineErrors(combineErrors(testErr, teardownErr), afterErr);
 	// Record the outcome BEFORE the frame's cleanup drain (finally) fires, so
@@ -1094,7 +1141,14 @@ async function runSuite(
 	// Errors recorded so far come from `beforeAll`; anything appended by
 	// `runAfterAllHooks` below belongs to the teardown phase.
 	const setupErrorCount = hookErrors.length;
-	await runAfterAllHooks(node, hookErrors, group, groupCleanups, groupHadError);
+	await runAfterAllHooks(
+		node,
+		hookErrors,
+		group,
+		groupCleanups,
+		groupHadError,
+		ctx.timeoutMs,
+	);
 
 	if (!groupFiltered) {
 		emitter.emit("group:end", {
@@ -1200,8 +1254,8 @@ async function runBeforeAllHooks(
 		try {
 			// Japa parity: group hooks receive the Group instance; a returned
 			// function becomes a group-scoped cleanup (run in the afterAll phase).
-			const ret = await h.fn(group);
-			if (typeof ret === "function") groupCleanups.push(ret);
+			const ret = await callHook(h, group, ctx.timeoutMs);
+			if (isCleanupFn(ret)) groupCleanups.push(ret);
 		} catch (err) {
 			const serialized = serializeError(err);
 			hookErrors.push(serialized);
@@ -1222,6 +1276,8 @@ async function runAfterAllHooks(
 	group: GroupInstance,
 	groupCleanups: CleanupFn[],
 	hadError: boolean,
+	/** Run-wide default, used when the hook declares no timeout of its own. */
+	fallbackMs = 0,
 ): Promise<void> {
 	// Group-scoped cleanups (returned by `group.setup()`) run first, in reverse
 	// insertion order, receiving `(hadError, group)` — Japa lifecycle parity.
@@ -1235,7 +1291,7 @@ async function runAfterAllHooks(
 	for (const h of node.hooks) {
 		if (h.type !== "afterAll") continue;
 		try {
-			await h.fn(group);
+			await callHook(h, group, fallbackMs);
 		} catch (err) {
 			hookErrors.push(serializeError(err));
 		}
@@ -1348,7 +1404,7 @@ export async function executeRoot(
 	for (const h of root.hooks) {
 		if (h.type !== "beforeAll") continue;
 		try {
-			await h.fn();
+			await callHook(h, undefined, ctx.timeoutMs);
 		} catch (err) {
 			const serialized = serializeError(err);
 			rootHookErrors.push(serialized);
@@ -1388,7 +1444,7 @@ export async function executeRoot(
 	for (const h of root.hooks) {
 		if (h.type !== "afterAll") continue;
 		try {
-			await h.fn();
+			await callHook(h, undefined, ctx.timeoutMs);
 		} catch (err) {
 			const serialized = serializeError(err);
 			rootHookErrors.push(serialized);

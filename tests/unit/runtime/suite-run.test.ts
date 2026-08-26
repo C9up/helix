@@ -264,3 +264,61 @@ vDescribe("suite + run — nested DSL", () => {
 		vExpect(getRoot()).toBe(r);
 	});
 });
+
+vDescribe("helix > hook timeouts", () => {
+	vIt(
+		"fails a beforeAll that never settles instead of hanging the file",
+		async () => {
+			// Unbounded before: a hook that never resolves hung the whole run with
+			// nothing naming it — the shape a boot that cannot reach its database has.
+			const root = resetRoot();
+			describe("slow boot", () => {
+				beforeAll(() => new Promise<void>(() => {}), 40);
+				it("never gets there", () => {
+					expect(1).toBe(1);
+				});
+			});
+
+			const result = await executeRoot(root, "inline");
+
+			vExpect(result.totals.fail).toBe(1);
+			vExpect(result.tests[0].error?.message).toMatch(
+				/beforeAll hook exceeded/,
+			);
+		},
+	);
+
+	vIt("lets a hook finish inside its own timeout", async () => {
+		const root = resetRoot();
+		describe("quick boot", () => {
+			beforeAll(async () => {
+				await new Promise((r) => setTimeout(r, 5));
+			}, 500);
+			it("runs", () => {
+				expect(1).toBe(1);
+			});
+		});
+
+		const result = await executeRoot(root, "inline");
+
+		vExpect(result.totals.pass).toBe(1);
+	});
+
+	vIt("leaves a hook without a timeout unbounded, as before", async () => {
+		// No second argument and no run-wide default: the hook is not raced, so
+		// a deliberately long setup is not cut off by a change it never asked for.
+		const root = resetRoot();
+		describe("untimed", () => {
+			beforeAll(async () => {
+				await new Promise((r) => setTimeout(r, 20));
+			});
+			it("runs", () => {
+				expect(1).toBe(1);
+			});
+		});
+
+		const result = await executeRoot(root, "inline");
+
+		vExpect(result.totals.pass).toBe(1);
+	});
+});
