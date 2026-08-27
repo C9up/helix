@@ -44,32 +44,15 @@ function hookList(source: unknown, key: string): SuiteHook[] {
  */
 export async function runGlobalHooks(
 	bootstrap: string | undefined,
-	options: { japaPlugins?: boolean } = {},
 ): Promise<() => Promise<void>> {
 	if (bootstrap === undefined || bootstrap === "") {
 		return async () => {};
 	}
 
-	// The parent imports the bootstrap too, so it needs the same alias the
-	// workers get. Without it the two processes resolve `@japa/runner/core`
-	// differently — the parent to the real Japa, the workers to the shim — and a
-	// bootstrap that registers at the top level registers on a class nothing
-	// reads. When `@japa/runner` is not installed at all, the parent simply
-	// cannot import the file.
-	let dropAlias: (() => void) | undefined;
-	if (options.japaPlugins === true) {
-		const { setJapaAlias } = await import("../japa/japa-alias.mjs");
-		setJapaAlias(true);
-		// Turned off with the teardown: `register()` cannot be undone, so a host
-		// running twice in one process would otherwise keep resolving
-		// `@japa/runner/core` to the shim after asking for the real one.
-		dropAlias = () => setJapaAlias(false);
-	}
-
-	// Everything past the alias needs unwinding if it throws: the import can
-	// fail, and so can a setup hook — half-way through, with earlier hooks
-	// already having opened something. Leaving the alias on and the undos
-	// pending is the failure mode this whole file exists to avoid.
+	// Everything below needs unwinding if it throws: the import can fail, and so
+	// can a setup hook — half-way through, with earlier hooks already having
+	// opened something. Leaving the undos pending is the failure mode this whole
+	// file exists to avoid.
 	const previous = process.env[GLOBAL_HOOKS_ENV];
 	const runner = new Runner(emitter);
 	const undos: SuiteHookCleanup[] = [];
@@ -92,13 +75,11 @@ export async function runGlobalHooks(
 		// Unwind what did run, then hand the failure on: a run that could not set
 		// itself up must not start, and must not leave the process changed.
 		await unwind(undos, [], runner);
-		dropAlias?.();
 		restoreEnv(previous);
 		throw err;
 	}
 
 	return async () => {
-		dropAlias?.();
 		restoreEnv(previous);
 		await unwind(undos, teardown, runner);
 	};

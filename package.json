@@ -1,6 +1,6 @@
 {
   "name": "@c9up/helix",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "description": "Helix \u2014 framework-agnostic test runtime for the Ream ecosystem (Vitest-compatible runner, spies, container overrides, time-travel). Per-package fakes live in each package's /testing.",
   "license": "MIT",
   "type": "module",
@@ -34,7 +34,6 @@
       "types": "./src/cli/runner.ts",
       "import": "./src/cli/runner.ts"
     },
-    "./japa-alias": "./src/japa/japa-alias.mjs",
     "./bin/helix.js": "./bin/helix.js"
   },
   "scripts": {
@@ -53,8 +52,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
-    "@japa/assert": "^4.2.0",
-    "@japa/runner": "^5.3.0",
     "@types/node": "*",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
@@ -94,7 +91,6 @@
         "types": "./dist/cli/runner.d.ts",
         "import": "./dist/cli/runner.js"
       },
-      "./japa-alias": "./dist/japa/japa-alias.mjs",
       "./bin/helix.js": "./bin/helix.js"
     },
     "access": "public"
