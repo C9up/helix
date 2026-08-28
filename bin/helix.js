@@ -49,9 +49,9 @@ const FLAG_SPEC = {
 	},
 	"match-all": {
 		kind: "boolean",
-		help: "Require ALL --tags instead of any (Japa parity)",
+		help: "Require ALL --tags instead of any (helix parity)",
 	},
-	// Japa's parser accepts both spellings (`matchAll` with `match-all` as its
+	// helix's parser accepts both spellings (`matchAll` with `match-all` as its
 	// alias), so both work here too.
 	matchAll: {
 		kind: "boolean",
@@ -59,40 +59,40 @@ const FLAG_SPEC = {
 	},
 	tests: {
 		kind: "string",
-		help: "Comma-separated exact test titles to run (Japa --tests)",
+		help: "Comma-separated exact test titles to run (helix --tests)",
 	},
 	groups: {
 		kind: "string",
-		help: "Comma-separated exact group titles to run (Japa --groups)",
+		help: "Comma-separated exact group titles to run (helix --groups)",
 	},
 	suite: {
 		kind: "string",
-		help: "Name of the suite these files belong to (Japa meta.suite)",
+		help: "Name of the suite these files belong to (helix meta.suite)",
 	},
 	files: {
 		kind: "string",
-		help: "Comma-separated substrings matched against test file paths (Japa --files)",
+		help: "Comma-separated substrings matched against test file paths (helix --files)",
 	},
 	reporters: {
 		kind: "string",
-		help: "Comma-separated reporters to activate, e.g. spec,json (Japa --reporters)",
+		help: "Comma-separated reporters to activate, e.g. spec,json (helix --reporters)",
 	},
-	bail: { kind: "boolean", help: "Stop at the first failure (Japa --bail)" },
+	bail: { kind: "boolean", help: "Stop at the first failure (helix --bail)" },
 	"bail-layer": {
 		kind: "string",
-		help: "How far a bail reaches: group|suite|runner (Japa --bail-layer)",
+		help: "How far a bail reaches: group|suite|runner (helix --bail-layer)",
 	},
 	failed: {
 		kind: "boolean",
-		help: "Re-run only the tests that failed last run (Japa --failed)",
+		help: "Re-run only the tests that failed last run (helix --failed)",
 	},
 	"list-pinned": {
 		kind: "boolean",
-		help: "Print the tests marked .pin() and run nothing (Japa --list-pinned)",
+		help: "Print the tests marked .pin() and run nothing (helix --list-pinned)",
 	},
 	"force-exit": {
 		kind: "boolean",
-		help: "process.exit() as soon as the run ends, without draining the event loop (Japa --force-exit)",
+		help: "process.exit() as soon as the run ends, without draining the event loop (helix --force-exit)",
 	},
 	watch: { kind: "boolean", help: "Watch mode — re-run on file changes" },
 	"watch-debounce": {
@@ -247,7 +247,7 @@ function findTsxLoader() {
 const TEST_SUFFIX = /(\.(test|spec))?\.[cm]?[jt]sx?$/;
 
 /**
- * Japa's `--files` rule: keep a file when its path ENDS WITH the filter, or
+ * helix's `--files` rule: keep a file when its path ENDS WITH the filter, or
  * when every segment of the filter (read right-to-left, `*` matching anything)
  * matches the corresponding path segment of the file minus its test suffix.
  * `--files=user` keeps `tests/unit/user.test.ts`; `--files=unit/*` keeps
@@ -500,25 +500,10 @@ async function main() {
 				suffixes: parsed.flags.include,
 				hardExcludes: parsed.flags.exclude,
 			},
-			// `japaPlugins` points `@japa/runner/core` at helix's shim in every
-			// worker, so an official Japa plugin instruments helix. Appended to
-			// the loader list rather than replacing it: the test files still need
-			// their TS loader.
-			nodeArgs: [
-				...(parsed.flags.tsx === false || !tsxLoader
+			nodeArgs:
+				parsed.flags.tsx === false || !tsxLoader
 					? []
-					: ["--import", tsxLoader]),
-				...(helixConfig.japaPlugins === true
-					? [
-							"--import",
-							pathToFileURL(
-								useDist
-									? path.resolve(here, "../dist/japa/japa-alias.mjs")
-									: path.resolve(here, "../src/japa/japa-alias.mjs"),
-							).href,
-						]
-					: []),
-			],
+					: ["--import", tsxLoader],
 			coverage: parsed.flags.coverage
 				? {
 						enabled: true,
@@ -577,7 +562,7 @@ async function main() {
 			process.env.HELIX_BAIL = "1";
 		}
 		// Flags a plugin reads off `api.cliArgs` but the runtime itself doesn't
-		// act on — forwarded for the same reason as the filters: Japa hands its
+		// act on — forwarded for the same reason as the filters: helix hands its
 		// plugins the whole flag set.
 		if (cfg.reporters !== undefined) {
 			process.env.HELIX_REPORTERS = cfg.reporters.join(",");
@@ -592,7 +577,7 @@ async function main() {
 		if (parsed.flags["list-pinned"] === true) {
 			process.env.HELIX_LIST_PINNED = "1";
 		}
-		// Positionals reach a plugin as `api.cliArgs._`, like Japa's.
+		// Positionals reach a plugin as `api.cliArgs._`, like helix's.
 		if (parsed.positional.length > 0) {
 			process.env.HELIX_POSITIONALS = parsed.positional.join(",");
 		}
@@ -603,7 +588,7 @@ async function main() {
 			process.env.HELIX_BAIL_LAYER = String(parsed.flags["bail-layer"]);
 		}
 		// `--failed` replays the previous run's failures as a `--tests` filter,
-		// exactly like Japa's retry plugin.
+		// exactly like helix's retry plugin.
 		if (parsed.flags.failed === true) {
 			const failedModule = pathToFileURL(
 				useDist
@@ -622,11 +607,9 @@ async function main() {
 		}
 
 		// `runnerHooks` run ONCE around the whole run, here, and the workers are
-		// told to skip them — Japa's semantics, and the difference between
+		// told to skip them — helix's semantics, and the difference between
 		// migrating once and migrating once per test file.
-		const dropGlobalHooks = await runGlobalHooks(process.env.HELIX_BOOTSTRAP, {
-			japaPlugins: helixConfig.japaPlugins === true,
-		});
+		const dropGlobalHooks = await runGlobalHooks(process.env.HELIX_BOOTSTRAP);
 
 		if (!selectedSuites) {
 			try {
@@ -637,7 +620,7 @@ async function main() {
 			}
 		}
 
-		// Suites run one after another (Japa runs them in sequence too), each
+		// Suites run one after another (helix runs them in sequence too), each
 		// with its own files, timeout, retries and `meta.suite` name. The
 		// sequence is handed to the orchestrator as a whole so watch mode
 		// wraps ALL of it in one watcher and the `--failed` cache holds every
@@ -725,10 +708,10 @@ async function main() {
 }
 
 /**
- * Japa semantics: the process exits on its own once the event loop drains, so a
+ * helix semantics: the process exits on its own once the event loop drains, so a
  * resource a test left open surfaces as a hang you can diagnose — rather than
  * being swallowed by an unconditional `process.exit`, which also truncates
- * pending stdout writes. `--force-exit` is the escape hatch, exactly as in Japa.
+ * pending stdout writes. `--force-exit` is the escape hatch, exactly as in helix.
  */
 /**
  * How long to wait for the event loop to drain before reporting what is holding

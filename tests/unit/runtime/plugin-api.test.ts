@@ -1,6 +1,6 @@
 /**
- * The plugin API — Japa hands a plugin `{ config, cliArgs, runner, emitter }`;
- * helix hands the same four (plus its `context`/`cleanup` extras), so a Japa
+ * The plugin API — helix hands a plugin `{ config, cliArgs, runner, emitter }`;
+ * helix hands the same four (plus its `context`/`cleanup` extras), so a helix
  * plugin's body ports over unchanged.
  */
 
@@ -62,7 +62,7 @@ async function capture(
 	return received;
 }
 
-describe("plugin API — Japa surface", () => {
+describe("plugin API — helix surface", () => {
 	it("exposes the options the run was configured with", async () => {
 		const api = await capture({ timeout: 1234, retries: 2 });
 
@@ -119,7 +119,7 @@ describe("plugin API — Japa surface", () => {
 		expect(api.cliArgs.forceExit).toBe(true);
 	});
 
-	it("exposes the positionals and --list-pinned, as Japa's CLIArgs does", async () => {
+	it("exposes the positionals and --list-pinned, as helix's CLIArgs does", async () => {
 		process.env.HELIX_POSITIONALS = "unit,functional";
 		process.env.HELIX_LIST_PINNED = "1";
 
@@ -170,8 +170,8 @@ describe("plugin API — Japa surface", () => {
 });
 
 describe("plugin API — what a plugin can steer", () => {
-	it("hands a plugin the rest of Japa's BaseConfig, filled in", async () => {
-		// `undefined` where Japa has a value is what makes a plugin branch wrong.
+	it("hands a plugin the rest of helix's BaseConfig, filled in", async () => {
+		// `undefined` where helix has a value is what makes a plugin branch wrong.
 		process.env.HELIX_REPORTERS = "spec,json";
 		process.env.HELIX_FILES = "user";
 		process.env.HELIX_SUITE = "functional";
@@ -188,7 +188,7 @@ describe("plugin API — what a plugin can steer", () => {
 	});
 
 	it("refiner.add writes through to the filters that steer the run", async () => {
-		// Two doors, one room: a plugin using Japa's refiner must land in the same
+		// Two doors, one room: a plugin using helix's refiner must land in the same
 		// place as one setting `config.filters` directly.
 		let api: PluginApi | undefined;
 		await configure({
@@ -229,7 +229,7 @@ describe("plugin API — what a plugin can steer", () => {
 	});
 
 	it("a plugin's edit to config.timeout reaches the run", async () => {
-		// Japa documents config as something a plugin edits, so the defaults have
+		// helix documents config as something a plugin edits, so the defaults have
 		// to be read back AFTER the plugins — not before them.
 		await configure({
 			timeout: 100,
@@ -263,7 +263,7 @@ describe("plugin API — what a plugin can steer", () => {
 		expect(cliArgs().tags).toEqual(["@from-plugin"]);
 	});
 
-	it("plugins run BEFORE the setup hooks, as in Japa", async () => {
+	it("plugins run BEFORE the setup hooks, as in helix", async () => {
 		const order: string[] = [];
 		await configure({
 			setup: [
@@ -356,7 +356,7 @@ describe("plugin API — what a plugin can steer", () => {
 		const api = await capture();
 
 		// The runner is process-wide and zeroes itself on `runner:start`, so read
-		// it where Japa does: after a run, never before one.
+		// it where helix does: after a run, never before one.
 		const green = resetRoot();
 		test("green", () => {});
 		await executeRoot(green, "inline");
@@ -372,8 +372,8 @@ describe("plugin API — what a plugin can steer", () => {
 });
 
 describe("plugin API — the runner surface", () => {
-	it("registerReporter hands a Japa reporter this worker's runner and emitter", async () => {
-		// A Japa reporter is `(runner, emitter) => void`. It observes THIS file —
+	it("registerReporter hands a helix reporter this worker's runner and emitter", async () => {
+		// A helix reporter is `(runner, emitter) => void`. It observes THIS file —
 		// the whole run is only visible from the CLI process — but it observes it
 		// for real, which is what a worker can honestly offer.
 		const seen: string[] = [];
@@ -391,7 +391,7 @@ describe("plugin API — the runner surface", () => {
 		expect(seen).toEqual(["watched"]);
 	});
 
-	it("accepts Japa's named-reporter form too", async () => {
+	it("accepts helix's named-reporter form too", async () => {
 		const seen: string[] = [];
 		const api = await capture();
 

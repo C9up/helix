@@ -1,6 +1,6 @@
 /**
  * The `--failed` cache — what turns "this failed last run" into a `--tests`
- * filter on the next one (Japa's retry plugin).
+ * filter on the next one (helix's retry plugin).
  */
 
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";

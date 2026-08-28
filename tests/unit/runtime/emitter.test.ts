@@ -1,5 +1,5 @@
 /**
- * The runner emitter — the Japa `Emitter` surface plugins and reporters
+ * The runner emitter — the helix `Emitter` surface plugins and reporters
  * subscribe to.
  */
 

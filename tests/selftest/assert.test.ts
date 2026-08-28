@@ -1,5 +1,5 @@
 /**
- * Self-test: the injected `ctx.assert` surface (@japa/assert parity).
+ * Self-test: the injected `ctx.assert` surface (helix’s assert parity).
  */
 
 import { expect, test } from "@c9up/helix";
@@ -35,7 +35,7 @@ test("assert core matchers pass on valid input", ({ assert }) => {
 	assert.doesNotThrow(() => 1);
 });
 
-test("assert @japa aliases + property-set matchers", ({ assert }) => {
+test("assert @helix aliases + property-set matchers", ({ assert }) => {
 	assert.ok(1);
 	assert.notOk(0);
 	assert.empty([]);

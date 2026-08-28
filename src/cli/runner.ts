@@ -4,7 +4,7 @@
  *
  * `bin/helix.js` reads `helix.config.*` and drives these; a framework that
  * declares its suites elsewhere (ream reads them from its rc file, the way
- * `@adonisjs/core` reads `adonisrc.ts` and hands the suites to Japa) composes
+ * `@adonisjs/core` reads `adonisrc.ts` and hands the suites to helix) composes
  * the same pieces instead of shelling out to the CLI.
  */
 

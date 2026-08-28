@@ -44,12 +44,12 @@ export interface PoolConfig {
 	 */
 	extraEnv?: NodeJS.ProcessEnv;
 	/**
-	 * Stop the run once a file reports a failure (Japa `--bail` at the runner
+	 * Stop the run once a file reports a failure (helix `--bail` at the runner
 	 * layer). Files already in flight finish; files not yet started are never
 	 * spawned.
 	 *
-	 * Named deviation from Japa: those files are DROPPED, not reported as
-	 * skipped. Japa can skip them because it collected every test in one
+	 * Named deviation from helix: those files are DROPPED, not reported as
+	 * skipped. helix can skip them because it collected every test in one
 	 * process; helix runs one process per file, so a file that never starts has
 	 * no tests to skip.
 	 */

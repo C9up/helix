@@ -140,7 +140,7 @@ export async function runTestFile(
 	);
 	return withViContext(async () => {
 		const root = await withCollection(async () => {
-			// `configure({ importer })` (Japa parity) replaces the plain dynamic
+			// `configure({ importer })` (helix parity) replaces the plain dynamic
 			// import — the seam a consumer needs to compile or instrument a file
 			// on the way in.
 			const importer = getConfiguredDefaults().importer;
@@ -148,9 +148,9 @@ export async function runTestFile(
 			else await import(url);
 		});
 		// `configureSuite`'s taps run between collection and execution — the
-		// point at which Japa's own `onTest`/`onGroup` fire.
+		// point at which helix's own `onTest`/`onGroup` fire.
 		applyTaps(root);
-		// `--list-pinned`: Japa collects the files, prints what is pinned and
+		// `--list-pinned`: helix collects the files, prints what is pinned and
 		// runs nothing — not the tests, and not the runner teardowns either,
 		// since it skipped the setup hooks that would have needed undoing.
 		if (cliArgs().listPinned === true) {
@@ -176,7 +176,7 @@ export async function runTestFile(
 			const defaults = getConfiguredDefaults();
 			const filters = defaults.filters;
 			// Read through the shared `cliArgs` object rather than the env: a
-			// plugin may have edited it (Japa parity), and an edit that the
+			// plugin may have edited it (helix parity), and an edit that the
 			// runtime ignored would be worse than not offering it at all.
 			const flags = cliArgs();
 			const raw = await executeRoot(root, absolutePath, {

@@ -1,5 +1,5 @@
 /**
- * Self-test: the injected TestContext (Japa parity).
+ * Self-test: the injected TestContext (helix parity).
  *
  * Proves the foundation the capability plugins build on:
  *   - every test body receives a context object as its FIRST argument,
@@ -11,7 +11,7 @@
 import { expect, TestContextRegistry, test } from "@c9up/helix";
 
 // Typing side: plugins pair a runtime registration with a declaration-merge so
-// `ctx.answer` / `ctx.lazy` are fully typed (the Japa pattern).
+// `ctx.answer` / `ctx.lazy` are fully typed (the helix pattern).
 declare module "@c9up/helix" {
 	interface TestContext {
 		answer: number;

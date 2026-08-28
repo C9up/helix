@@ -1,15 +1,15 @@
 /**
- * The `runner` handed to plugins — Japa's `Runner`, minus what a worker cannot
+ * The `runner` handed to plugins — helix's `Runner`, minus what a worker cannot
  * honestly own.
  *
- * Present, and identical to Japa: `getSummary()`, `failed`, `bail(toggle)`,
+ * Present, and identical to helix: `getSummary()`, `failed`, `bail(toggle)`,
  * `onSuite(callback)`. The summary is tracked by subscribing to the very events
  * the runtime emits, so it can never drift from what a reporter sees.
  *
- * `registerReporter` works, with its scope stated: a Japa reporter is
+ * `registerReporter` works, with its scope stated: a helix reporter is
  * `(runner, emitter) => void`, and the emitter it gets is this worker's, which
  * sees this worker's FILE. That is what a worker can honestly offer, and it
- * beats the alternative — the method being absent, so a Japa plugin calling it
+ * beats the alternative — the method being absent, so a helix plugin calling it
  * dies on a `TypeError` with nothing explaining why. Run-wide output stays the
  * CLI's job: `--reporters`, or `run({ reporterInstance })`.
  *
@@ -21,7 +21,7 @@
 import { type Emitter, emitter } from "./emitter.js";
 import { currentSuite, type SuiteHandle, setBail } from "./suite-taps.js";
 
-/** A Japa reporter: a handler, or a named one wrapping it. */
+/** A helix reporter: a handler, or a named one wrapping it. */
 export type ReporterHandler = (
 	runner: Runner,
 	emitter: Emitter,
@@ -48,7 +48,7 @@ export class RunnerNotDrivableError extends Error {
 	}
 }
 
-/** Test counts for a run (Japa `summary.aggregates`). */
+/** Test counts for a run (helix `summary.aggregates`). */
 export interface SummaryAggregates {
 	total: number;
 	passed: number;
@@ -122,13 +122,13 @@ export class Runner {
 		this.#duration = 0;
 	}
 
-	/** Whether anything has failed so far (Japa `Runner#failed`). */
+	/** Whether anything has failed so far (helix `Runner#failed`). */
 	get failed(): boolean {
 		return this.#hasError || this.#aggregates.failed > 0;
 	}
 
 	/**
-	 * Stop at the first failure (Japa `Runner#bail`). A plugin runs before the
+	 * Stop at the first failure (helix `Runner#bail`). A plugin runs before the
 	 * test file is collected, so this reaches the run it was called for; the
 	 * `--bail` flag still wins when both are set.
 	 */
@@ -138,7 +138,7 @@ export class Runner {
 	}
 
 	/**
-	 * Configure the suite before it runs (Japa `Runner#onSuite`). Japa calls the
+	 * Configure the suite before it runs (helix `Runner#onSuite`). helix calls the
 	 * callback once per suite; a worker runs exactly one, so it is called once,
 	 * immediately — plugins run before the suite's hooks, so what the callback
 	 * registers still takes effect.
@@ -150,7 +150,7 @@ export class Runner {
 	}
 
 	/**
-	 * Register a Japa reporter (Japa `Runner#registerReporter`). It is handed
+	 * Register a helix reporter (helix `Runner#registerReporter`). It is handed
 	 * this runner and this worker's emitter, so it observes THIS FILE — the
 	 * whole run is only visible from the CLI process.
 	 */
@@ -161,7 +161,7 @@ export class Runner {
 		return this;
 	}
 
-	/** The suites this worker runs — exactly one (Japa `Runner#suites`). */
+	/** The suites this worker runs — exactly one (helix `Runner#suites`). */
 	get suites(): SuiteHandle[] {
 		const suite = currentSuite();
 		return suite === undefined ? [] : [suite];
@@ -189,7 +189,7 @@ export class Runner {
 
 	/**
 	 * The run's summary. Meaningful once `runner:end` has fired — the point a
-	 * Japa reporter reads it from.
+	 * helix reporter reads it from.
 	 */
 	getSummary(): RunnerSummary {
 		return {

@@ -1,5 +1,5 @@
 /**
- * Self-test: Japa Test-surface parity —
+ * Self-test: helix Test-surface parity —
  *   - `Test.macro(name, fn)` extends every handle (class-level, chainable);
  *   - `test.macro(callback)` builds a resource macro whose `t` carries `cleanup`;
  *   - `test.group()` returns the SAME instance its hooks receive (`self === group`).
@@ -24,14 +24,14 @@ Test.macro("asSlow", function () {
 
 test("Test.macro extends the handle and chains", (ctx) => {
 	expect(ctx.test.options.tags).toContain("@slow");
-	// ctx.test.options carries the title + isTodo (Japa parity).
+	// ctx.test.options carries the title + isTodo (helix parity).
 	expect(ctx.test.options.title).toBe(
 		"Test.macro extends the handle and chains",
 	);
 	expect(ctx.test.options.isTodo).toBe(false);
 }).asSlow();
 
-// --- test.macro: resource macro receiving the running test `t` (Japa parity) ---
+// --- test.macro: resource macro receiving the running test `t` (helix parity) ---
 let cleaned = false;
 const useResource = test.macro((t, label: string) => {
 	t.cleanup(() => {
@@ -52,7 +52,7 @@ test("the resource macro's cleanup ran after its test finished", () => {
 	expect(cleaned).toBe(true);
 });
 
-// --- test.group returns the SAME instance passed to its hooks (Japa `self === group`) ---
+// --- test.group returns the SAME instance passed to its hooks (helix `self === group`) ---
 let bodyHandle: unknown;
 let hookSelf: unknown;
 const group = test.group("returning group", (g) => {
@@ -64,7 +64,7 @@ const group = test.group("returning group", (g) => {
 	test("inner test runs", () => {
 		expect(1).toBe(1);
 	});
-	// `ctx.test.options.meta.group` is the enclosing Group object (Japa parity),
+	// `ctx.test.options.meta.group` is the enclosing Group object (helix parity),
 	// not a bare name — and the SAME instance the body/hooks/return share.
 	test("meta.group is the enclosing group instance", (ctx) => {
 		expect(ctx.test.options.meta.group).toBe(group);

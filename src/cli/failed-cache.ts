@@ -1,7 +1,7 @@
 /**
- * The `--failed` cache — Japa's "run what failed last time".
+ * The `--failed` cache — helix's "run what failed last time".
  *
- * Japa writes the failed test TITLES to a cache file after every run, and
+ * helix writes the failed test TITLES to a cache file after every run, and
  * `--failed` turns them into a `--tests` filter on the next one. Same contract
  * here, same file shape (`{ tests: string[] }`), under
  * `node_modules/.cache/helix/summary.json`.

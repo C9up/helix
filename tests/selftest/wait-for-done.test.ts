@@ -1,5 +1,5 @@
 /**
- * Self-test: `test.waitForDone()` + the `done` callback (Japa parity). The
+ * Self-test: `test.waitForDone()` + the `done` callback (helix parity). The
  * runner must not complete the test until `done()` fires, even though the body
  * returns synchronously.
  */

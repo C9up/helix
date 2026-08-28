@@ -1,5 +1,5 @@
 /**
- * Self-test: Japa lifecycle-hook parity — test hooks receive the Test instance,
+ * Self-test: helix lifecycle-hook parity — test hooks receive the Test instance,
  * group hooks receive the Group instance, and a cleanup returned by group.setup
  * runs in the afterAll phase with (hadError, group).
  */
@@ -12,7 +12,7 @@ test.group("hook args", (group) => {
 	group.each.setup((subject) => {
 		// A test hook receives the running Test instance.
 		seen.eachSetupTitle = subject?.title;
-		// Japa parity (F2): the injected context is reachable as `$test.context`
+		// helix parity (F2): the injected context is reachable as `$test.context`
 		// from within the hook — built BEFORE `beforeEach` runs.
 		seen.eachSetupHasContext = subject?.context !== undefined;
 	});
@@ -33,7 +33,7 @@ test.group("hook args", (group) => {
 	});
 });
 
-// F6: `group.tap` receives the Test with a MUTABLE `options` view (Japa parity)
+// F6: `group.tap` receives the Test with a MUTABLE `options` view (helix parity)
 // — assigning `options.title` renames the test.
 test.group("tap options", (group) => {
 	group.tap((t) => {

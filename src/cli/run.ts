@@ -82,7 +82,7 @@ export interface RunConfig {
 	/** Reporter name: `"dot" | "spec" | "json"`. Default `"spec"`. */
 	reporter?: string;
 	/**
-	 * Activate several reporters at once (Japa `--reporters=spec,json`). Takes
+	 * Activate several reporters at once (helix `--reporters=spec,json`). Takes
 	 * precedence over {@link RunConfig.reporter} when it holds more than one
 	 * name.
 	 */
@@ -104,17 +104,17 @@ export interface RunConfig {
 	/** Watch mode: re-run on file changes. */
 	watch?: WatchOptions;
 	/**
-	 * Stop the run at the first failure (Japa `--bail`). Within a file the
+	 * Stop the run at the first failure (helix `--bail`). Within a file the
 	 * remaining tests are reported as skipped; files not yet started are dropped.
 	 */
 	bail?: boolean;
 	/**
-	 * Re-run only the tests that failed last time (Japa `--failed`). Reads the
+	 * Re-run only the tests that failed last time (helix `--failed`). Reads the
 	 * cache written by the previous run and applies it as a `--tests` filter.
 	 */
 	failed?: boolean;
 	/**
-	 * Collect the files, print the tests marked `.pin()`, and run nothing (Japa
+	 * Collect the files, print the tests marked `.pin()`, and run nothing (helix
 	 * `--list-pinned`). Stays on the TypeScript pool: it prints a list rather
 	 * than executing anything, so the native engine's fast path buys nothing.
 	 */
@@ -211,7 +211,7 @@ async function runNative(
 }
 
 export async function run(config: RunConfig): Promise<RunOutcome> {
-	// Adonis/Japa parity: a test run executes in the `test` environment. Set it
+	// Adonis/helix parity: a test run executes in the `test` environment. Set it
 	// on the orchestrator BEFORE any worker spawns — both the native (Rust) and
 	// TS pools inherit the parent process env, so every worker (where the app +
 	// test code is actually loaded) starts with NODE_ENV=test. Mirrors AdonisJS
@@ -273,7 +273,7 @@ export interface SuiteRun {
 }
 
 /**
- * Run suites one after another, the way Japa does. Two things only this level
+ * Run suites one after another. Two things only this level
  * can get right:
  *   - watch mode wraps the WHOLE sequence in one watcher, so every suite runs
  *     on every pass;
@@ -360,7 +360,7 @@ const SILENT_REPORTER: Reporter = {
 
 /**
  * `--list-pinned` output: every pinned test, grouped by the file it lives in.
- * Japa prints the list and exits 0 without running anything.
+ * helix prints the list and exits 0 without running anything.
  */
 function printPinnedTests(results: readonly FileResult[]): void {
 	let total = 0;
@@ -608,7 +608,7 @@ async function runOnce(
 			return { summary, exitCode: 0 };
 		}
 		reporter.onSummary(summary);
-		// Feed the `--failed` cache with this run's failures (Japa writes it from
+		// Feed the `--failed` cache with this run's failures (helix writes it from
 		// a runner teardown).
 		if (writeCache) await writeFailedCache(root, summary);
 

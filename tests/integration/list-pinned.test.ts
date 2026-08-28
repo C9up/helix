@@ -1,5 +1,5 @@
 /**
- * `--list-pinned` — Japa collects the files, prints what `.pin()` marked, and
+ * `--list-pinned` — helix collects the files, prints what `.pin()` marked, and
  * runs NOTHING: not the tests, and not the global setup hooks either, since
  * nothing they would open gets used.
  */
@@ -81,7 +81,7 @@ describe("--list-pinned", () => {
 		expect(existsSync(path.join(root, "ran.log"))).toBe(false);
 	}, 30_000);
 
-	it("skips the bootstrap's global setup hooks, as Japa does", async () => {
+	it("skips the bootstrap's global setup hooks, as helix does", async () => {
 		const file = await writeSpec();
 		const bootstrap = path.join(root, "bootstrap.ts");
 		await writeFile(

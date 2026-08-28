@@ -1,5 +1,5 @@
 /**
- * Parity coverage for the `@japa/runner` + Vitest features added to the
+ * Parity coverage for the `helix` + Vitest features added to the
  * runtime: retries, per-test timeout, `--grep`/`--tags` filtering,
  * `test.fails`, `onTestFinished`/`onTestFailed`, hook cleanup returns,
  * `test.each(fn)`, assertion counting, and the new matchers / asymmetric

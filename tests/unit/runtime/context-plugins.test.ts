@@ -1,7 +1,7 @@
 /**
  * A plugin may replace `assert`; it may not replace `cleanup` or `test`.
  *
- * helix ships an assert, and refusing the override left `@japa/assert`
+ * helix ships an assert, and refusing the override left `helix’s assert`
  * registered but never reached — `plugins: [assert()]` looked wired and did
  * nothing. `cleanup` and `test` stay reserved: the runtime hands them to the
  * body and a test with someone else's `cleanup` is not a test.

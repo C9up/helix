@@ -1,5 +1,5 @@
 /**
- * Self-test: `ctx.test.resetTimeout()` (Japa parity) re-arms the running test's
+ * Self-test: `ctx.test.resetTimeout()` (helix parity) re-arms the running test's
  * deadline, and `test(name).with(() => rows).run(...)` accepts a lazy dataset.
  */
 
@@ -22,7 +22,7 @@ test("resetTimeout(ms) can set a new duration", async (ctx) => {
 	expect(true).toBe(true);
 }).timeout(20);
 
-// Lazy dataset — the function (may be async) is resolved at run time (Japa).
+// Lazy dataset — the function (may be async) is resolved at run time (helix).
 test("lazy dataset yields even rows")
 	.with(() => [2, 4, 6])
 	.run((ctx, row) => {

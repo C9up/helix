@@ -1,11 +1,11 @@
 /**
- * `configure({ plugins })` — the Japa/AdonisJS bootstrap entry.
+ * `configure({ plugins })` — the helix/AdonisJS bootstrap entry.
  *
- * Following Japa precisely: the runtime core is plugin-agnostic, and every
+ * Following helix precisely: the runtime core is plugin-agnostic, and every
  * capability (HTTP `client`, `db`, fakes, …) ships as a PLUGIN that extends the
  * injected test context. A plugin is a function handed a {@link PluginApi};
  * it registers context properties via `api.context.macro` / `.getter` (the
- * `TestContext.macro`/`getter` of Japa) and pairs that with a `declare module`
+ * `TestContext.macro`/`getter` of helix) and pairs that with a `declare module`
  * augmentation for the types.
  *
  *   // tests/bootstrap.ts
@@ -15,7 +15,7 @@
  *
  * This keeps `@c9up/helix` (the core) free of any ecosystem dependency: the
  * plugins live in each package's `/testing` subpath and depend on helix, never
- * the other way round — the Japa "runner + plugins" topology.
+ * the other way round — the helix "runner + plugins" topology.
  */
 
 import { type CLIArgs, cliArgs } from "./cli-args.js";
@@ -31,7 +31,7 @@ import {
 } from "./suite-taps.js";
 
 /**
- * What a plugin uses to extend the test context. Mirrors Japa's
+ * What a plugin uses to extend the test context. Mirrors helix's
  * `TestContext.macro(name, value)` / `TestContext.getter(name, fn)`.
  */
 export interface PluginContext {
@@ -41,49 +41,49 @@ export interface PluginContext {
 	getter(name: string, fn: (ctx: TestContext) => unknown): void;
 }
 
-/** A runner-level hook — Japa's shape, defined once in `suite-taps.ts`. */
+/** A runner-level hook — helix's shape, defined once in `suite-taps.ts`. */
 export type RunnerHook = SuiteHook;
 export type RunnerHookCleanup = SuiteHookCleanup;
 
 /**
  * The API handed to each plugin at {@link configure} time.
  *
- * Japa hands its plugins `{ config, cliArgs, runner, emitter }`; helix passes
- * the same four, so a Japa plugin's body ports over unchanged, plus two helix
- * additions — `context` (Japa reaches the same registry through the imported
- * `TestContext` class) and `cleanup` (Japa uses `config.teardown`).
+ * helix hands its plugins `{ config, cliArgs, runner, emitter }`; helix passes
+ * the same four, so a helix plugin's body ports over unchanged, plus two helix
+ * additions — `context` (helix reaches the same registry through the imported
+ * `TestContext` class) and `cleanup` (helix uses `config.teardown`).
  */
 export interface PluginApi {
 	/**
-	 * The options this run was configured with (Japa `config`). Mutable: Japa
+	 * The options this run was configured with (helix `config`). Mutable: helix
 	 * plugins edit it, and helix reads it back once every plugin has run.
 	 */
 	config: ConfigureOptions;
-	/** The flags the CLI forwarded to this worker (Japa `cliArgs`). */
+	/** The flags the CLI forwarded to this worker (helix `cliArgs`). */
 	cliArgs: CLIArgs;
-	/** Run-level counters, readable once the run ends (Japa `runner`). */
+	/** Run-level counters, readable once the run ends (helix `runner`). */
 	runner: Runner;
-	/** Lifecycle events — `test:start`, `group:end`, … (Japa `emitter`). */
+	/** Lifecycle events — `test:start`, `group:end`, … (helix `emitter`). */
 	emitter: Emitter;
 	/** Extend the injected test context. */
 	context: PluginContext;
 	/**
 	 * Register a teardown that runs ONCE after all tests in the run finish
 	 * (reverse registration order) — the place to close a booted server, a DB
-	 * pool, etc. (Japa runner-teardown parity). Without this, a plugin that boots
+	 * pool, etc. (helix runner-teardown parity). Without this, a plugin that boots
 	 * a resource at `configure()` has no clean shutdown point.
 	 */
 	cleanup(fn: RunnerHook): void;
 }
 
 /**
- * A helix plugin — the Japa plugin shape adapted to helix. Runs once at
+ * A helix plugin — the helix plugin shape adapted to helix. Runs once at
  * bootstrap; may be async (e.g. to boot a server before registering `client`).
  */
 export type Plugin = (api: PluginApi) => void | Promise<void>;
 
 /**
- * Filters applied to the tests a file declares (Japa `config.filters`).
+ * Filters applied to the tests a file declares (helix `config.filters`).
  *
  * `files` and `suites` are reported, not honoured: they select which FILES run,
  * and helix settles that list in the CLI process before any worker — and
@@ -93,12 +93,12 @@ export type Plugin = (api: PluginApi) => void | Promise<void>;
  */
 export interface ConfigureFilters {
 	/**
-	 * Path fragments the CLI matched files against (Japa `filters.files`).
+	 * Path fragments the CLI matched files against (helix `filters.files`).
 	 * Read-only here: helix settles the file list before a worker exists, so
 	 * this reports what was selected rather than selecting.
 	 */
 	files?: string[];
-	/** Suite names the run was limited to (Japa `filters.suites`). Read-only. */
+	/** Suite names the run was limited to (helix `filters.suites`). Read-only. */
 	suites?: string[];
 	/** Only tests carrying one of these tags (`~@tag`/`!@tag` excludes). */
 	tags?: string[];
@@ -106,21 +106,21 @@ export interface ConfigureFilters {
 	groups?: string[];
 	/** Only tests with these exact titles. */
 	tests?: string[];
-	/** Require EVERY tag in `tags` instead of any (Japa `--match-all`). */
+	/** Require EVERY tag in `tags` instead of any (helix `--match-all`). */
 	matchAll?: boolean;
 }
 
 /**
- * Japa's `Refiner`, as much of it as means anything here: a handle that ADDS
+ * helix's `Refiner`, as much of it as means anything here: a handle that ADDS
  * filters. It writes straight into {@link ConfigureOptions.filters}, so a
  * plugin calling `refiner.add("tags", [...])` steers the run exactly as setting
  * the filter would — the object is a different door to the same room, not a
  * second mechanism.
  */
 export interface Refiner {
-	/** Add filter values for a layer (Japa `refiner.add`). */
+	/** Add filter values for a layer (helix `refiner.add`). */
 	add(layer: "tests" | "groups" | "tags", values: string[]): void;
-	/** Require every tag instead of any (Japa `refiner.matchAllTags`). */
+	/** Require every tag instead of any (helix `refiner.matchAllTags`). */
 	matchAllTags(toggle?: boolean): void;
 }
 
@@ -138,70 +138,70 @@ function makeRefiner(filters: ConfigureFilters): Refiner {
 
 /** Runtime configuration passed to {@link configure}. */
 export interface ConfigureOptions {
-	/** Plugins to install — each extends the test context (Japa parity). */
+	/** Plugins to install — each extends the test context (helix parity). */
 	plugins?: Plugin[];
 	/**
-	 * The directory the run was launched from (Japa `cwd`). Filled in by the
+	 * The directory the run was launched from (helix `cwd`). Filled in by the
 	 * runtime, so a plugin resolving a path against the project reads the same
 	 * root the CLI discovered from.
 	 */
 	cwd?: string;
 	/**
-	 * Configure the suite before it runs (Japa `configureSuite`). Applied AFTER
-	 * the plugins, which is both Japa's order and what lets a plugin read it or
+	 * Configure the suite before it runs (helix `configureSuite`). Applied AFTER
+	 * the plugins, which is both helix's order and what lets a plugin read it or
 	 * put its own in place.
 	 *
-	 * May return a promise — Japa's is synchronous, but helix's per-suite
+	 * May return a promise — helix's is synchronous, but helix's per-suite
 	 * `configure` has to re-import the config module, and hooks it registers must
 	 * exist before the setup hooks are drained.
 	 */
 	configureSuite?: (suite: SuiteHandle) => void | Promise<void>;
 	/**
-	 * The reporters this run activated (Japa `reporters.activated`). Read-only
+	 * The reporters this run activated (helix `reporters.activated`). Read-only
 	 * truth: reporters live in the CLI process, so naming one here would not
 	 * make it run.
 	 */
 	reporters?: { activated: string[] };
-	/** `process.exit()` once the run ends (Japa `forceExit`). */
+	/** `process.exit()` once the run ends (helix `forceExit`). */
 	forceExit?: boolean;
-	/** Directories discovery skipped (Japa `exclude`). */
+	/** Directories discovery skipped (helix `exclude`). */
 	exclude?: string[];
 	/**
-	 * The filter object (Japa `refiner`). Writes through to
+	 * The filter object (helix `refiner`). Writes through to
 	 * {@link ConfigureOptions.filters}, so `refiner.add("tags", [...])` from a
 	 * plugin steers the run exactly as setting the filter would.
 	 */
 	refiner?: Refiner;
 	/**
-	 * Filters to apply to this file's tests (Japa `config.filters`). The CLI
+	 * Filters to apply to this file's tests (helix `config.filters`). The CLI
 	 * flags win: a filter typed at the prompt overrides the configured one.
 	 */
 	filters?: ConfigureFilters;
 	/**
-	 * How a test file is imported (Japa `config.importer`). Defaults to
+	 * How a test file is imported (helix `config.importer`). Defaults to
 	 * `import(file.href)`. Receives the URL helix would have imported —
 	 * cache-busting query included, so repeated runs still re-evaluate.
 	 */
 	importer?: (file: URL) => void | Promise<void>;
-	/** Run once before the tests (Japa runner `setup`). */
+	/** Run once before the tests (helix runner `setup`). */
 	setup?: RunnerHook[];
-	/** Run once after the tests, reverse order (Japa runner `teardown`). */
+	/** Run once after the tests, reverse order (helix runner `teardown`). */
 	teardown?: RunnerHook[];
 	/**
-	 * Default per-test timeout in ms for this file's tests (Japa `configure({
+	 * Default per-test timeout in ms for this file's tests (helix `configure({
 	 * timeout })`). `0` disables. Overridden by `--timeout` and by a per-test
 	 * `test.timeout(ms)` / `{ timeout }`.
 	 */
 	timeout?: number;
 	/**
-	 * Default extra attempts on failure for this file's tests (Japa `configure({
+	 * Default extra attempts on failure for this file's tests (helix `configure({
 	 * retries })`). Overridden by `--retries` and by a per-test `test.retry(n)`.
 	 */
 	retries?: number;
 	/**
 	 * The name of the suite these tests belong to — surfaced as
 	 * `ctx.test.options.meta.suite.name` and on the `suite:*` events. Defaults to
-	 * `"default"`, the name Japa gives its implicit suite. Overridden by
+	 * `"default"`, the name helix gives its implicit suite. Overridden by
 	 * `--suite`.
 	 */
 	suite?: string;
@@ -232,12 +232,12 @@ export function getConfiguredDefaults(): Readonly<ConfiguredDefaults> {
 /** Tracks the run by listening to {@link emitter} — handed to plugins. */
 const runner = new Runner(emitter);
 
-/** The options the last {@link configure} call resolved to (Japa `config`). */
+/** The options the last {@link configure} call resolved to (helix `config`). */
 let resolvedConfig: ConfigureOptions = {};
 
 const api: PluginApi = {
 	// A getter so a plugin reads the config of the `configure()` call it is
-	// running under, not an empty object captured at module load. Japa lets a
+	// running under, not an empty object captured at module load. helix lets a
 	// plugin EDIT it (that is how a plugin raises the default timeout), so the
 	// object is handed over mutable and read back after every plugin has run.
 	get config(): ConfigureOptions {
@@ -261,9 +261,9 @@ const api: PluginApi = {
 
 /**
  * Install plugins + runner hooks. Call once from a bootstrap file
- * (Japa/AdonisJS `bin/test.ts` / `tests/bootstrap.ts`).
+ * (helix/AdonisJS `bin/test.ts` / `tests/bootstrap.ts`).
  *
- * Order follows Japa: PLUGINS first, then the run's `setup` hooks, then the
+ * Order follows helix: PLUGINS first, then the run's `setup` hooks, then the
  * `teardown` hooks are parked for after the run (see {@link
  * drainRunnerTeardowns}). That ordering is what makes a plugin's edits count —
  * it can raise `config.timeout`, push a `setup` hook, or reach for
@@ -281,7 +281,7 @@ export async function configure(options: ConfigureOptions): Promise<void> {
 	const handle = makeSuiteHandle(options.suite ?? "default", setup, teardown);
 	setCurrentSuite(handle);
 
-	// The rest of Japa's `BaseConfig`, filled with what this run actually is, so
+	// The rest of helix's `BaseConfig`, filled with what this run actually is, so
 	// a plugin reading `api.config` is told the truth rather than `undefined`.
 	const flags = cliArgs();
 	resolvedConfig.cwd ??= process.cwd();
@@ -297,7 +297,7 @@ export async function configure(options: ConfigureOptions): Promise<void> {
 		await plugin(api);
 	}
 
-	// Japa order: plugins, THEN `runner.onSuite(config.configureSuite)`, then the
+	// helix order: plugins, THEN `runner.onSuite(config.configureSuite)`, then the
 	// setup hooks. Applying it here rather than earlier is what lets a plugin
 	// read it — or put its own in place — and still have it take effect.
 	await resolvedConfig.configureSuite?.(handle);
@@ -315,7 +315,7 @@ export async function configure(options: ConfigureOptions): Promise<void> {
 	if (resolvedConfig.importer !== undefined)
 		configuredDefaults.importer = resolvedConfig.importer;
 
-	// Japa skips the global setup hooks under `--list-pinned`: nothing runs, so
+	// helix skips the global setup hooks under `--list-pinned`: nothing runs, so
 	// nothing should be opened.
 	const listing = cliArgs().listPinned === true;
 	for (const fn of listing ? [] : setup) {

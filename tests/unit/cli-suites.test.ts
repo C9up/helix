@@ -130,7 +130,7 @@ describe("loadHelixConfig", () => {
 	});
 });
 
-describe("resolveSuiteFiles — Japa's three `files` forms", () => {
+describe("resolveSuiteFiles — helix's three `files` forms", () => {
 	it("accepts a bare string, not just an array", async () => {
 		const spec = await write("tests/unit/a.spec.ts");
 		await write("tests/unit/helper.ts");

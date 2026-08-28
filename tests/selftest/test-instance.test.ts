@@ -1,5 +1,5 @@
 /**
- * Self-test: the Japa Test model — `ctx.test` instance, `test(name).with().run()`
+ * Self-test: the helix Test model — `ctx.test` instance, `test(name).with().run()`
  * datasets, per-test `setup`/`teardown`, `cleanup(hasError, test)` args, and
  * conditional `skip(condition)`.
  */
@@ -18,7 +18,7 @@ const rows = [
 	{ a: 1, b: 2, sum: 3 },
 	{ a: 4, b: 5, sum: 9 },
 ];
-// Japa dataset API: `test(name).with(rows).run((ctx, row) => …)`.
+// helix dataset API: `test(name).with(rows).run((ctx, row) => …)`.
 test("adds a + b")
 	.with(rows)
 	.run((ctx, row) => {
@@ -83,7 +83,7 @@ test("skip(async () => true) skips when the promise resolves true", () => {
 test("a bodiless test is reported as todo");
 
 // F3 primary form: `test(name, fn).with(rows)` re-homes the body and runs it
-// once per row (Japa's main dataset shape).
+// once per row (helix's main dataset shape).
 let rehomedRuns = 0;
 test("primary-form dataset re-homes the body", (ctx) => {
 	rehomedRuns += 1;

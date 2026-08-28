@@ -1,5 +1,5 @@
 /**
- * `suite.onTest()` / `suite.onGroup()` — the taps Japa's `Suite` exposes to
+ * `suite.onTest()` / `suite.onGroup()` — the taps helix's `Suite` exposes to
  * `configureSuite`, so a bootstrap can configure every test or group of a suite
  * without touching the test files.
  *
@@ -9,10 +9,10 @@
  *
  * `configureSuite` runs before the test file is imported, so the callbacks are
  * stored and applied to the collected tree just before execution — the same
- * point at which Japa's taps fire (each test, once, before it runs).
+ * point at which helix's taps fire (each test, once, before it runs).
  *
  * Each method maps onto a field the collection tree already carries; nothing
- * here is a facade over behaviour helix does not have. Japa `Test` members that
+ * here is a facade over behaviour helix does not have. helix `Test` members that
  * belong to EXECUTION rather than configuration — `run`, `exec`, `context`,
  * `executed`, `failed`, `options` — are absent: helix owns execution, and a
  * handle that pretended otherwise would be lying about what a callback can do.
@@ -24,10 +24,10 @@ import type { SuiteNode, TestNode } from "./suite.js";
 /** A hook body, as `test.setup()` / `group.setup()` take it. */
 type Handler = () => void | Promise<void>;
 
-/** How `test.tags()` combines with the tags already declared (Japa parity). */
+/** How `test.tags()` combines with the tags already declared (helix parity). */
 export type TagStrategy = "replace" | "append" | "prepend";
 
-/** The Japa `Test` surface a tap can configure. */
+/** The helix `Test` surface a tap can configure. */
 export interface TestHandle {
 	/** The declared title. */
 	readonly title: string;
@@ -47,15 +47,15 @@ export interface TestHandle {
 	teardown(handler: Handler): TestHandle;
 }
 
-/** The Japa `Group` surface a tap can configure. */
+/** The helix `Group` surface a tap can configure. */
 export interface GroupHandle {
 	/** The declared title. */
 	readonly title: string;
-	/** Configure every test of this group (Japa `group.tap`). */
+	/** Configure every test of this group (helix `group.tap`). */
 	tap(callback: (test: TestHandle) => void): GroupHandle;
 	setup(handler: Handler): GroupHandle;
 	teardown(handler: Handler): GroupHandle;
-	/** Per-test hooks and defaults — Japa `group.each`. */
+	/** Per-test hooks and defaults — helix `group.each`. */
 	readonly each: {
 		setup(handler: Handler): void;
 		teardown(handler: Handler): void;
@@ -166,7 +166,7 @@ export function groupHandle(node: SuiteNode): GroupHandle {
 }
 
 /**
- * What a `setup` hook may return so it gets undone afterwards — Japa's
+ * What a `setup` hook may return so it gets undone afterwards — helix's
  * `@poppinss/hooks` cleanup handler, called with `(error, runner)`.
  */
 export type SuiteHookCleanup = (
@@ -177,7 +177,7 @@ export type SuiteHookCleanup = (
 /**
  * A run-level hook, as `suite.setup()` / `suite.teardown()` take it.
  *
- * Japa hands it the `runner`, and lets a `setup` hook RETURN its own undo — the
+ * helix hands it the `runner`, and lets a `setup` hook RETURN its own undo — the
  * idiom AdonisJS is written in (`setup: [() => testUtils.db().migrate()]`,
  * where `migrate()` resolves to the rollback). Both are honoured.
  *
@@ -189,7 +189,7 @@ export type SuiteHook =
 	| ((runner: Runner) => SuiteHookCleanup | Promise<SuiteHookCleanup>);
 
 /**
- * What `configureSuite` and `runner.onSuite` receive — Japa's `Suite`, minus
+ * What `configureSuite` and `runner.onSuite` receive — helix's `Suite`, minus
  * the members that only make sense to whoever OWNS execution (`add`, `stack`,
  * `exec`, `failed`): helix builds the tree from the file's own `describe`/`test`
  * and runs it itself, so a handle exposing those would be lying about what a
@@ -202,11 +202,11 @@ export interface SuiteHandle {
 	setup(fn: SuiteHook): SuiteHandle;
 	/** Run after this suite's tests, in reverse registration order. */
 	teardown(fn: SuiteHook): SuiteHandle;
-	/** Configure every test of the suite before it runs (Japa `Suite#onTest`). */
+	/** Configure every test of the suite before it runs (helix `Suite#onTest`). */
 	onTest(callback: (test: TestHandle) => void): SuiteHandle;
-	/** Configure every group of the suite before it runs (Japa `Suite#onGroup`). */
+	/** Configure every group of the suite before it runs (helix `Suite#onGroup`). */
 	onGroup(callback: (group: GroupHandle) => void): SuiteHandle;
-	/** Stop this suite at the first failure (Japa `Suite#bail`). */
+	/** Stop this suite at the first failure (helix `Suite#bail`). */
 	bail(toggle?: boolean): SuiteHandle;
 }
 
@@ -249,7 +249,7 @@ export function makeSuiteHandle(
 /**
  * The suite the current `configure()` call is running for. Set before plugins
  * run so `runner.onSuite` has something to hand back — a worker runs exactly
- * one suite, so Japa's "called once per suite" is "called once".
+ * one suite, so helix's "called once per suite" is "called once".
  */
 let current: SuiteHandle | undefined;
 
@@ -272,17 +272,17 @@ const taps: {
 	bail?: boolean;
 } = { onTest: [], onGroup: [] };
 
-/** Register a per-test tap (Japa `Suite#onTest`). */
+/** Register a per-test tap (helix `Suite#onTest`). */
 export function registerTestTap(callback: (test: TestHandle) => void): void {
 	taps.onTest.push(callback);
 }
 
-/** Register a per-group tap (Japa `Suite#onGroup`). */
+/** Register a per-group tap (helix `Suite#onGroup`). */
 export function registerGroupTap(callback: (group: GroupHandle) => void): void {
 	taps.onGroup.push(callback);
 }
 
-/** Ask this suite to stop at the first failure (Japa `Suite#bail`). */
+/** Ask this suite to stop at the first failure (helix `Suite#bail`). */
 export function setBail(toggle: boolean): void {
 	taps.bail = toggle;
 }

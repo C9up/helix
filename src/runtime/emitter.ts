@@ -1,18 +1,18 @@
 /**
- * Runner events — the Japa `Emitter` surface.
+ * Runner events — the helix `Emitter` surface.
  *
- * Japa's plugin/reporter topology is built on an event emitter: a plugin
+ * helix's plugin/reporter topology is built on an event emitter: a plugin
  * receives `{ config, cliArgs, runner, emitter }` and subscribes to
  * `runner:start`, `suite:start`, `group:start`, `test:start`, … to observe the
  * run. Helix emits the SAME event names with the SAME node shapes
- * (`TestStartNode`, `TestEndNode`, `GroupStartNode`, …) so a Japa reporter or
+ * (`TestStartNode`, `TestEndNode`, `GroupStartNode`, …) so a helix reporter or
  * plugin can be ported without rewriting its listeners.
  *
- * One named deviation from `@japa/core`: `suite:start` / `suite:end` carry the
+ * One named deviation from `helix`: `suite:start` / `suite:end` carry the
  * test FILE name. Helix runs one process per file, so the file is what a
  * worker-side listener can see of a suite.
  *
- * `errors[].error` is the thrown `Error` itself, as in Japa — the emitter runs
+ * `errors[].error` is the thrown `Error` itself, as in helix — the emitter runs
  * in the worker, where the original is still around. Only an error rebuilt from
  * an IPC frame (which can carry data only) degrades to the {@link
  * SerializedError} shape, which keeps the same `name`/`message`/`stack` fields.
@@ -20,7 +20,7 @@
 
 import type { SerializedError } from "./run.js";
 
-/** The lifecycle phase an error was raised in (Japa parity). */
+/** The lifecycle phase an error was raised in (helix parity). */
 export type ErrorPhase =
 	| "setup"
 	| "test"
@@ -39,7 +39,7 @@ export interface EmittedError {
 	error: Error | SerializedError;
 }
 
-/** A test title, before and after dataset interpolation (Japa parity). */
+/** A test title, before and after dataset interpolation (helix parity). */
 export interface EmittedTitle {
 	original: string;
 	expanded: string;
@@ -53,17 +53,17 @@ export interface EmittedDataset {
 }
 
 /**
- * Shared shape of `test:start` / `test:end` — Japa's `TestOptions`, field for
+ * Shared shape of `test:start` / `test:end` — helix's `TestOptions`, field for
  * field. Only `title`, `tags`, `timeout`, `meta` and `isPinned` always carry a
  * value; the rest appear when the corresponding modifier was used, so a
- * reporter that probes for a key sees what Japa would show it.
+ * reporter that probes for a key sees what helix would show it.
  */
 interface TestNodeBase {
 	title: EmittedTitle;
 	tags: string[];
 	timeout: number;
 	waitsForDone?: boolean;
-	/** The test body, as Japa hands it over. Absent on a `todo`. */
+	/** The test body, as helix hands it over. Absent on a `todo`. */
 	executor?: (...args: never[]) => unknown;
 	retries?: number;
 	retryAttempt?: number;
@@ -111,7 +111,7 @@ export type SuiteEndNode = SuiteStartNode & {
 };
 
 /**
- * Payload of `runner:start`. Japa types this as `{}`; helix spells the same
+ * Payload of `runner:start`. helix types this as `{}`; helix spells the same
  * "no fields" shape as an empty record so no lint suppression is needed.
  */
 export type RunnerStartNode = Record<string, never>;
@@ -121,7 +121,7 @@ export interface RunnerEndNode {
 	hasError: boolean;
 }
 
-/** Every event the runtime emits, with its payload (Japa `RunnerEvents`). */
+/** Every event the runtime emits, with its payload (helix `RunnerEvents`). */
 export interface RunnerEvents {
 	"test:start": TestStartNode;
 	"test:end": TestEndNode;
@@ -149,7 +149,7 @@ interface StoredListener {
 
 /**
  * A typed event emitter over {@link RunnerEvents}. Deliberately minimal — `on`
- * / `once` / `off` / `emit`, the surface a Japa reporter or plugin uses. A
+ * / `once` / `off` / `emit`, the surface a helix reporter or plugin uses. A
  * throwing listener is reported on stderr and never fails the run.
  */
 export class Emitter {

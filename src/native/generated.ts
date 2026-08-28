@@ -16,11 +16,11 @@ export interface RunConfig {
 	/** `"dot" | "spec" | "json"`. Default `"spec"`. */
 	reporter?: string;
 	/**
-	 * Activate several reporters at once (Japa `--reporters=spec,json`).
+	 * Activate several reporters at once (helix `--reporters=spec,json`).
 	 * Takes precedence over `reporter` when it holds more than one name.
 	 */
 	reporters?: string[] | undefined;
-	/** Stop the run at the first failing file (Japa `--bail`). */
+	/** Stop the run at the first failing file (helix `--bail`). */
 	bail?: boolean;
 	/**
 	 * Path to the compiled worker entry (points at the JS shim that calls

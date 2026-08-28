@@ -1,5 +1,5 @@
 /**
- * `assert` — Japa/`@japa/assert` (chai-flavored) assertion surface, injected on
+ * `assert` — helix/`helix's assert` (chai-flavored) assertion surface, injected on
  * every test context as `ctx.assert`. Complements the Vitest `expect` API; some
  * teams (and the Adonis docs) reach for `assert.*`. Each call records an
  * assertion so `assert.plan(n)` / `expect.assertions(n)` stay accurate.
@@ -91,7 +91,7 @@ function deepSubset(obj: unknown, subset: unknown): boolean {
 }
 
 /**
- * How two array members are compared. `@japa/assert` (chai) uses STRICT
+ * How two array members are compared. `helix's assert` (chai) uses STRICT
  * equality for the plain `*Members` family and deep equality only for the
  * explicit `*DeepMembers` variants.
  */
@@ -148,7 +148,7 @@ function includeOrderedWith(
 
 /** Loose equality (chai `assert.equal` semantics). Isolated so the `==` is deliberate. */
 function looseEqual(a: unknown, b: unknown): boolean {
-	// biome-ignore lint/suspicious/noDoubleEquals: chai/@japa `assert.equal` is intentionally non-strict (`==`); `strictEqual` covers `===`.
+	// biome-ignore lint/suspicious/noDoubleEquals: chai/@helix `assert.equal` is intentionally non-strict (`==`); `strictEqual` covers `===`.
 	return a == b;
 }
 
@@ -218,46 +218,46 @@ export interface Assert {
 	notMatch(value: string, regex: RegExp, message?: string): void;
 	oneOf(value: unknown, list: readonly unknown[], message?: string): void;
 
-	/** Alias of `isOk` — value is truthy (@japa/assert). */
+	/** Alias of `isOk` — value is truthy (helix's assert). */
 	ok(value: unknown, message?: string): void;
-	/** Alias of `isNotOk` — value is falsy (@japa/assert). */
+	/** Alias of `isNotOk` — value is falsy (helix's assert). */
 	notOk(value: unknown, message?: string): void;
-	/** Alias of `isEmpty` (@japa/assert). */
+	/** Alias of `isEmpty` (helix's assert). */
 	empty(value: unknown, message?: string): void;
-	/** Alias of `isNotEmpty` (@japa/assert). */
+	/** Alias of `isNotEmpty` (helix's assert). */
 	notEmpty(value: unknown, message?: string): void;
 	/** Deep membership: array contains a deeply-equal element, or object contains the subset. */
 	deepInclude(haystack: unknown, needle: unknown, message?: string): void;
 	/** Negation of {@link deepInclude}. */
 	notDeepInclude(haystack: unknown, needle: unknown, message?: string): void;
-	/** Object owns ALL of `keys` (@japa/assert `properties`). */
+	/** Object owns ALL of `keys` (helix's assert `properties`). */
 	properties(object: unknown, keys: readonly string[], message?: string): void;
-	/** Object is MISSING at least one of `keys` (@japa/assert `notAllProperties`). */
+	/** Object is MISSING at least one of `keys` (helix's assert `notAllProperties`). */
 	notAllProperties(
 		object: unknown,
 		keys: readonly string[],
 		message?: string,
 	): void;
-	/** Object's own keys are EXACTLY `keys` (@japa/assert `onlyProperties`). */
+	/** Object's own keys are EXACTLY `keys` (helix's assert `onlyProperties`). */
 	onlyProperties(
 		object: unknown,
 		keys: readonly string[],
 		message?: string,
 	): void;
-	/** Object owns NONE of `keys` (@japa/assert `notAnyProperties`). */
+	/** Object owns NONE of `keys` (helix's assert `notAnyProperties`). */
 	notAnyProperties(
 		object: unknown,
 		keys: readonly string[],
 		message?: string,
 	): void;
-	/** Object owns AT LEAST ONE of `keys` (@japa/assert `anyProperties`). */
+	/** Object owns AT LEAST ONE of `keys` (helix's assert `anyProperties`). */
 	anyProperties(
 		object: unknown,
 		keys: readonly string[],
 		message?: string,
 	): void;
 
-	/** Negation helpers + numeric/object-state matchers (chai / @japa/assert). */
+	/** Negation helpers + numeric/object-state matchers (chai / helix's assert). */
 	isNotTrue(value: unknown, message?: string): void;
 	isNotFalse(value: unknown, message?: string): void;
 	isNotArray(value: unknown, message?: string): void;
@@ -274,7 +274,7 @@ export interface Assert {
 		delta: number,
 		message?: string,
 	): void;
-	/** Alias of {@link closeTo} (`@japa/assert` exposes both). */
+	/** Alias of {@link closeTo} (`helix's assert` exposes both). */
 	approximately(
 		actual: number,
 		expected: number,
@@ -315,7 +315,7 @@ export interface Assert {
 	): void;
 	/**
 	 * `superset` contains every member of `subset` (strict equality, order
-	 * independent) — `@japa/assert`'s `includeMembers`.
+	 * independent) — `helix's assert`'s `includeMembers`.
 	 */
 	includeMembers(
 		superset: readonly unknown[],
@@ -420,7 +420,7 @@ export interface Assert {
 		subset: unknown,
 		message?: string,
 	): void;
-	/** Alias of {@link doesNotContainSubset} (`@japa/assert` exposes both). */
+	/** Alias of {@link doesNotContainSubset} (`helix's assert` exposes both). */
 	notContainsSubset(object: unknown, subset: unknown, message?: string): void;
 	/** Alias of {@link containsSubset} kept from helix's earlier naming. */
 	containSubset(object: unknown, subset: unknown, message?: string): void;
@@ -436,7 +436,7 @@ export interface Assert {
 
 	throws(fn: () => unknown, matcher?: ErrorMatcher, message?: string): void;
 	doesNotThrow(fn: () => unknown, message?: string): void;
-	/** Alias of {@link doesNotThrow} (`@japa/assert` exposes both spellings). */
+	/** Alias of {@link doesNotThrow} (`helix's assert` exposes both spellings). */
 	doesNotThrows(fn: () => unknown, message?: string): void;
 	rejects(
 		fn: () => Promise<unknown>,
@@ -444,19 +444,19 @@ export interface Assert {
 		message?: string,
 	): Promise<void>;
 	doesNotReject(fn: () => Promise<unknown>, message?: string): Promise<void>;
-	/** Alias of {@link doesNotReject} (`@japa/assert` exposes both spellings). */
+	/** Alias of {@link doesNotReject} (`helix's assert` exposes both spellings). */
 	doesNotRejects(fn: () => Promise<unknown>, message?: string): Promise<void>;
 
 	/** Force a failure with a message. */
 	fail(message?: string): never;
-	/** Force a failure carrying actual/expected/operator (chai/@japa parity). */
+	/** Force a failure carrying actual/expected/operator (chai/@helix parity). */
 	fail(
 		actual: unknown,
 		expected: unknown,
 		message?: string,
 		operator?: string,
 	): never;
-	/** Declare the exact number of assertions this test must make (Japa parity). */
+	/** Declare the exact number of assertions this test must make (helix parity). */
 	plan(count: number): void;
 }
 
@@ -979,7 +979,7 @@ export function createAssert(): Assert {
 		},
 		// The `*Members` family. Plain variants compare with `===`, `*Deep*`
 		// variants structurally, `*Ordered*` variants position by position —
-		// chai/`@japa/assert` semantics, verified against the real package.
+		// chai/`helix's assert` semantics, verified against the real package.
 		includeMembers(
 			superset: readonly unknown[],
 			subset: readonly unknown[],

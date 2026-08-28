@@ -1,5 +1,5 @@
 /**
- * `suites[].configure` — Japa's per-suite callback, re-imported in the worker
+ * `suites[].configure` — helix's per-suite callback, re-imported in the worker
  * because a function cannot cross the CLI→worker boundary.
  */
 

@@ -175,7 +175,7 @@ describe("helix > cli > reporter > makeReporter factory", () => {
 	});
 });
 
-describe("makeReporters — Japa --reporters", () => {
+describe("makeReporters — helix --reporters", () => {
 	/** A reporter that records which callbacks it received. */
 	function recording(log: string[], label: string): Reporter {
 		return {

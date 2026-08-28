@@ -17,7 +17,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { TestInstance } from "./suite.js";
 
 /**
- * A per-test teardown. Receives `(hasError, test)` (Japa parity): whether the
+ * A per-test teardown. Receives `(hasError, test)` (helix parity): whether the
  * test failed, and the running test's instance. Both params are optional so
  * plain `() => …` cleanups stay valid.
  */
@@ -43,9 +43,9 @@ interface TestFrame {
 	/** `onTestFailed` callbacks — run after the test only when it failed. */
 	onFailed: TestCleanup[];
 	assertions: AssertionState;
-	/** The running test's instance (Japa `ctx.test`), threaded into cleanups. */
+	/** The running test's instance (helix `ctx.test`), threaded into cleanups. */
 	test: TestInstance | undefined;
-	/** The injected context — what a Japa `Test.executed` hook reads as `test.context`. */
+	/** The injected context — what a helix `Test.executed` hook reads as `test.context`. */
 	context: unknown;
 	/** Whether the test body/hooks errored — passed to cleanups as `hasError`. */
 	hadError: boolean;
@@ -104,19 +104,19 @@ export function setFrameTest(test: TestInstance): void {
 
 /**
  * Read the running test's instance from the active frame — the `t` handed to a
- * Japa resource macro (`test.macro((t, …) => …)`). Undefined outside a test.
+ * helix resource macro (`test.macro((t, …) => …)`). Undefined outside a test.
  */
 export function getFrameTest(): TestInstance | undefined {
 	return storage.getStore()?.test;
 }
 
-/** The running test, or `undefined` outside one (Japa `getActiveTest`). */
+/** The running test, or `undefined` outside one (helix `getActiveTest`). */
 export function getActiveTest(): TestInstance | undefined {
 	return getFrameTest();
 }
 
 /**
- * The running test, or a thrown error outside one — Japa's
+ * The running test, or a thrown error outside one — helix's
  * `getActiveTestOrFail`, the guard a plugin uses before touching test state.
  */
 export function getActiveTestOrFail(): TestInstance {
@@ -175,8 +175,8 @@ export function onTestFailed(cb: TestCleanup): void {
 }
 
 /**
- * Callbacks registered for EVERY test of the run (Japa `Test.executed`). Japa
- * plugins use it to check after each test that something held — `@japa/assert`
+ * Callbacks registered for EVERY test of the run (helix `Test.executed`). helix
+ * plugins use it to check after each test that something held — `helix's assert`
  * validates its planned-assertion count there.
  */
 type ExecutedHook = (
@@ -186,7 +186,7 @@ type ExecutedHook = (
 
 const executedHooks: ExecutedHook[] = [];
 
-/** Register a per-test hook for the whole run (Japa `Test.executed`). */
+/** Register a per-test hook for the whole run (helix `Test.executed`). */
 export function registerExecutedHook(fn: ExecutedHook): void {
 	executedHooks.push(fn);
 }
@@ -207,7 +207,7 @@ export function setFrameContext(context: unknown): void {
  * then the run-wide `Test.executed` hooks.
  *
  * Returns what an `executed` hook threw, if one did. That hook IS a verdict —
- * `@japa/assert` validates `assert.plan(n)` there and throws when the count is
+ * `helix's assert` validates `assert.plan(n)` there and throws when the count is
  * wrong — so swallowing it would let a plugin's whole reason for existing pass
  * green. The frame's own callbacks keep being logged rather than thrown: they
  * are teardown, and a broken one must not invent a failure.

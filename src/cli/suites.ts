@@ -4,7 +4,7 @@
  * SHAPE is Adonis's (`timeout`, `forceExit`, `suites[{ name, files, timeout }]`)
  * and the glob syntax is portable verbatim, but the file read is
  * `helix.config.*`: helix is framework-agnostic, and `adonisrc.ts` belongs to
- * the framework that owns it — in Adonis it is `@adonisjs/core`, not Japa, that
+ * the framework that owns it — in Adonis it is `@adonisjs/core`, not helix, that
  * reads the file and hands the suites to the runner.
  *
  *     // helix.config.ts
@@ -37,7 +37,7 @@ import {
 } from "./glob.js";
 
 /**
- * A suite's file list — Japa's `TestFiles`, the three forms it accepts: one
+ * A suite's file list — helix's `TestFiles`, the three forms it accepts: one
  * pattern, several, or a callback returning the URLs. The callback runs in the
  * CLI process, where the config module was imported, so it can look wherever it
  * likes for its files.
@@ -48,14 +48,14 @@ export type SuiteFiles = string | string[] | (() => URL[] | Promise<URL[]>);
 export interface SuiteDefinition {
 	/** Suite name — what `helix test <name>` selects. */
 	name: string;
-	/** Paths, globs, or a callback returning the files (Japa `TestFiles`). */
+	/** Paths, globs, or a callback returning the files (helix `TestFiles`). */
 	files: SuiteFiles;
 	/** Per-test timeout for this suite (ms). */
 	timeout?: number;
 	/** Extra attempts on failure for this suite. */
 	retries?: number;
 	/**
-	 * Configure the suite before it runs (Japa `TestSuite.configure`). Receives
+	 * Configure the suite before it runs (helix `TestSuite.configure`). Receives
 	 * the same handle as the bootstrap's `configureSuite`, and runs after it.
 	 *
 	 * Costs an import of this config module in every worker, since a function
@@ -90,7 +90,7 @@ const CONFIG_FILENAMES = [
 /**
  * Accept a config whose settings sit under a `tests` block.
  *
- * helix's own config is flat, the way Japa's is. Ream's `reamrc.ts` nests the
+ * helix's own config is flat. Ream's `reamrc.ts` nests the
  * same fields under `tests`, the way `adonisrc.ts` does — so someone moving
  * between the two files writes the nested form here soon enough, and the whole
  * block used to be read as an unknown key and dropped. Nothing said so: the
@@ -159,7 +159,7 @@ function toConfig(imported: unknown): HelixConfig {
 	return { ...runner, suites: parsed };
 }
 
-/** Narrow a declared `files` value to one of Japa's three accepted forms. */
+/** Narrow a declared `files` value to one of helix's three accepted forms. */
 function toSuiteFiles(value: unknown): SuiteFiles | undefined {
 	if (typeof value === "string") return value;
 	if (typeof value === "function") {
@@ -262,7 +262,7 @@ export async function resolveSuiteFiles(
 	root: string,
 	discovery: DiscoveryOptions | undefined,
 ): Promise<string[]> {
-	// A callback picks the files itself (Japa `TestFiles`); there is no pattern
+	// A callback picks the files itself (helix `TestFiles`); there is no pattern
 	// to compile and nothing to exclude, so it short-circuits the whole loop.
 	if (typeof suite.files === "function") {
 		return [...new Set((await suite.files()).map((url) => fileURLToPath(url)))];

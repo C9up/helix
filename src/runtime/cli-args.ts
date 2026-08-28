@@ -5,12 +5,12 @@
  * worker through the environment (`HELIX_TAGS`, `HELIX_TESTS`, …), because a
  * worker is spawned by either orchestrator (Node pool or the Rust engine) with
  * a fixed instruction shape. Reading them back here is what lets both the
- * runtime and a plugin (`api.cliArgs`, Japa parity) see the same filters.
+ * runtime and a plugin (`api.cliArgs`, helix parity) see the same filters.
  *
- * One named deviation from Japa's `CLIArgs`: values are parsed (`string[]`,
+ * One named deviation from helix's `CLIArgs`: values are parsed (`string[]`,
  * `number`, `boolean`) rather than kept as raw CLI strings. They have been
  * through the parser once already, on the CLI side, and handing a plugin
- * `"500"` to re-parse would be worse — Japa's own raw form exists because its
+ * `"500"` to re-parse would be worse — helix's own raw form exists because its
  * CLI hands the config manager unparsed argv, which helix's does not.
  */
 
@@ -36,7 +36,7 @@ export interface CLIArgs {
 	grep?: string;
 	/** `--suite` — the suite name these files belong to. */
 	suite?: string;
-	/** `--files` — substrings matched against the test file path (Japa `--files`). */
+	/** `--files` — substrings matched against the test file path (helix `--files`). */
 	files?: string[];
 	/** `--reporters` — the reporters activated for this run. */
 	reporters?: string[];
@@ -51,12 +51,12 @@ export interface CLIArgs {
 	/**
 	 * `--help`. Always absent in a worker: the CLI prints its help and exits
 	 * before spawning anything, so nothing here could ever have seen it. Declared
-	 * for the same reason Japa declares it — a plugin reading `cliArgs.help`
+	 * for the same reason helix declares it — a plugin reading `cliArgs.help`
 	 * should get `undefined`, not a type error.
 	 */
 	help?: boolean;
 	/**
-	 * Japa's open record. A host that forwards its own `HELIX_*` variable, or a
+	 * helix's open record. A host that forwards its own `HELIX_*` variable, or a
 	 * plugin that stashes something for another, has somewhere to put it without
 	 * the type standing in the way.
 	 */
@@ -92,7 +92,7 @@ export function envMatchAll(): boolean | undefined {
 	return process.env.HELIX_MATCH_ALL === "1" ? true : undefined;
 }
 
-/** A boolean flag as forwarded by the CLI — absent stays `undefined`, as in Japa. */
+/** A boolean flag as forwarded by the CLI — absent stays `undefined`, as in helix. */
 function envFlag(name: string): boolean | undefined {
 	return process.env[name] === "1" ? true : undefined;
 }
@@ -100,7 +100,7 @@ function envFlag(name: string): boolean | undefined {
 /**
  * The run's flags, as ONE object.
  *
- * Japa hands its plugins a `cliArgs` they may edit — that is a documented way
+ * helix hands its plugins a `cliArgs` they may edit — that is a documented way
  * to steer a run from a plugin. Rebuilding it from the environment on every
  * access would silently drop those edits, so it is built once and every reader
  * (the plugin API, and the runtime's own filter resolution) shares it.

@@ -1,5 +1,5 @@
 /**
- * `runnerHooks` — run ONCE for the whole run, where Japa runs them.
+ * `runnerHooks` — run ONCE for the whole run, where helix runs them.
  *
  * These were running per worker process, which meant a migration in
  * `runnerHooks.setup` ran once per FILE. The reason given was that a resource

@@ -14,7 +14,7 @@
  *     }
  *
  * helix loads the same file with the same three exports — plus `filters` and
- * `importer`, the two Japa `Config` fields Adonis sets in `bin/test.ts`, which
+ * `importer`, the two helix `Config` fields Adonis sets in `bin/test.ts`, which
  * helix has no equivalent of — so an Adonis `tests/bootstrap.ts` ports over
  * unchanged. The CLI resolves it once and
  * forwards the absolute path as `HELIX_BOOTSTRAP`, so it reaches the worker
@@ -22,7 +22,7 @@
  * that inherit the CLI's env).
  *
  * `runnerHooks` run ONCE for the whole run, in the process that spawns the
- * workers — Japa's semantics. See `global-hooks.ts`. Everything else here is
+ * workers — helix's semantics. See `global-hooks.ts`. Everything else here is
  * per worker because it has to be: a context macro, a filter, an importer only
  * mean anything in the process that loads the test file.
  */
@@ -49,7 +49,7 @@ export const BOOTSTRAP_FILENAMES = [
 
 /**
  * The exports helix reads off the bootstrap module. `plugins`, `runnerHooks`
- * and `configureSuite` are Adonis's; `filters` and `importer` are Japa `Config`
+ * and `configureSuite` are Adonis's; `filters` and `importer` are helix `Config`
  * fields that Adonis sets in `bin/test.ts` — with no `bin/test.ts` in helix,
  * the bootstrap module is where they belong.
  */
@@ -172,7 +172,7 @@ async function applyBootstrap(file: string, suite: string): Promise<void> {
 		? []
 		: [...(module.runnerHooks?.teardown ?? [])];
 	// `configureSuite` is handed to `configure()` rather than called here, so it
-	// runs where Japa runs it: after the plugins, which is what lets a plugin
+	// runs where helix runs it: after the plugins, which is what lets a plugin
 	// read it or replace it. The per-suite callback chains onto it — both get
 	// the same handle, so hooks either registers reach the arrays below.
 	await configure({

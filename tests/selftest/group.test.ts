@@ -1,5 +1,5 @@
 /**
- * Self-test: `test.group(name, group => …)` (Japa parity) — group setup/teardown
+ * Self-test: `test.group(name, group => …)` (helix parity) — group setup/teardown
  * run once, each.setup/each.teardown run around every test, and the injected
  * context (assert) works inside grouped tests.
  */

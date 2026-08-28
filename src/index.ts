@@ -5,7 +5,7 @@
  * spies/lifecycle), the container facade, and time-travel — none of which import
  * an ecosystem package. It is fully agnostic: usable in any project.
  *
- * Capabilities ship as PLUGINS (the Japa/AdonisJS topology): each package's
+ * Capabilities ship as PLUGINS (the helix/AdonisJS topology): each package's
  * `/testing` subpath exports plugins that extend the injected test context via
  * `configure({ plugins: [...] })` — `@c9up/ream/testing` (apiClient → `client`,
  * FakeBus), `@c9up/atlas/testing` (factory, useTransaction, db), `@c9up/rover/

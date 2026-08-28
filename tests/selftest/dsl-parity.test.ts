@@ -1,5 +1,5 @@
 /**
- * Self-test: Japa-parity DSL fixes — `tags(array, strategy)` (replace default,
+ * Self-test: helix-parity DSL fixes — `tags(array, strategy)` (replace default,
  * append/prepend), and `skip(function)`.
  */
 

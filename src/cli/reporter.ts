@@ -169,7 +169,7 @@ export function makeReporter(
 }
 
 /**
- * Fan one run out to several reporters — Japa activates a LIST of reporters
+ * Fan one run out to several reporters — helix activates a LIST of reporters
  * (`--reporters=spec,json`), not just one. Each callback reaches every reporter;
  * a throwing reporter is isolated so it cannot take the run down with it.
  */
@@ -219,7 +219,7 @@ export function makeReportersFrom(reporters: readonly Reporter[]): Reporter {
 
 /**
  * Build the reporter for a run. One name behaves exactly as before; several
- * (Japa `--reporters=spec,json`) fan out to all of them.
+ * (helix `--reporters=spec,json`) fan out to all of them.
  */
 export function makeReporters(
 	names: readonly string[] | undefined,

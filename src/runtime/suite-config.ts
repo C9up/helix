@@ -1,5 +1,5 @@
 /**
- * `suites[].configure` — the per-suite callback Japa's `TestSuite` carries.
+ * `suites[].configure` — the per-suite callback helix's `TestSuite` carries.
  *
  * A function cannot cross the CLI→worker boundary, so the worker re-imports the
  * module that declared it. The CLI names that module in `HELIX_SUITE_CONFIG`

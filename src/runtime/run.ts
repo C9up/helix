@@ -45,7 +45,7 @@ export interface TestResult {
 	status: "pass" | "fail" | "skip" | "todo";
 	durationMs: number;
 	error?: SerializedError;
-	/** Lifecycle phase `error` was raised in (Japa `test:end` parity). */
+	/** Lifecycle phase `error` was raised in (helix `test:end` parity). */
 	errorPhase?: ErrorPhase;
 }
 
@@ -81,7 +81,7 @@ export interface FileResult {
 	durationMs: number;
 	/**
 	 * Full names of the tests marked `.pin()` — only populated under
-	 * `--list-pinned`, where Japa collects the files, prints what is pinned, and
+	 * `--list-pinned`, where helix collects the files, prints what is pinned, and
 	 * runs nothing.
 	 */
 	pinned?: string[];
@@ -105,32 +105,32 @@ export interface ExecuteOptions {
 	 */
 	grep?: string;
 	/**
-	 * Tag filter expressions (Japa `--tags`). A `~`-prefixed tag EXCLUDES (`!` is
+	 * Tag filter expressions (helix `--tags`). A `~`-prefixed tag EXCLUDES (`!` is
 	 * also accepted). Required tags are OR-ed by default — a test runs when it
 	 * carries ANY of them — unless {@link ExecuteOptions.matchAll} is set, and
 	 * never when it carries an excluded tag.
 	 */
 	tags?: string[];
-	/** Require ALL required tags instead of any (Japa `--match-all`). */
+	/** Require ALL required tags instead of any (helix `--match-all`). */
 	matchAll?: boolean;
-	/** Exact test titles to run (Japa `--tests`). A test runs only if its leaf title is listed. */
+	/** Exact test titles to run (helix `--tests`). A test runs only if its leaf title is listed. */
 	tests?: string[];
-	/** Exact group titles to run (Japa `--groups`). A test runs only if its enclosing group is listed. */
+	/** Exact group titles to run (helix `--groups`). A test runs only if its enclosing group is listed. */
 	groups?: string[];
 	/**
 	 * The suite these tests belong to — `ctx.test.options.meta.suite.name` and the
-	 * `suite:*` event payloads. Defaults to `"default"`, Japa's implicit suite.
+	 * `suite:*` event payloads. Defaults to `"default"`, helix's implicit suite.
 	 */
 	suite?: string;
 	/**
-	 * Stop running once a test fails (Japa `--bail`). Everything after the
-	 * failure is reported as SKIPPED, not dropped — same as Japa, so the counts
+	 * Stop running once a test fails (helix `--bail`). Everything after the
+	 * failure is reported as SKIPPED, not dropped — same as helix, so the counts
 	 * still add up.
 	 */
 	bail?: boolean;
 	/**
-	 * How far a bail reaches (Japa `--bail-layer`): `"group"` stops the enclosing
-	 * group only, `"suite"` the rest of the file, `"runner"` (Japa's default,
+	 * How far a bail reaches (helix `--bail-layer`): `"group"` stops the enclosing
+	 * group only, `"suite"` the rest of the file, `"runner"` (helix's default,
 	 * spelled `""` on its CLI) the rest of the run — the remaining FILES are
 	 * dropped by the pool, since helix runs one process per file and cannot skip
 	 * tests it never collected.
@@ -139,7 +139,7 @@ export interface ExecuteOptions {
 }
 
 /**
- * Compiled tag filter (Japa `--tags` / `--match-all`). A test passes when it
+ * Compiled tag filter (helix `--tags` / `--match-all`). A test passes when it
  * carries no `excluded` tag AND — if any `required` — matches them by the
  * `matchAll` mode (all vs any).
  */
@@ -160,7 +160,7 @@ function compileTagFilter(
 	for (const raw of tags) {
 		const t = raw.trim();
 		if (!t) continue;
-		// `~` is the Japa exclusion prefix; `!` is accepted too (helix legacy) so a
+		// `~` is the helix exclusion prefix; `!` is accepted too (helix legacy) so a
 		// stray `!` never silently becomes an impossible required tag.
 		if (t.startsWith("~") || t.startsWith("!")) excluded.push(t.slice(1));
 		else required.push(t);
@@ -190,7 +190,7 @@ function tagMatches(node: TestNode, filter: TagFilter): boolean {
 		: filter.required.some((r) => have.has(r));
 }
 
-/** Nearest enclosing `test.group(...)` title, for the Japa `--groups` filter. */
+/** Nearest enclosing `test.group(...)` title, for the helix `--groups` filter. */
 function enclosingGroupTitle(node: TestNode): string | undefined {
 	for (
 		let s: SuiteNode | undefined = node.parent;
@@ -213,7 +213,7 @@ function isInGroups(node: TestNode, groups: Set<string>): boolean {
  *
  * A result crosses the worker→CLI IPC boundary, so it can only hold plain data.
  * The EMITTER, though, runs in the worker — where the thrown `Error` still
- * exists, and where a Japa reporter or plugin expects `errors[].error` to be an
+ * exists, and where a helix reporter or plugin expects `errors[].error` to be an
  * `Error` instance. A symbol key is invisible to `JSON.stringify` and to
  * `Object.keys`, so the original rides along without ever reaching the frame.
  */
@@ -235,7 +235,7 @@ function withThrown(
 	return serialized;
 }
 
-/** The reason Japa attaches to a test skipped because the run bailed. */
+/** The reason helix attaches to a test skipped because the run bailed. */
 const BAIL_SKIP_REASON = "Skipped due to bail mode";
 
 function serializeError(err: unknown): SerializedError {
@@ -314,7 +314,7 @@ function collectHookChain(
  * run-wide test timeout; `0` on either disables it, which is how a deliberately
  * long boot opts out.
  */
-/** A group hook's return that is a group-scoped cleanup (Japa parity). */
+/** A group hook's return that is a group-scoped cleanup (helix parity). */
 function isCleanupFn(value: unknown): value is CleanupFn {
 	return typeof value === "function";
 }
@@ -324,7 +324,7 @@ function asHooks(fns: Hook["fn"][] | undefined, type: HookType): Hook[] {
 	return (fns ?? []).map((fn) => ({ type, fn }));
 }
 
-/** A `beforeEach` return that is a cleanup callback (Vitest/Japa parity). */
+/** A `beforeEach` return that is a cleanup callback (Vitest/helix parity). */
 function isTestCleanup(value: unknown): value is TestCleanup {
 	return typeof value === "function";
 }
@@ -349,11 +349,11 @@ async function runHooks(
 ): Promise<SerializedError | undefined> {
 	for (const h of hooks) {
 		try {
-			// Japa parity: test hooks receive the Test instance, group hooks the
+			// helix parity: test hooks receive the Test instance, group hooks the
 			// Group instance. Zero-arg hooks simply ignore it.
 			const ret = await callHook(h, subject, fallbackMs);
 			// A `beforeEach` returning a function registers it as a test-scoped
-			// cleanup (Vitest/Japa parity). Ignored for `afterEach`.
+			// cleanup (Vitest/helix parity). Ignored for `afterEach`.
 			if (registerCleanups && isTestCleanup(ret)) {
 				registerTestCleanup(ret);
 			}
@@ -435,15 +435,15 @@ interface RunCtx {
 	retries: number;
 	grep: RegExp | undefined;
 	tagFilter: TagFilter | undefined;
-	/** Exact test titles to run (Japa `--tests`); `undefined` = no title filter. */
+	/** Exact test titles to run (helix `--tests`); `undefined` = no title filter. */
 	testTitles: Set<string> | undefined;
-	/** Exact group titles to run (Japa `--groups`); `undefined` = no group filter. */
+	/** Exact group titles to run (helix `--groups`); `undefined` = no group filter. */
 	groupTitles: Set<string> | undefined;
 	/** The test file being executed — surfaced as `ctx.test.options.meta.fileName`. */
 	file: string;
-	/** The suite these tests belong to (Japa `meta.suite` / `suite:*`). */
+	/** The suite these tests belong to (helix `meta.suite` / `suite:*`). */
 	suite: SuiteIdentity;
-	/** Stop after the first failure (Japa `--bail`). */
+	/** Stop after the first failure (helix `--bail`). */
 	bail: boolean;
 	/** How far a bail reaches — `"group"` resets at each group boundary. */
 	bailLayer: "group" | "suite" | "runner";
@@ -452,7 +452,7 @@ interface RunCtx {
 }
 
 /**
- * Whether a test survives the run's filters (Japa's refiner). `--grep` is a
+ * Whether a test survives the run's filters (helix's refiner). `--grep` is a
  * helix extra applied per resolved title, so it lives at the call sites that
  * know the interpolated name rather than here.
  */
@@ -466,7 +466,7 @@ function isFilteredOut(node: TestNode, ctx: RunCtx): boolean {
 }
 
 /**
- * Whether any test under this suite survives the filters — Japa's
+ * Whether any test under this suite survives the filters — helix's
  * `Refiner#isGroupAllowed`: a group announces itself only when it has at least
  * one runnable test, so a fully filtered-out group is invisible to reporters.
  */
@@ -482,9 +482,9 @@ function suiteHasRunnableTest(node: SuiteNode, ctx: RunCtx): boolean {
 }
 
 /**
- * The suite a run belongs to (Japa `meta.suite`). Helix runs one process per
+ * The suite a run belongs to (helix `meta.suite`). Helix runs one process per
  * FILE, so the suite is a name the run carries — `"default"` unless
- * `configure({ suite })` or `--suite` says otherwise, exactly like Japa's
+ * `configure({ suite })` or `--suite` says otherwise, exactly like helix's
  * implicit suite.
  */
 export interface SuiteIdentity {
@@ -493,21 +493,21 @@ export interface SuiteIdentity {
 
 /**
  * The `meta` bag exposed as `ctx.test.options.meta` and on the test events —
- * Japa's `{ suite, group, fileName, abort }`.
+ * helix's `{ suite, group, fileName, abort }`.
  */
 function testMeta(node: TestNode, ctx: RunCtx): Record<string, unknown> {
 	return {
 		suite: ctx.suite,
 		group: enclosingGroup(node),
 		fileName: ctx.file,
-		// Japa's escape hatch: fail the running test with a given message.
+		// helix's escape hatch: fail the running test with a given message.
 		abort: (message: string): never => {
 			throw new Error(message);
 		},
 	};
 }
 
-/** Nearest enclosing `test.group(...)` instance, if any (Japa `meta.group`). */
+/** Nearest enclosing `test.group(...)` instance, if any (helix `meta.group`). */
 function enclosingGroup(node: TestNode): Group | undefined {
 	for (
 		let s: SuiteNode | undefined = node.parent;
@@ -521,7 +521,7 @@ function enclosingGroup(node: TestNode): Group | undefined {
 
 /**
  * The `test:start` payload for one concrete test (a plain test, or one dataset
- * row). `test:end` is this object plus the outcome — exactly how Japa builds
+ * row). `test:end` is this object plus the outcome — exactly how helix builds
  * the two nodes.
  */
 function buildTestStartNode(
@@ -531,11 +531,11 @@ function buildTestStartNode(
 	dataset: EmittedDataset | undefined,
 	flags: { isTodo: boolean; isSkipped: boolean },
 ): TestStartNode {
-	// Japa's `TestOptions`, field for field. `title`, `tags`, `timeout`, `meta`,
+	// helix's `TestOptions`, field for field. `title`, `tags`, `timeout`, `meta`,
 	// `isPinned` — and, as its `Test` constructor initialises them, `isTodo` and
 	// `retries` — always carry a value. The rest appear only when the matching
 	// modifier was used, so a reporter reading `"isSkipped" in node` sees what
-	// Japa would show it. Pinned down by the golden tests, which compare the raw
+	// helix would show it. Pinned down by the golden tests, which compare the raw
 	// key set of both runners' nodes.
 	return {
 		title: { original: node.name, expanded: expandedTitle },
@@ -561,7 +561,7 @@ function toEmittedErrors(
 	phase: ErrorPhase,
 ): EmittedError[] {
 	if (error === undefined) return [];
-	// Japa types `errors[].error` as `Error`; hand listeners the real one when
+	// helix types `errors[].error` as `Error`; hand listeners the real one when
 	// this process still has it, and fall back to the serialized shape for a
 	// result that was rebuilt from a frame.
 	const thrown = thrownValue(error);
@@ -569,12 +569,12 @@ function toEmittedErrors(
 }
 
 /**
- * Emit the Japa `test:start` / `test:end` pair for a test that never runs a
+ * Emit the helix `test:start` / `test:end` pair for a test that never runs a
  * body — a `todo`, an explicit `.skip()`, or a test whose skip condition threw.
- * Japa announces those through its `DummyRunner`, back-to-back.
+ * helix announces those through its `DummyRunner`, back-to-back.
  *
  * Tests dropped by a FILTER (`--tags`/`--tests`/`--groups`/`--grep`/`.only`)
- * are deliberately NOT emitted: Japa's refiner removes them before they can
+ * are deliberately NOT emitted: helix's refiner removes them before they can
  * announce themselves, so a reporter never hears about them. They still show up
  * as `skip` in {@link FileResult}, which is what the (Vitest-shaped) CLI
  * reporter consumes.
@@ -605,14 +605,14 @@ async function runTest(
 ): Promise<TestResult[]> {
 	const baseFullName = joinName(parentFullName, node.name);
 
-	// Filter gates (Japa's refiner). Computed first because a filtered-out test
+	// Filter gates (helix's refiner). Computed first because a filtered-out test
 	// emits NOTHING — not even the `test:start`/`test:end` pair a `.skip()` or a
 	// `todo` still announces. `grep` is per-name (per row for datasets), so it
 	// stays below.
 	const filteredOut = isFilteredOut(node, ctx);
 
 	// A dataset test with no body (`test('x').with(rows)` and no `.run(fn)` / no
-	// body in `test`) is a `todo` — same as a bodiless plain test (Japa parity).
+	// body in `test`) is a `todo` — same as a bodiless plain test (helix parity).
 	const datasetTodo =
 		node.datasetFn !== undefined && node.datasetBody === undefined;
 	if (node.mode === "todo" || datasetTodo) {
@@ -627,7 +627,7 @@ async function runTest(
 		return [r];
 	}
 
-	// Deferred skip condition (Japa: a `skip(fn)` callback — possibly async — is
+	// Deferred skip condition (helix: a `skip(fn)` callback — possibly async — is
 	// evaluated here at run time, not eagerly at collection). A throwing
 	// condition fails the test rather than silently skipping it.
 	let deferredSkip = false;
@@ -651,10 +651,10 @@ async function runTest(
 
 	// Node-level gates that apply to the whole test (and every dataset row).
 	// `grep` is applied per-name below (per row for datasets). A bailed run skips
-	// what is left — Japa marks them `skip`, it does not drop them.
+	// what is left — helix marks them `skip`, it does not drop them.
 	const nodeSkipped =
 		node.mode === "skip" || deferredSkip || filteredOut || ctx.bailed;
-	// Japa marks a bailed-over test with `skip(true, "Skipped due to bail mode")`,
+	// helix marks a bailed-over test with `skip(true, "Skipped due to bail mode")`,
 	// so the reason travels on the node and reaches `skipReason` on the events.
 	// Mirrored here, on the same node, for the same reason.
 	if (ctx.bailed && node.reason === undefined) node.reason = BAIL_SKIP_REASON;
@@ -673,7 +673,7 @@ async function runTest(
 	const grepOut = (fullName: string): boolean =>
 		ctx.grep !== undefined && !ctx.grep.test(fullName);
 
-	// Dataset expansion (Japa `test(name, fn).with(rows)`): resolve the rows at
+	// Dataset expansion (helix `test(name, fn).with(rows)`): resolve the rows at
 	// run time (awaiting an async source), then run one test per row with an
 	// interpolated title. The full resolved dataset is exposed as `ctx.test.dataset`.
 	if (node.datasetFn !== undefined) {
@@ -760,7 +760,7 @@ async function runOneTest(
 	const attempts = 1 + Math.max(0, perTestRetries);
 	const start = Date.now();
 
-	// Japa announces the test ONCE, before the first attempt; the retry loop
+	// helix announces the test ONCE, before the first attempt; the retry loop
 	// lives inside the start/end pair and only the final attempt is reported.
 	const startNode = buildTestStartNode(node, title, ctx, datasetNode, {
 		isTodo: false,
@@ -772,7 +772,7 @@ async function runOneTest(
 	// afterEach) inside its own per-test frame so cleanups / outcome hooks /
 	// assertion counters reset between attempts. Passes on the first success.
 	let last!: TestResult;
-	// 1-based number of the attempt that produced `last` (Japa counts the first
+	// 1-based number of the attempt that produced `last` (helix counts the first
 	// run as attempt 1), and only reported when the test opted into retries.
 	let attemptNumber = 1;
 	for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -851,7 +851,7 @@ async function runAttempt(
 	const timeoutCtl = makeTimeoutController(timeoutMs, `test "${fullName}"`);
 
 	// The running test's instance — injected as `ctx.test`, passed to the test
-	// hooks (Japa parity), and threaded into the frame so cleanups receive it.
+	// hooks (helix parity), and threaded into the frame so cleanups receive it.
 	const testInstance: TestInstance = {
 		title,
 		fullName,
@@ -861,8 +861,8 @@ async function runAttempt(
 			retries,
 			tags: node.tags ?? [],
 			isTodo: false,
-			// `test.fails()` — a Japa plugin reads it to know an error was the
-			// point (`@japa/assert` skips its assertion check for such a test).
+			// `test.fails()` — a helix plugin reads it to know an error was the
+			// point (`helix's assert` skips its assertion check for such a test).
 			isFailing: node.failing === true,
 			meta,
 		},
@@ -876,10 +876,10 @@ async function runAttempt(
 	setFrameTest(testInstance);
 
 	// Build the injected context BEFORE the `beforeEach` chain so hooks can reach
-	// it as `$test.context` (Japa parity) — the SAME context flows to the body.
+	// it as `$test.context` (helix parity) — the SAME context flows to the body.
 	// Built inside the per-test frame so `ctx.cleanup` / getters bind here.
 	const context = buildTestContext(testInstance);
-	// A Japa `Test.executed` hook reads `test.context` — `@japa/assert` validates
+	// A helix `Test.executed` hook reads `test.context` — `helix's assert` validates
 	// its assertion count through it after every test.
 	setFrameContext(context);
 	testInstance.context = context;
@@ -899,7 +899,7 @@ async function runAttempt(
 	}
 
 	let testErr: SerializedError | undefined;
-	// Which phase produced `testErr` — surfaced on `test:end` (Japa parity).
+	// Which phase produced `testErr` — surfaced on `test:end` (helix parity).
 	let errorPhase: ErrorPhase | undefined;
 
 	// Per-test setup hooks (`test.setup`) run after the group `each.setup` chain,
@@ -915,7 +915,7 @@ async function runAttempt(
 		errorPhase = "setup";
 	} else {
 		try {
-			// `done` callback (Japa `waitForDone`): the test completes when the
+			// `done` callback (helix `waitForDone`): the test completes when the
 			// body calls done()/done(error). Built even when unused (harmless).
 			let doneResolve: () => void = noop;
 			let doneReject: (error: unknown) => void = noop;
@@ -988,7 +988,7 @@ async function runAttempt(
 	// Record the outcome BEFORE the frame's cleanup drain (finally) fires, so
 	// `ctx.cleanup((hasError, test) => …)` sees the right `hasError`.
 	setFrameOutcome(finalErr !== undefined);
-	// A `Test.executed` hook is a verdict, not a teardown: `@japa/assert`
+	// A `Test.executed` hook is a verdict, not a teardown: `helix's assert`
 	// validates `assert.plan(n)` there. Its throw has to reach the result, or a
 	// plugin's whole reason for existing passes green.
 	const executedErr = await drainTestOutcomeHooks(finalErr !== undefined);
@@ -1085,7 +1085,7 @@ async function runSuite(
 	if (skipEntire) return runSkippedSuite(node, fullName, ctx);
 
 	const hookErrors: SerializedError[] = [];
-	// The group's instance (Japa parity) passed to group hooks, and cleanups a
+	// The group's instance (helix parity) passed to group hooks, and cleanups a
 	// `group.setup()` returns — run in the afterAll phase with `(hadError, group)`.
 	// For a `test.group()` this is the SAME object the body received and the call
 	// returned (`self === group`); a plain `describe` suite has no group handle,
@@ -1096,7 +1096,7 @@ async function runSuite(
 	};
 	const groupCleanups: CleanupFn[] = [];
 
-	// A group with no runnable test announces nothing — Japa's refiner drops it
+	// A group with no runnable test announces nothing — helix's refiner drops it
 	// before `Group.exec()` runs, so a reporter never sees it.
 	const groupFiltered = !suiteHasRunnableTest(node, ctx);
 	if (!groupFiltered) {
@@ -1126,7 +1126,7 @@ async function runSuite(
 	if (!beforeAllFailed) {
 		for (const child of node.children) {
 			if (child.kind === "test") {
-				// A dataset test expands to one result per row (Japa parity).
+				// A dataset test expands to one result per row (helix parity).
 				for (const r of await runTest(child, fullName, ctx)) children.push(r);
 			} else {
 				children.push(await runSuite(child, fullName, ctx));
@@ -1155,10 +1155,10 @@ async function runSuite(
 			title: node.name,
 			meta: { suite: ctx.suite, fileName: ctx.file },
 			// True when ANYTHING under the group failed — a hook or a test — which
-			// is what Japa's GroupRunner reports.
+			// is what helix's GroupRunner reports.
 			hasError: groupHadError || hookErrors.length > 0,
 			// The group's own `errors` are its hook failures only; a test's failure
-			// travels on that test's `test:end` (Japa parity).
+			// travels on that test's `test:end` (helix parity).
 			errors: hookErrors.map(
 				(error, i): EmittedError => ({
 					phase: i < setupErrorCount ? "setup" : "teardown",
@@ -1252,7 +1252,7 @@ async function runBeforeAllHooks(
 	for (const h of node.hooks) {
 		if (h.type !== "beforeAll") continue;
 		try {
-			// Japa parity: group hooks receive the Group instance; a returned
+			// helix parity: group hooks receive the Group instance; a returned
 			// function becomes a group-scoped cleanup (run in the afterAll phase).
 			const ret = await callHook(h, group, ctx.timeoutMs);
 			if (isCleanupFn(ret)) groupCleanups.push(ret);
@@ -1280,7 +1280,7 @@ async function runAfterAllHooks(
 	fallbackMs = 0,
 ): Promise<void> {
 	// Group-scoped cleanups (returned by `group.setup()`) run first, in reverse
-	// insertion order, receiving `(hadError, group)` — Japa lifecycle parity.
+	// insertion order, receiving `(hadError, group)` — helix lifecycle parity.
 	for (let i = groupCleanups.length - 1; i >= 0; i -= 1) {
 		try {
 			await groupCleanups[i](hadError, group);
@@ -1379,7 +1379,7 @@ export async function executeRoot(
 		file,
 		suite: { name: options.suite ?? "default" },
 		bail: options.bail === true,
-		// Japa spells the runner layer as an empty string on its CLI.
+		// helix spells the runner layer as an empty string on its CLI.
 		bailLayer:
 			options.bailLayer === undefined || options.bailLayer === ""
 				? "runner"
@@ -1388,9 +1388,9 @@ export async function executeRoot(
 	};
 	const suites: SuiteResult[] = [];
 
-	// Japa's runner/suite frame. Helix has no named-suite layer (one process per
+	// helix's runner/suite frame. Helix has no named-suite layer (one process per
 	// file), so the FILE is the suite — `suite:start` carries its name.
-	// Japa skips a suite whose every test is filtered out — the suite never
+	// helix skips a suite whose every test is filtered out — the suite never
 	// announces itself, though the runner still opens and closes the run.
 	const suiteRunnable = suiteHasRunnableTest(root, ctx);
 	emitter.emit("runner:start", {});
@@ -1424,7 +1424,7 @@ export async function executeRoot(
 	if (!rootBeforeAllFailed) {
 		for (const child of root.children) {
 			if (child.kind === "test") {
-				// A dataset test expands to one result per row (Japa parity).
+				// A dataset test expands to one result per row (helix parity).
 				const trs = await runTest(child, "", ctx);
 				suites.push({
 					name: "",

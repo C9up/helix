@@ -1,5 +1,5 @@
 /**
- * Japa-parity CLI filters at the executeRoot level: `--tags` (OR by default,
+ * helix-parity CLI filters at the executeRoot level: `--tags` (OR by default,
  * `--match-all` for AND, `~`/`!` to exclude), `--tests` (exact leaf titles),
  * and `--groups` (exact enclosing-group titles).
  */
@@ -12,7 +12,7 @@ function statusOf(result: FileResult, name: string): string | undefined {
 	return result.tests.find((t) => t.name === name)?.status;
 }
 
-vDescribe("run — Japa filters", () => {
+vDescribe("run — helix filters", () => {
 	vIt("--tags is OR by default (any required tag)", async () => {
 		const root = resetRoot();
 		test("a", () => {}, { tags: ["@a"] });

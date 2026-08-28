@@ -1,5 +1,5 @@
 /**
- * `suite.onTest` / `suite.onGroup` — Japa's `Suite` taps. Each method has to
+ * `suite.onTest` / `suite.onGroup` — helix's `Suite` taps. Each method has to
  * land on the field the runtime actually reads, which is what these pin down.
  */
 
@@ -80,7 +80,7 @@ describe("testHandle", () => {
 		expect(node.tags).toEqual(["@only"]);
 	});
 
-	it("skips statically or lazily, as Japa does", () => {
+	it("skips statically or lazily, as helix does", () => {
 		const root = makeSuite("root");
 		const still = makeTest("still", root);
 		const lazy = makeTest("lazy", root);

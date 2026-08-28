@@ -1,5 +1,5 @@
 /**
- * Self-test: group-level test defaults (Japa parity) — `group.each.timeout`,
+ * Self-test: group-level test defaults (helix parity) — `group.each.timeout`,
  * `group.each.retry`, and `group.tap`.
  */
 

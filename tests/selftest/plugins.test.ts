@@ -1,12 +1,12 @@
 /**
- * Self-test: the Japa/Adonis plugin model — `configure({ plugins })`. A plugin
+ * Self-test: the helix/Adonis plugin model — `configure({ plugins })`. A plugin
  * extends the injected test context via `api.context.macro` / `.getter`, and
  * pairs that with a `declare module` augmentation for the types.
  */
 
 import { configure, expect, type Plugin, test } from "@c9up/helix";
 
-// A plugin's typing side: augment TestContext (the Japa pattern).
+// A plugin's typing side: augment TestContext (the helix pattern).
 declare module "@c9up/helix" {
 	interface TestContext {
 		greeting: string;

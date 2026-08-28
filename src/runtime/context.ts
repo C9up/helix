@@ -1,5 +1,5 @@
 /**
- * Injected test context — Japa's defining mechanism.
+ * Injected test context — helix's defining mechanism.
  *
  * Every test body (and, later, group hooks) receives a `TestContext` as its
  * FIRST argument: `test("x", ({ assert, client, db, cleanup }) => …)`. The
@@ -33,26 +33,26 @@ import { registerTestCleanup, type TestCleanup } from "./test-context.js";
  * declaration merging — `declare module "@c9up/helix" { interface TestContext {
  * client: ApiClient } }` — without breaking the core's construction (an external
  * augmentation is not subject to helix's `strictPropertyInitialization`). This
- * is exactly how Japa's `TestContext` works.
+ * is exactly how helix's `TestContext` works.
  */
 export class TestContext {
 	/**
-	 * Add a shared property to every test context — Japa's
-	 * `TestContext.macro('sleep', fn)`, callable on the class itself so a Japa
+	 * Add a shared property to every test context — helix's
+	 * `TestContext.macro('sleep', fn)`, callable on the class itself so a helix
 	 * plugin's registration code ports over unchanged.
 	 */
 	static macro(name: string, value: unknown): void {
 		TestContextRegistry.macro(name, value);
 	}
 
-	/** Add a lazily-computed, per-context property (Japa `TestContext.getter`). */
+	/** Add a lazily-computed, per-context property (helix `TestContext.getter`). */
 	static getter(name: string, fn: Getter): void {
 		TestContextRegistry.getter(name, fn);
 	}
 
-	/** Chai-flavored assertions (`@japa/assert` parity), alongside `expect`. */
+	/** Chai-flavored assertions (`helix's assert` parity), alongside `expect`. */
 	readonly assert: Assert;
-	/** The running test's own instance — name, options, dataset (Japa `ctx.test`). */
+	/** The running test's own instance — name, options, dataset (helix `ctx.test`). */
 	readonly test: TestInstance;
 
 	constructor(test: TestInstance) {
@@ -62,7 +62,7 @@ export class TestContext {
 
 	/**
 	 * Register a teardown that runs at the end of THIS test, regardless of
-	 * outcome (Japa `ctx.cleanup`). Reverse-insertion order, isolated failures.
+	 * outcome (helix `ctx.cleanup`). Reverse-insertion order, isolated failures.
 	 */
 	cleanup(fn: TestCleanup): void {
 		// Falls through to the active per-test frame; a false return means we were
@@ -72,7 +72,7 @@ export class TestContext {
 }
 
 // Invoked with `this` bound to the context AND the context as the first arg, so
-// both Japa's `function () { return this.foo }` and `(ctx) => ctx.foo` work.
+// both helix's `function () { return this.foo }` and `(ctx) => ctx.foo` work.
 export type Getter = (this: TestContext, ctx: TestContext) => unknown;
 
 const macros = new Map<string, unknown>();
@@ -80,7 +80,7 @@ const getters = new Map<string, Getter>();
 
 /**
  * Registry through which plugins extend the test context at runtime. Mirrors
- * Japa's `TestContext.macro(name, value)` / `TestContext.getter(name, fn)`.
+ * helix's `TestContext.macro(name, value)` / `TestContext.getter(name, fn)`.
  * Pair each call with a `declare module` augmentation for the types.
  */
 export const TestContextRegistry = {
@@ -123,7 +123,7 @@ export function buildTestContext(test: TestInstance): TestContext {
 	const ctx = new TestContext(test);
 	// `cleanup` and `test` are structural — the runtime hands them to the body
 	// and nothing may take their place. `assert` is NOT: helix ships one, and a
-	// project installing `@japa/assert` is asking for that one instead. Refusing
+	// project installing `helix's assert` is asking for that one instead. Refusing
 	// the override left the plugin registered but never reached, which is how
 	// `plugins: [assert()]` could look wired and do nothing.
 	const reserved = new Set(["cleanup", "test"]);
