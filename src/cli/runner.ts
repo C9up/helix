@@ -12,6 +12,7 @@ export {
 	BOOTSTRAP_FILENAMES,
 	resolveBootstrap,
 } from "../runtime/bootstrap.js";
+export { armDrainGuard, DRAIN_GRACE_MS } from "../runtime/drain-guard.js";
 export { runGlobalHooks } from "../runtime/global-hooks.js";
 export type { Reporter } from "./reporter.js";
 export { makeReporters, makeReportersFrom } from "./reporter.js";

@@ -87,13 +87,44 @@ const CONFIG_FILENAMES = [
 	"helix.config.mjs",
 ];
 
+/**
+ * Accept a config whose settings sit under a `tests` block.
+ *
+ * helix's own config is flat, the way Japa's is. Ream's `reamrc.ts` nests the
+ * same fields under `tests`, the way `adonisrc.ts` does — so someone moving
+ * between the two files writes the nested form here soon enough, and the whole
+ * block used to be read as an unknown key and dropped. Nothing said so: the
+ * declared bootstrap was ignored, the conventional `tests/bootstrap.ts` was
+ * picked up instead, and a suite that had asked for no bootstrap at all ran one
+ * — in the reported case, one that starts the application, for 25 tests that
+ * needed no server.
+ *
+ * The flat form wins where both carry the same key, so a config that already
+ * works keeps working.
+ */
+function unwrapTestsBlock(source: object): object {
+	const tests = Reflect.get(source, "tests");
+	if (tests === null || typeof tests !== "object") return source;
+	return { ...tests, ...stripUndefined(source) };
+}
+
+/** Own enumerable entries whose value is not `undefined`. */
+function stripUndefined(source: object): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(source)) {
+		if (value !== undefined) out[key] = value;
+	}
+	return out;
+}
+
 /** Narrow an imported module's default export to a {@link HelixConfig}. */
 function toConfig(imported: unknown): HelixConfig {
-	const source =
+	const exported =
 		imported !== null && typeof imported === "object"
 			? (Reflect.get(imported, "default") ?? imported)
 			: imported;
-	if (source === null || typeof source !== "object") return {};
+	if (exported === null || typeof exported !== "object") return {};
+	const source = unwrapTestsBlock(exported);
 	const rawBootstrap = Reflect.get(source, "bootstrap");
 	const bootstrap = typeof rawBootstrap === "string" ? rawBootstrap : undefined;
 	const rawTimeout = Reflect.get(source, "timeout");

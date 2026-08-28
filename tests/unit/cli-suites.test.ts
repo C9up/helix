@@ -93,6 +93,31 @@ describe("loadHelixConfig", () => {
 		]);
 	});
 
+	it("reads a config whose settings sit under a `tests` block", async () => {
+		// The shape of \`reamrc.ts\` (and \`adonisrc.ts\`). It used to be read as one
+		// unknown key and dropped: the declared bootstrap was ignored and the
+		// conventional \`tests/bootstrap.ts\` ran in its place, silently.
+		await write(
+			"helix.config.mjs",
+			`export default { tests: { bootstrap: "tests/boot.ts", forceExit: true, suites: [{ name: "app", files: ["tests/app"] }] } }\n`,
+		);
+
+		const config = await loadHelixConfig(root);
+
+		expect(config.bootstrap).toBe("tests/boot.ts");
+		expect(config.forceExit).toBe(true);
+		expect(config.suites?.map((s) => s.name)).toEqual(["app"]);
+	});
+
+	it("lets the flat form win over the nested one, so a working config keeps working", async () => {
+		await write(
+			"helix.config.mjs",
+			`export default { bootstrap: "flat.ts", tests: { bootstrap: "nested.ts" } }\n`,
+		);
+
+		expect((await loadHelixConfig(root)).bootstrap).toBe("flat.ts");
+	});
+
 	it("drops malformed suite entries instead of trusting them", async () => {
 		await write(
 			"helix.config.mjs",
