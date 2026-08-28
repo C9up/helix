@@ -730,6 +730,13 @@ async function main() {
  * being swallowed by an unconditional `process.exit`, which also truncates
  * pending stdout writes. `--force-exit` is the escape hatch, exactly as in Japa.
  */
+/**
+ * How long to wait for the event loop to drain before reporting what is holding
+ * it. Long enough that a normal teardown (a socket closing, a pool draining)
+ * finishes first, short enough that CI does not sit on it.
+ */
+const DRAIN_GRACE_MS = 2000;
+
 function finish(code) {
 	process.exitCode = code;
 	// The env var carries the config-declared `forceExit`; the argv check also
@@ -737,7 +744,47 @@ function finish(code) {
 	const forced =
 		process.env.HELIX_FORCE_EXIT === "1" ||
 		process.argv.includes("--force-exit");
-	if (forced) process.exit(code);
+	if (forced) {
+		process.exit(code);
+		return;
+	}
+
+	// Letting the loop drain on its own is the right default — it is what makes
+	// a leaked resource visible instead of swallowed. But visible has to mean
+	// SAID: the run used to print its summary and then hang with no further
+	// output, which reads as a crash, and in CI is a timeout scored as a
+	// failure rather than the passing run it was.
+	//
+	// `unref()` so this never keeps the process alive by itself: if everything
+	// closed, the timer never fires and nothing is printed.
+	const drainWatch = setTimeout(() => {
+		const resources =
+			typeof process.getActiveResourcesInfo === "function"
+				? process.getActiveResourcesInfo()
+				: [];
+		const counted = new Map();
+		for (const name of resources) {
+			counted.set(name, (counted.get(name) ?? 0) + 1);
+		}
+		const listed =
+			counted.size > 0
+				? [...counted]
+						.map(([name, n]) => (n > 1 ? `${name} x${n}` : name))
+						.join(", ")
+				: "nothing Node can name";
+
+		process.stderr.write(
+			`\nhelix: the run finished (exit ${code}) but the process is still alive after ` +
+				`${DRAIN_GRACE_MS}ms.\n` +
+				`helix: still open: ${listed}\n` +
+				"helix: a test left something running — an open server, a timer, a database " +
+				"handle. Close it in a teardown hook,\n" +
+				"helix: or set `forceExit: true` in the tests config (or pass --force-exit) " +
+				"to exit anyway.\n",
+		);
+		process.exit(code);
+	}, DRAIN_GRACE_MS);
+	drainWatch.unref();
 }
 
 main()

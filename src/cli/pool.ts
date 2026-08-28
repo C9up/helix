@@ -69,6 +69,15 @@ export type FileOutcome =
 /** Maximum stderr buffering before we give up and mark the file errored. */
 const MAX_STDERR_BUFFER_BYTES = 4 * 1024 * 1024; // 4 MiB
 
+/**
+ * How long a worker may take to exit AFTER reporting its result.
+ *
+ * It is only flushing `atExit` hooks by then — the V8 coverage writer is the
+ * slow one, and it is milliseconds. Anything past this is a resource the test
+ * left running, and waiting on it turns a passing run into a silent hang.
+ */
+const EXIT_GRACE_MS = 2000;
+
 interface ActiveChild {
 	kill(): void;
 }
@@ -264,10 +273,12 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 
 		let settled = false;
 		let pendingOutcome: FileOutcome | undefined;
+		let exitGrace: ReturnType<typeof setTimeout> | undefined;
 		const settle = (outcome: FileOutcome): void => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(watchdog);
+			if (exitGrace) clearTimeout(exitGrace);
 			activeChildren.delete(registration);
 			resolve(outcome);
 		};
@@ -293,6 +304,27 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 				return;
 			}
 			pendingOutcome = outcome;
+
+			// Bound that wait. The worker has already reported; we are only
+			// giving `atExit` hooks time to flush. A test that left a server or
+			// a timer running means the exit never comes, and the run then hangs
+			// after its last file with nothing printed — a passing suite that
+			// reads as a crash, and in CI a timeout scored as a failure.
+			//
+			// Separate from the per-file watchdog on purpose: that one is sized
+			// for a test to RUN (tens of seconds), this one for a flush
+			// (milliseconds). Reusing it made the hang outlive most CI budgets.
+			exitGrace = setTimeout(() => {
+				if (settled) return;
+				process.stderr.write(
+					`helix: ${file} finished but its worker did not exit within ${EXIT_GRACE_MS}ms — ` +
+						"something it started is still running (a server, a timer, a connection).\n" +
+						"helix: killing it and keeping the result. Close it in a teardown hook to silence this.\n",
+				);
+				killChild(child, killGraceMs);
+				settle(pendingOutcome ?? outcome);
+			}, EXIT_GRACE_MS);
+			exitGrace.unref?.();
 		};
 
 		const watchdog = setTimeout(() => {
