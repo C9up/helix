@@ -36,11 +36,11 @@ pub struct RunConfig {
     pub timeout_ms: Option<u32>,
     /// `"dot" | "spec" | "json"`. Default `"spec"`.
     pub reporter: Option<String>,
-    /// Activate several reporters at once (Japa `--reporters=spec,json`).
+    /// Activate several reporters at once (helix `--reporters=spec,json`).
     /// Takes precedence over `reporter` when it holds more than one name.
     #[napi(ts_type = "string[] | undefined")]
     pub reporters: Option<Vec<String>>,
-    /// Stop the run at the first failing file (Japa `--bail`).
+    /// Stop the run at the first failing file (helix `--bail`).
     pub bail: Option<bool>,
     /// Path to the compiled worker entry (points at the JS shim that calls
     /// `runtime/worker.ts#main()`). Required — there's no sensible default
@@ -79,7 +79,7 @@ fn make_reporter(kind: &str, use_colors: bool) -> Box<dyn Reporter + Send> {
 }
 
 /// Fans every reporter callback out to a list of reporters — the Rust side of
-/// Japa's `--reporters=spec,json`.
+/// helix's `--reporters=spec,json`.
 struct MultiReporter {
     reporters: Vec<Box<dyn Reporter + Send>>,
 }

@@ -30,7 +30,7 @@ pub struct PoolConfig {
     pub worker_entry: String,
     pub threads: usize,
     pub timeout: Duration,
-    /// Stop the run once a file reports a failure (Japa `--bail`). Files
+    /// Stop the run once a file reports a failure (helix `--bail`). Files
     /// already spawned finish; files still queued are never started.
     pub bail: bool,
 }
