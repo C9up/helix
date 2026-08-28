@@ -48,42 +48,42 @@ export type RunnerHookCleanup = SuiteHookCleanup;
 /**
  * The API handed to each plugin at {@link configure} time.
  *
- * helix hands its plugins `{ config, cliArgs, runner, emitter }`; helix passes
- * the same four, so a helix plugin's body ports over unchanged, plus two helix
- * additions — `context` (helix reaches the same registry through the imported
- * `TestContext` class) and `cleanup` (helix uses `config.teardown`).
+ * Four members carry the run — `config`, `cliArgs`, `runner`, `emitter` — plus
+ * two helix adds: `context`, so a plugin extends the injected test context
+ * without importing the `TestContext` class, and `cleanup`, so a plugin that
+ * boots something at configure time has a shutdown point.
  */
 export interface PluginApi {
 	/**
-	 * The options this run was configured with (helix `config`). Mutable: helix
-	 * plugins edit it, and helix reads it back once every plugin has run.
+	 * The options this run was configured with. Mutable: a plugin edits it,
+	 * and the runner reads it back once every plugin has run.
 	 */
 	config: ConfigureOptions;
-	/** The flags the CLI forwarded to this worker (helix `cliArgs`). */
+	/** The flags the CLI forwarded to this worker (`cliArgs`). */
 	cliArgs: CLIArgs;
-	/** Run-level counters, readable once the run ends (helix `runner`). */
+	/** Run-level counters, readable once the run ends (`runner`). */
 	runner: Runner;
-	/** Lifecycle events — `test:start`, `group:end`, … (helix `emitter`). */
+	/** Lifecycle events — `test:start`, `group:end`, … (`emitter`). */
 	emitter: Emitter;
 	/** Extend the injected test context. */
 	context: PluginContext;
 	/**
 	 * Register a teardown that runs ONCE after all tests in the run finish
 	 * (reverse registration order) — the place to close a booted server, a DB
-	 * pool, etc. (helix runner-teardown parity). Without this, a plugin that boots
+	 * pool, etc. (runner teardown). Without this, a plugin that boots
 	 * a resource at `configure()` has no clean shutdown point.
 	 */
 	cleanup(fn: RunnerHook): void;
 }
 
 /**
- * A helix plugin — the helix plugin shape adapted to helix. Runs once at
- * bootstrap; may be async (e.g. to boot a server before registering `client`).
+ * A helix plugin. Runs once at bootstrap; may be async — e.g. to boot a server
+ * before registering `client` on the test context.
  */
 export type Plugin = (api: PluginApi) => void | Promise<void>;
 
 /**
- * Filters applied to the tests a file declares (helix `config.filters`).
+ * Filters applied to the tests a file declares (`config.filters`).
  *
  * `files` and `suites` are reported, not honoured: they select which FILES run,
  * and helix settles that list in the CLI process before any worker — and
@@ -93,12 +93,12 @@ export type Plugin = (api: PluginApi) => void | Promise<void>;
  */
 export interface ConfigureFilters {
 	/**
-	 * Path fragments the CLI matched files against (helix `filters.files`).
+	 * Path fragments the CLI matched files against (`filters.files`).
 	 * Read-only here: helix settles the file list before a worker exists, so
 	 * this reports what was selected rather than selecting.
 	 */
 	files?: string[];
-	/** Suite names the run was limited to (helix `filters.suites`). Read-only. */
+	/** Suite names the run was limited to (`filters.suites`). Read-only. */
 	suites?: string[];
 	/** Only tests carrying one of these tags (`~@tag`/`!@tag` excludes). */
 	tags?: string[];
@@ -106,7 +106,7 @@ export interface ConfigureFilters {
 	groups?: string[];
 	/** Only tests with these exact titles. */
 	tests?: string[];
-	/** Require EVERY tag in `tags` instead of any (helix `--match-all`). */
+	/** Require EVERY tag in `tags` instead of any (`--match-all`). */
 	matchAll?: boolean;
 }
 
@@ -118,9 +118,9 @@ export interface ConfigureFilters {
  * second mechanism.
  */
 export interface Refiner {
-	/** Add filter values for a layer (helix `refiner.add`). */
+	/** Add filter values for a layer (`refiner.add`). */
 	add(layer: "tests" | "groups" | "tags", values: string[]): void;
-	/** Require every tag instead of any (helix `refiner.matchAllTags`). */
+	/** Require every tag instead of any (`refiner.matchAllTags`). */
 	matchAllTags(toggle?: boolean): void;
 }
 
@@ -138,16 +138,16 @@ function makeRefiner(filters: ConfigureFilters): Refiner {
 
 /** Runtime configuration passed to {@link configure}. */
 export interface ConfigureOptions {
-	/** Plugins to install — each extends the test context (helix parity). */
+	/** Plugins to install — each extends the test context. */
 	plugins?: Plugin[];
 	/**
-	 * The directory the run was launched from (helix `cwd`). Filled in by the
+	 * The directory the run was launched from (`cwd`). Filled in by the
 	 * runtime, so a plugin resolving a path against the project reads the same
 	 * root the CLI discovered from.
 	 */
 	cwd?: string;
 	/**
-	 * Configure the suite before it runs (helix `configureSuite`). Applied AFTER
+	 * Configure the suite before it runs (`configureSuite`). Applied AFTER
 	 * the plugins, which is both helix's order and what lets a plugin read it or
 	 * put its own in place.
 	 *
@@ -157,44 +157,44 @@ export interface ConfigureOptions {
 	 */
 	configureSuite?: (suite: SuiteHandle) => void | Promise<void>;
 	/**
-	 * The reporters this run activated (helix `reporters.activated`). Read-only
+	 * The reporters this run activated (`reporters.activated`). Read-only
 	 * truth: reporters live in the CLI process, so naming one here would not
 	 * make it run.
 	 */
 	reporters?: { activated: string[] };
-	/** `process.exit()` once the run ends (helix `forceExit`). */
+	/** `process.exit()` once the run ends (`forceExit`). */
 	forceExit?: boolean;
-	/** Directories discovery skipped (helix `exclude`). */
+	/** Directories discovery skipped (`exclude`). */
 	exclude?: string[];
 	/**
-	 * The filter object (helix `refiner`). Writes through to
+	 * The filter object (`refiner`). Writes through to
 	 * {@link ConfigureOptions.filters}, so `refiner.add("tags", [...])` from a
 	 * plugin steers the run exactly as setting the filter would.
 	 */
 	refiner?: Refiner;
 	/**
-	 * Filters to apply to this file's tests (helix `config.filters`). The CLI
+	 * Filters to apply to this file's tests (`config.filters`). The CLI
 	 * flags win: a filter typed at the prompt overrides the configured one.
 	 */
 	filters?: ConfigureFilters;
 	/**
-	 * How a test file is imported (helix `config.importer`). Defaults to
+	 * How a test file is imported (`config.importer`). Defaults to
 	 * `import(file.href)`. Receives the URL helix would have imported —
 	 * cache-busting query included, so repeated runs still re-evaluate.
 	 */
 	importer?: (file: URL) => void | Promise<void>;
-	/** Run once before the tests (helix runner `setup`). */
+	/** Run once before the tests (runner `setup`). */
 	setup?: RunnerHook[];
-	/** Run once after the tests, reverse order (helix runner `teardown`). */
+	/** Run once after the tests, reverse order (runner `teardown`). */
 	teardown?: RunnerHook[];
 	/**
-	 * Default per-test timeout in ms for this file's tests (helix `configure({
+	 * Default per-test timeout in ms for this file's tests (`configure({
 	 * timeout })`). `0` disables. Overridden by `--timeout` and by a per-test
 	 * `test.timeout(ms)` / `{ timeout }`.
 	 */
 	timeout?: number;
 	/**
-	 * Default extra attempts on failure for this file's tests (helix `configure({
+	 * Default extra attempts on failure for this file's tests (`configure({
 	 * retries })`). Overridden by `--retries` and by a per-test `test.retry(n)`.
 	 */
 	retries?: number;
@@ -232,7 +232,7 @@ export function getConfiguredDefaults(): Readonly<ConfiguredDefaults> {
 /** Tracks the run by listening to {@link emitter} — handed to plugins. */
 const runner = new Runner(emitter);
 
-/** The options the last {@link configure} call resolved to (helix `config`). */
+/** The options the last {@link configure} call resolved to (`config`). */
 let resolvedConfig: ConfigureOptions = {};
 
 const api: PluginApi = {

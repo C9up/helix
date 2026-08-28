@@ -17,7 +17,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { TestInstance } from "./suite.js";
 
 /**
- * A per-test teardown. Receives `(hasError, test)` (helix parity): whether the
+ * A per-test teardown. Receives `(hasError, test)`: whether the
  * test failed, and the running test's instance. Both params are optional so
  * plain `() => …` cleanups stay valid.
  */
@@ -43,7 +43,7 @@ interface TestFrame {
 	/** `onTestFailed` callbacks — run after the test only when it failed. */
 	onFailed: TestCleanup[];
 	assertions: AssertionState;
-	/** The running test's instance (helix `ctx.test`), threaded into cleanups. */
+	/** The running test's instance (`ctx.test`), threaded into cleanups. */
 	test: TestInstance | undefined;
 	/** The injected context — what a helix `Test.executed` hook reads as `test.context`. */
 	context: unknown;
@@ -110,7 +110,7 @@ export function getFrameTest(): TestInstance | undefined {
 	return storage.getStore()?.test;
 }
 
-/** The running test, or `undefined` outside one (helix `getActiveTest`). */
+/** The running test, or `undefined` outside one (`getActiveTest`). */
 export function getActiveTest(): TestInstance | undefined {
 	return getFrameTest();
 }
@@ -175,7 +175,7 @@ export function onTestFailed(cb: TestCleanup): void {
 }
 
 /**
- * Callbacks registered for EVERY test of the run (helix `Test.executed`). helix
+ * Callbacks registered for EVERY test of the run (`Test.executed`). helix
  * plugins use it to check after each test that something held — `helix's assert`
  * validates its planned-assertion count there.
  */
@@ -186,7 +186,7 @@ type ExecutedHook = (
 
 const executedHooks: ExecutedHook[] = [];
 
-/** Register a per-test hook for the whole run (helix `Test.executed`). */
+/** Register a per-test hook for the whole run (`Test.executed`). */
 export function registerExecutedHook(fn: ExecutedHook): void {
 	executedHooks.push(fn);
 }

@@ -219,7 +219,7 @@ export function makeReportersFrom(reporters: readonly Reporter[]): Reporter {
 
 /**
  * Build the reporter for a run. One name behaves exactly as before; several
- * (helix `--reporters=spec,json`) fan out to all of them.
+ * (`--reporters=spec,json`) fan out to all of them.
  */
 export function makeReporters(
 	names: readonly string[] | undefined,

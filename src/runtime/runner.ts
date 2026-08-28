@@ -9,7 +9,7 @@
  * `registerReporter` works, with its scope stated: a helix reporter is
  * `(runner, emitter) => void`, and the emitter it gets is this worker's, which
  * sees this worker's FILE. That is what a worker can honestly offer, and it
- * beats the alternative — the method being absent, so a helix plugin calling it
+ * beats the alternative — the method being absent, so a plugin calling it
  * dies on a `TypeError` with nothing explaining why. Run-wide output stays the
  * CLI's job: `--reporters`, or `run({ reporterInstance })`.
  *
@@ -48,7 +48,7 @@ export class RunnerNotDrivableError extends Error {
 	}
 }
 
-/** Test counts for a run (helix `summary.aggregates`). */
+/** Test counts for a run (`summary.aggregates`). */
 export interface SummaryAggregates {
 	total: number;
 	passed: number;
@@ -122,13 +122,13 @@ export class Runner {
 		this.#duration = 0;
 	}
 
-	/** Whether anything has failed so far (helix `Runner#failed`). */
+	/** Whether anything has failed so far (`Runner#failed`). */
 	get failed(): boolean {
 		return this.#hasError || this.#aggregates.failed > 0;
 	}
 
 	/**
-	 * Stop at the first failure (helix `Runner#bail`). A plugin runs before the
+	 * Stop at the first failure (`Runner#bail`). A plugin runs before the
 	 * test file is collected, so this reaches the run it was called for; the
 	 * `--bail` flag still wins when both are set.
 	 */
@@ -138,7 +138,7 @@ export class Runner {
 	}
 
 	/**
-	 * Configure the suite before it runs (helix `Runner#onSuite`). helix calls the
+	 * Configure the suite before it runs (`Runner#onSuite`). helix calls the
 	 * callback once per suite; a worker runs exactly one, so it is called once,
 	 * immediately — plugins run before the suite's hooks, so what the callback
 	 * registers still takes effect.
@@ -150,7 +150,7 @@ export class Runner {
 	}
 
 	/**
-	 * Register a helix reporter (helix `Runner#registerReporter`). It is handed
+	 * Register a helix reporter (`Runner#registerReporter`). It is handed
 	 * this runner and this worker's emitter, so it observes THIS FILE — the
 	 * whole run is only visible from the CLI process.
 	 */
@@ -161,7 +161,7 @@ export class Runner {
 		return this;
 	}
 
-	/** The suites this worker runs — exactly one (helix `Runner#suites`). */
+	/** The suites this worker runs — exactly one (`Runner#suites`). */
 	get suites(): SuiteHandle[] {
 		const suite = currentSuite();
 		return suite === undefined ? [] : [suite];

@@ -45,14 +45,14 @@ export class TestContext {
 		TestContextRegistry.macro(name, value);
 	}
 
-	/** Add a lazily-computed, per-context property (helix `TestContext.getter`). */
+	/** Add a lazily-computed, per-context property (`TestContext.getter`). */
 	static getter(name: string, fn: Getter): void {
 		TestContextRegistry.getter(name, fn);
 	}
 
 	/** Chai-flavored assertions (`helix's assert` parity), alongside `expect`. */
 	readonly assert: Assert;
-	/** The running test's own instance — name, options, dataset (helix `ctx.test`). */
+	/** The running test's own instance — name, options, dataset (`ctx.test`). */
 	readonly test: TestInstance;
 
 	constructor(test: TestInstance) {
@@ -62,7 +62,7 @@ export class TestContext {
 
 	/**
 	 * Register a teardown that runs at the end of THIS test, regardless of
-	 * outcome (helix `ctx.cleanup`). Reverse-insertion order, isolated failures.
+	 * outcome (`ctx.cleanup`). Reverse-insertion order, isolated failures.
 	 */
 	cleanup(fn: TestCleanup): void {
 		// Falls through to the active per-test frame; a false return means we were

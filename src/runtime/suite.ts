@@ -13,20 +13,20 @@ import { getFrameTest, type TestCleanup } from "./test-context.js";
 
 /**
  * Signals completion of a `waitForDone()` test. Call `done()` to pass, or
- * `done(error)` to fail (helix parity). Ignored unless `test.waitForDone()`.
+ * `done(error)` to fail. Ignored unless `test.waitForDone()`.
  */
 export type DoneFn = (error?: unknown) => void;
 
 /**
  * A test body. Receives the injected {@link TestContext} as its first argument
- * and a `done` callback as its second (helix parity). Existing zero/one-argument
+ * and a `done` callback as its second. Existing zero/one-argument
  * bodies stay valid — they simply ignore the extra parameters.
  */
 export type TestFn = (ctx: TestContext, done: DoneFn) => void | Promise<void>;
 export type SuiteFn = () => void;
 
 /**
- * Teardown a hook may return (Vitest/helix parity). Receives `(hasError, subject)`
+ * Teardown a hook may return (Vitest parity). Receives `(hasError, subject)`
  * — whether the test/group errored, and the Test or Group instance. Both params
  * are optional so plain `() => …` cleanups stay valid.
  */
@@ -36,7 +36,7 @@ export type CleanupFn = (
 ) => void | Promise<void>;
 /**
  * A lifecycle hook. Receives the Test instance (test hooks) or Group instance
- * (group hooks) as its argument (helix parity); may return a {@link CleanupFn}.
+ * (group hooks) as its argument; may return a {@link CleanupFn}.
  * Existing zero-argument hooks stay valid.
  */
 export type HookFn =
@@ -86,11 +86,11 @@ export interface TestNode {
 	setups?: HookFn[];
 	/** Per-test teardown hooks — `test.teardown(fn)` (run just after this test). */
 	teardowns?: HookFn[];
-	/** Resolved dataset rows backing this test — `test(name, fn).with(rows)` (helix `ctx.test.dataset`). */
+	/** Resolved dataset rows backing this test — `test(name, fn).with(rows)` (`ctx.test.dataset`). */
 	dataset?: readonly unknown[];
 	/**
 	 * Deferred dataset source — `test(name, fn).with(rows)`. An array OR a
-	 * (possibly async) function returning one (helix parity). Resolved at RUN time
+	 * (possibly async) function returning one. Resolved at RUN time
 	 * so async datasets work; the node then expands into one result per row.
 	 */
 	datasetFn?: DatasetSource<unknown>;
@@ -112,7 +112,7 @@ export interface TestNode {
 	skipCondition?: () => boolean | Promise<boolean>;
 }
 
-/** A group's instance, passed to `group.setup`/`teardown` hooks (helix parity). */
+/** A group's instance, passed to `group.setup`/`teardown` hooks. */
 export interface GroupInstance {
 	/** The group's own name. */
 	title: string;
@@ -121,7 +121,7 @@ export interface GroupInstance {
 }
 
 /**
- * The running test's own instance, injected as `ctx.test` (helix parity). Read
+ * The running test's own instance, injected as `ctx.test`. Read
  * access to the test's identity + resolved options + dataset.
  */
 export interface TestInstance {
@@ -129,7 +129,7 @@ export interface TestInstance {
 	title: string;
 	/** Fully-qualified dotted name (suite path + title). */
 	fullName: string;
-	/** Resolved options in effect for this run (helix `test.options` parity). */
+	/** Resolved options in effect for this run (`test.options`). */
 	options: {
 		/** The test's title (leaf name). */
 		title: string;
@@ -138,13 +138,13 @@ export interface TestInstance {
 		tags: readonly string[];
 		/** Whether this is a `todo` test. Always `false` inside a running test. */
 		isTodo: boolean;
-		/** Whether the test is expected to throw — `test.fails()` (helix parity). */
+		/** Whether the test is expected to throw — `test.fails()`. */
 		isFailing: boolean;
 		/**
-		 * Free-form metadata bag (helix `options.meta`): `fileName`, `group` (the
+		 * Free-form metadata bag (`options.meta`): `fileName`, `group` (the
 		 * enclosing {@link Group} instance, or `undefined` outside a group),
 		 * `suite` (`{ name }` — `"default"` unless `configure({ suite })` or
-		 * `--suite` names it, exactly like helix's implicit suite), and `abort`.
+		 * `--suite` names it, the implicit suite), and `abort`.
 		 */
 		meta: Record<string, unknown>;
 	};
@@ -160,14 +160,14 @@ export interface TestInstance {
 	/** Whether the test was pinned via `test.pin()`. */
 	isPinned: boolean;
 	/**
-	 * Re-arm the running test's timeout (helix `ctx.test.resetTimeout`). With no
+	 * Re-arm the running test's timeout (`ctx.test.resetTimeout`). With no
 	 * argument, restarts the current timeout; with `ms`, sets a new one. Useful
 	 * for long polling steps that shouldn't count against a single deadline.
 	 */
 	resetTimeout(ms?: number): void;
 	/**
 	 * Register a teardown that runs at the end of THIS test regardless of outcome
-	 * (helix `test.cleanup`). This is the same registry as `ctx.cleanup`; it is
+	 * (`test.cleanup`). This is the same registry as `ctx.cleanup`; it is
 	 * exposed here so a resource macro's `t` (see `test.macro`) can register
 	 * cleanups — `test.macro((t) => { t.cleanup(() => …) })`.
 	 */
@@ -191,7 +191,7 @@ export interface TestOptions {
  * mutate the just-registered node. Ignoring the return keeps Vitest's
  * `test(name, fn)` ergonomics; chaining adds `helix` parity.
  */
-/** How `tags()` merges with any tags already on the test (helix parity). */
+/** How `tags()` merges with any tags already on the test. */
 export type TagStrategy = "replace" | "append" | "prepend";
 
 export interface TestHandle {
@@ -199,31 +199,31 @@ export interface TestHandle {
 	timeout(ms: number): TestHandle;
 	disableTimeout(): TestHandle;
 	/**
-	 * Attach tags. helix parity: `tags(['@slow'], 'append')`. `strategy` defaults
+	 * Attach tags. `tags(['@slow'], 'append')`. `strategy` defaults
 	 * to `'replace'`. A single string is accepted as a shorthand.
 	 */
 	tags(tags: string | string[], strategy?: TagStrategy): TestHandle;
-	/** Expect the test to throw. Optional `reason` documents why (helix parity). */
+	/** Expect the test to throw. Optional `reason` documents why. */
 	fails(reason?: string): TestHandle;
-	/** Run a hook just before THIS test (helix `test.setup`). */
+	/** Run a hook just before THIS test (`test.setup`). */
 	setup(fn: HookFn): TestHandle;
-	/** Run a hook just after THIS test (helix `test.teardown`). */
+	/** Run a hook just after THIS test (`test.teardown`). */
 	teardown(fn: HookFn): TestHandle;
-	/** Pin the test: when any test is pinned, only pinned tests run (helix `test.pin`). */
+	/** Pin the test: when any test is pinned, only pinned tests run (`test.pin`). */
 	pin(): TestHandle;
 	/**
 	 * Skip the test, optionally only when `condition` (a boolean OR a function
-	 * returning one — which may be async, helix parity) is true, with a `reason`.
+	 * returning one — which may be async) is true, with a `reason`.
 	 * A function condition is evaluated at RUN time, not at collection.
 	 */
 	skip(
 		condition?: boolean | (() => boolean | Promise<boolean>),
 		reason?: string,
 	): TestHandle;
-	/** Complete only once the body calls its `done` callback (helix `waitForDone`). */
+	/** Complete only once the body calls its `done` callback (`waitForDone`). */
 	waitForDone(): TestHandle;
 	/**
-	 * Attach a dataset (helix parity). Two forms:
+	 * Attach a dataset. Two forms:
 	 *   - `test('title', (ctx, row) => …).with([...])` — the body from `test()`
 	 *     is re-homed and runs once per row (row typed as the 2nd body arg).
 	 *   - `test('title').with([...]).run((ctx, row) => …)` — the fully-typed
@@ -237,7 +237,7 @@ export interface TestHandle {
 
 /**
  * The handle returned by `test(...).with(rows)` — carries the dataset element
- * type so `.run((ctx, row) => …)` types `row` precisely (helix parity).
+ * type so `.run((ctx, row) => …)` types `row` precisely.
  */
 export interface DatasetHandle<Row> {
 	/**
@@ -265,7 +265,7 @@ export interface SuiteNode {
 	/**
 	 * The single {@link Group} instance built by `test.group()` for this node —
 	 * the body handle, the value returned, AND the `self` its hooks receive
-	 * (helix `self === group`). Absent on plain `describe` suites.
+	 * (`self === group`). Absent on plain `describe` suites.
 	 */
 	groupInstance?: Group;
 }
@@ -390,7 +390,7 @@ function registerTest(
 	return node;
 }
 
-/** Consumer-registered handle macros (helix `Test.macro`) applied to every handle. */
+/** Consumer-registered handle macros (`Test.macro`) applied to every handle. */
 const handleMacros = new Map<
 	string,
 	(this: TestHandle, ...args: unknown[]) => unknown
@@ -450,7 +450,7 @@ function makeHandle(node: TestNode): TestHandle {
 		) {
 			if (typeof condition === "function") {
 				// Deferred: a function condition (possibly async) is evaluated at RUN
-				// time (helix parity), not eagerly at collection.
+				// time, not eagerly at collection.
 				node.skipCondition = condition;
 				if (reason !== undefined) node.reason = reason;
 			} else if (condition) {
@@ -489,7 +489,7 @@ function makeHandle(node: TestNode): TestHandle {
 			return datasetHandle;
 		},
 	};
-	// Apply consumer-registered macros (helix `Test.macro`) — `this` is the handle
+	// Apply consumer-registered macros (`Test.macro`) — `this` is the handle
 	// so the macro can chain.
 	for (const [name, fn] of handleMacros) {
 		Object.defineProperty(handle, name, {
@@ -504,7 +504,7 @@ function makeHandle(node: TestNode): TestHandle {
 
 /**
  * Build the {@link TapHandle} passed to `group.tap` — the chainable modifiers
- * plus a mutable `options` view backed live by the node (helix `test.options`).
+ * plus a mutable `options` view backed live by the node (`test.options`).
  */
 function makeTapHandle(node: TestNode): TapHandle {
 	const handle = makeHandle(node);
@@ -595,7 +595,7 @@ type EachRows<Row extends EachRow> = readonly Row[] | (() => readonly Row[]);
 
 /**
  * Source of dataset rows (`test(name, fn).with(...)`): a static array OR a
- * function returning one — the function may be async (helix parity). Resolved at
+ * function returning one — the function may be async. Resolved at
  * RUN time so async sources work.
  */
 export type DatasetSource<Row> =
@@ -603,7 +603,7 @@ export type DatasetSource<Row> =
 	| (() => readonly Row[] | Promise<readonly Row[]>);
 
 /**
- * The `group` handle passed to `test.group(name, (group) => …)` (helix parity).
+ * The `group` handle passed to `test.group(name, (group) => …)`.
  * `setup`/`teardown` run once for the whole group; `each.setup`/`each.teardown`
  * run around every test in it. Hook bodies may return a cleanup function.
  */
@@ -628,14 +628,14 @@ export interface Group extends GroupInstance {
 	 * `group.tap(t => { t.options.title = t.options.title.toUpperCase() })`.
 	 * Applied to all tests registered in the group body. The callback receives a
 	 * {@link TapHandle}: the chainable modifiers PLUS a mutable `options` view
-	 * (helix `test.options.title` parity).
+	 * (`test.options.title`).
 	 */
 	tap(fn: (test: TapHandle) => void): void;
 }
 
-/** The mutable, resolved options of a test, exposed to `group.tap` (helix parity). */
+/** The mutable, resolved options of a test, exposed to `group.tap`. */
 export interface TapOptions {
-	/** The test's title — assignable to rename it (helix `test.options.title`). */
+	/** The test's title — assignable to rename it (`test.options.title`). */
 	title: string;
 	/** The test's tags — assignable to replace them. */
 	tags: string[];
@@ -656,7 +656,7 @@ export interface TapHandle extends TestHandle {
 
 type TestApi = {
 	/**
-	 * Register a test. Omitting `fn` marks it `todo` (helix parity) — reported as
+	 * Register a test. Omitting `fn` marks it `todo` — reported as
 	 * pending and never executed — unless a dataset body is supplied later via
 	 * `.with(...).run(fn)`.
 	 */
@@ -674,7 +674,7 @@ type TestApi = {
 	 */
 	group(name: string, fn: (group: Group) => void): Group;
 	/**
-	 * Create a resource macro (helix `test.macro`). The callback receives the
+	 * Create a resource macro (`test.macro`). The callback receives the
 	 * running test instance `t` (carrying `t.cleanup`) followed by any arguments;
 	 * `macro` returns a function that, called inside a test body, invokes the
 	 * callback against the active test and returns its value:
@@ -791,7 +791,7 @@ function interpolateEach(
 }
 
 /**
- * Interpolate a dataset test title (helix parity). Tokens:
+ * Interpolate a dataset test title. Tokens:
  *   - `{$i}`   → the 1-based row index
  *   - `{$self}`→ the row itself (stringified) — for primitive/array rows
  *   - `{prop}` / `{a.b}` → a (dotted) property lookup on an object row
@@ -839,7 +839,7 @@ describeFn.only = (name, fn) => registerSuite(name, "only", fn);
 describeFn.todo = (name) => registerSuite(name, "todo", () => {});
 
 const testFn = ((name: string, fn?: TestFn, options?: TestOptions | number) => {
-	// No body → `todo` (helix parity). A dataset body added later via
+	// No body → `todo`. A dataset body added later via
 	// `.with(...).run(fn)` promotes it back to a runnable test.
 	const mode: RunMode = fn === undefined ? "todo" : "run";
 	return makeHandle(
@@ -880,7 +880,7 @@ testFn.group = (name: string, fn: (group: Group) => void): Group => {
 		}
 	}
 	// A group IS a suite. Build ONE instance that is the body handle, the value
-	// returned, AND the `self` the group's hooks receive (helix `self === group`).
+	// returned, AND the `self` the group's hooks receive (`self === group`).
 	// Its hook methods attach to THIS active suite via `addHook`.
 	let instance: Group | undefined;
 	registerSuite(name, "run", () => {
@@ -949,7 +949,7 @@ testFn.macro = <Args extends unknown[], R>(
 };
 
 /**
- * Class-level extension surface (helix `Test.macro`). Registers a named method
+ * Class-level extension surface (`Test.macro`). Registers a named method
  * available on every test handle; `this` inside it is the handle, so it can
  * chain (`Test.macro('slow', function () { this.tags(['@slow']); return this })`).
  * Pair with a `declare module` augmentation for the types.

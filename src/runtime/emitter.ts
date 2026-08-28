@@ -20,7 +20,7 @@
 
 import type { SerializedError } from "./run.js";
 
-/** The lifecycle phase an error was raised in (helix parity). */
+/** The lifecycle phase an error was raised in. */
 export type ErrorPhase =
 	| "setup"
 	| "test"
@@ -39,7 +39,7 @@ export interface EmittedError {
 	error: Error | SerializedError;
 }
 
-/** A test title, before and after dataset interpolation (helix parity). */
+/** A test title, before and after dataset interpolation. */
 export interface EmittedTitle {
 	original: string;
 	expanded: string;
@@ -121,7 +121,7 @@ export interface RunnerEndNode {
 	hasError: boolean;
 }
 
-/** Every event the runtime emits, with its payload (helix `RunnerEvents`). */
+/** Every event the runtime emits, with its payload (`RunnerEvents`). */
 export interface RunnerEvents {
 	"test:start": TestStartNode;
 	"test:end": TestEndNode;

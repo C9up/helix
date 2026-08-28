@@ -24,7 +24,7 @@ import type { SuiteNode, TestNode } from "./suite.js";
 /** A hook body, as `test.setup()` / `group.setup()` take it. */
 type Handler = () => void | Promise<void>;
 
-/** How `test.tags()` combines with the tags already declared (helix parity). */
+/** How `test.tags()` combines with the tags already declared. */
 export type TagStrategy = "replace" | "append" | "prepend";
 
 /** The helix `Test` surface a tap can configure. */
@@ -51,7 +51,7 @@ export interface TestHandle {
 export interface GroupHandle {
 	/** The declared title. */
 	readonly title: string;
-	/** Configure every test of this group (helix `group.tap`). */
+	/** Configure every test of this group (`group.tap`). */
 	tap(callback: (test: TestHandle) => void): GroupHandle;
 	setup(handler: Handler): GroupHandle;
 	teardown(handler: Handler): GroupHandle;
@@ -177,7 +177,7 @@ export type SuiteHookCleanup = (
 /**
  * A run-level hook, as `suite.setup()` / `suite.teardown()` take it.
  *
- * helix hands it the `runner`, and lets a `setup` hook RETURN its own undo — the
+ * The API hands it the `runner`, and lets a `setup` hook RETURN its own undo — the
  * idiom AdonisJS is written in (`setup: [() => testUtils.db().migrate()]`,
  * where `migrate()` resolves to the rollback). Both are honoured.
  *
@@ -202,11 +202,11 @@ export interface SuiteHandle {
 	setup(fn: SuiteHook): SuiteHandle;
 	/** Run after this suite's tests, in reverse registration order. */
 	teardown(fn: SuiteHook): SuiteHandle;
-	/** Configure every test of the suite before it runs (helix `Suite#onTest`). */
+	/** Configure every test of the suite before it runs (`Suite#onTest`). */
 	onTest(callback: (test: TestHandle) => void): SuiteHandle;
-	/** Configure every group of the suite before it runs (helix `Suite#onGroup`). */
+	/** Configure every group of the suite before it runs (`Suite#onGroup`). */
 	onGroup(callback: (group: GroupHandle) => void): SuiteHandle;
-	/** Stop this suite at the first failure (helix `Suite#bail`). */
+	/** Stop this suite at the first failure (`Suite#bail`). */
 	bail(toggle?: boolean): SuiteHandle;
 }
 
@@ -272,17 +272,17 @@ const taps: {
 	bail?: boolean;
 } = { onTest: [], onGroup: [] };
 
-/** Register a per-test tap (helix `Suite#onTest`). */
+/** Register a per-test tap (`Suite#onTest`). */
 export function registerTestTap(callback: (test: TestHandle) => void): void {
 	taps.onTest.push(callback);
 }
 
-/** Register a per-group tap (helix `Suite#onGroup`). */
+/** Register a per-group tap (`Suite#onGroup`). */
 export function registerGroupTap(callback: (group: GroupHandle) => void): void {
 	taps.onGroup.push(callback);
 }
 
-/** Ask this suite to stop at the first failure (helix `Suite#bail`). */
+/** Ask this suite to stop at the first failure (`Suite#bail`). */
 export function setBail(toggle: boolean): void {
 	taps.bail = toggle;
 }

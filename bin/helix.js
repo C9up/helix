@@ -49,7 +49,7 @@ const FLAG_SPEC = {
 	},
 	"match-all": {
 		kind: "boolean",
-		help: "Require ALL --tags instead of any (helix parity)",
+		help: "Require ALL --tags instead of any",
 	},
 	// helix's parser accepts both spellings (`matchAll` with `match-all` as its
 	// alias), so both work here too.
@@ -59,40 +59,40 @@ const FLAG_SPEC = {
 	},
 	tests: {
 		kind: "string",
-		help: "Comma-separated exact test titles to run (helix --tests)",
+		help: "Comma-separated exact test titles to run (--tests)",
 	},
 	groups: {
 		kind: "string",
-		help: "Comma-separated exact group titles to run (helix --groups)",
+		help: "Comma-separated exact group titles to run (--groups)",
 	},
 	suite: {
 		kind: "string",
-		help: "Name of the suite these files belong to (helix meta.suite)",
+		help: "Name of the suite these files belong to (meta.suite)",
 	},
 	files: {
 		kind: "string",
-		help: "Comma-separated substrings matched against test file paths (helix --files)",
+		help: "Comma-separated substrings matched against test file paths (--files)",
 	},
 	reporters: {
 		kind: "string",
-		help: "Comma-separated reporters to activate, e.g. spec,json (helix --reporters)",
+		help: "Comma-separated reporters to activate, e.g. spec,json (--reporters)",
 	},
-	bail: { kind: "boolean", help: "Stop at the first failure (helix --bail)" },
+	bail: { kind: "boolean", help: "Stop at the first failure (--bail)" },
 	"bail-layer": {
 		kind: "string",
-		help: "How far a bail reaches: group|suite|runner (helix --bail-layer)",
+		help: "How far a bail reaches: group|suite|runner (--bail-layer)",
 	},
 	failed: {
 		kind: "boolean",
-		help: "Re-run only the tests that failed last run (helix --failed)",
+		help: "Re-run only the tests that failed last run (--failed)",
 	},
 	"list-pinned": {
 		kind: "boolean",
-		help: "Print the tests marked .pin() and run nothing (helix --list-pinned)",
+		help: "Print the tests marked .pin() and run nothing (--list-pinned)",
 	},
 	"force-exit": {
 		kind: "boolean",
-		help: "process.exit() as soon as the run ends, without draining the event loop (helix --force-exit)",
+		help: "process.exit() as soon as the run ends, without draining the event loop (--force-exit)",
 	},
 	watch: { kind: "boolean", help: "Watch mode — re-run on file changes" },
 	"watch-debounce": {
@@ -607,7 +607,7 @@ async function main() {
 		}
 
 		// `runnerHooks` run ONCE around the whole run, here, and the workers are
-		// told to skip them — helix's semantics, and the difference between
+		// told to skip them — the difference between
 		// migrating once and migrating once per test file.
 		const dropGlobalHooks = await runGlobalHooks(process.env.HELIX_BOOTSTRAP);
 
@@ -620,7 +620,7 @@ async function main() {
 			}
 		}
 
-		// Suites run one after another (helix runs them in sequence too), each
+		// Suites run one after another (they run in sequence), each
 		// with its own files, timeout, retries and `meta.suite` name. The
 		// sequence is handed to the orchestrator as a whole so watch mode
 		// wraps ALL of it in one watcher and the `--failed` cache holds every
@@ -708,7 +708,7 @@ async function main() {
 }
 
 /**
- * helix semantics: the process exits on its own once the event loop drains, so a
+ * The process exits on its own once the event loop drains, so a
  * resource a test left open surfaces as a hang you can diagnose — rather than
  * being swallowed by an unconditional `process.exit`, which also truncates
  * pending stdout writes. `--force-exit` is the escape hatch, exactly as in helix.

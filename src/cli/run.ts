@@ -82,7 +82,7 @@ export interface RunConfig {
 	/** Reporter name: `"dot" | "spec" | "json"`. Default `"spec"`. */
 	reporter?: string;
 	/**
-	 * Activate several reporters at once (helix `--reporters=spec,json`). Takes
+	 * Activate several reporters at once (`--reporters=spec,json`). Takes
 	 * precedence over {@link RunConfig.reporter} when it holds more than one
 	 * name.
 	 */
@@ -104,12 +104,12 @@ export interface RunConfig {
 	/** Watch mode: re-run on file changes. */
 	watch?: WatchOptions;
 	/**
-	 * Stop the run at the first failure (helix `--bail`). Within a file the
+	 * Stop the run at the first failure (`--bail`). Within a file the
 	 * remaining tests are reported as skipped; files not yet started are dropped.
 	 */
 	bail?: boolean;
 	/**
-	 * Re-run only the tests that failed last time (helix `--failed`). Reads the
+	 * Re-run only the tests that failed last time (`--failed`). Reads the
 	 * cache written by the previous run and applies it as a `--tests` filter.
 	 */
 	failed?: boolean;
@@ -211,7 +211,7 @@ async function runNative(
 }
 
 export async function run(config: RunConfig): Promise<RunOutcome> {
-	// Adonis/helix parity: a test run executes in the `test` environment. Set it
+	// Adonis parity: a test run executes in the `test` environment. Set it
 	// on the orchestrator BEFORE any worker spawns — both the native (Rust) and
 	// TS pools inherit the parent process env, so every worker (where the app +
 	// test code is actually loaded) starts with NODE_ENV=test. Mirrors AdonisJS

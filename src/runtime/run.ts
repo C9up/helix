@@ -45,7 +45,7 @@ export interface TestResult {
 	status: "pass" | "fail" | "skip" | "todo";
 	durationMs: number;
 	error?: SerializedError;
-	/** Lifecycle phase `error` was raised in (helix `test:end` parity). */
+	/** Lifecycle phase `error` was raised in (`test:end`). */
 	errorPhase?: ErrorPhase;
 }
 
@@ -105,31 +105,31 @@ export interface ExecuteOptions {
 	 */
 	grep?: string;
 	/**
-	 * Tag filter expressions (helix `--tags`). A `~`-prefixed tag EXCLUDES (`!` is
+	 * Tag filter expressions (`--tags`). A `~`-prefixed tag EXCLUDES (`!` is
 	 * also accepted). Required tags are OR-ed by default — a test runs when it
 	 * carries ANY of them — unless {@link ExecuteOptions.matchAll} is set, and
 	 * never when it carries an excluded tag.
 	 */
 	tags?: string[];
-	/** Require ALL required tags instead of any (helix `--match-all`). */
+	/** Require ALL required tags instead of any (`--match-all`). */
 	matchAll?: boolean;
-	/** Exact test titles to run (helix `--tests`). A test runs only if its leaf title is listed. */
+	/** Exact test titles to run (`--tests`). A test runs only if its leaf title is listed. */
 	tests?: string[];
-	/** Exact group titles to run (helix `--groups`). A test runs only if its enclosing group is listed. */
+	/** Exact group titles to run (`--groups`). A test runs only if its enclosing group is listed. */
 	groups?: string[];
 	/**
 	 * The suite these tests belong to — `ctx.test.options.meta.suite.name` and the
-	 * `suite:*` event payloads. Defaults to `"default"`, helix's implicit suite.
+	 * `suite:*` event payloads. Defaults to `"default"`, the implicit suite.
 	 */
 	suite?: string;
 	/**
-	 * Stop running once a test fails (helix `--bail`). Everything after the
-	 * failure is reported as SKIPPED, not dropped — same as helix, so the counts
+	 * Stop running once a test fails (`--bail`). Everything after the
+	 * failure is reported as SKIPPED, not dropped — not dropped, so the counts
 	 * still add up.
 	 */
 	bail?: boolean;
 	/**
-	 * How far a bail reaches (helix `--bail-layer`): `"group"` stops the enclosing
+	 * How far a bail reaches (`--bail-layer`): `"group"` stops the enclosing
 	 * group only, `"suite"` the rest of the file, `"runner"` (helix's default,
 	 * spelled `""` on its CLI) the rest of the run — the remaining FILES are
 	 * dropped by the pool, since helix runs one process per file and cannot skip
@@ -139,7 +139,7 @@ export interface ExecuteOptions {
 }
 
 /**
- * Compiled tag filter (helix `--tags` / `--match-all`). A test passes when it
+ * Compiled tag filter (`--tags` / `--match-all`). A test passes when it
  * carries no `excluded` tag AND — if any `required` — matches them by the
  * `matchAll` mode (all vs any).
  */
@@ -160,7 +160,7 @@ function compileTagFilter(
 	for (const raw of tags) {
 		const t = raw.trim();
 		if (!t) continue;
-		// `~` is the helix exclusion prefix; `!` is accepted too (helix legacy) so a
+		// `~` is the helix exclusion prefix; `!` is accepted too (legacy) so a
 		// stray `!` never silently becomes an impossible required tag.
 		if (t.startsWith("~") || t.startsWith("!")) excluded.push(t.slice(1));
 		else required.push(t);
@@ -314,7 +314,7 @@ function collectHookChain(
  * run-wide test timeout; `0` on either disables it, which is how a deliberately
  * long boot opts out.
  */
-/** A group hook's return that is a group-scoped cleanup (helix parity). */
+/** A group hook's return that is a group-scoped cleanup. */
 function isCleanupFn(value: unknown): value is CleanupFn {
 	return typeof value === "function";
 }
@@ -324,7 +324,7 @@ function asHooks(fns: Hook["fn"][] | undefined, type: HookType): Hook[] {
 	return (fns ?? []).map((fn) => ({ type, fn }));
 }
 
-/** A `beforeEach` return that is a cleanup callback (Vitest/helix parity). */
+/** A `beforeEach` return that is a cleanup callback (Vitest parity). */
 function isTestCleanup(value: unknown): value is TestCleanup {
 	return typeof value === "function";
 }
@@ -349,11 +349,11 @@ async function runHooks(
 ): Promise<SerializedError | undefined> {
 	for (const h of hooks) {
 		try {
-			// helix parity: test hooks receive the Test instance, group hooks the
+			// test hooks receive the Test instance, group hooks the
 			// Group instance. Zero-arg hooks simply ignore it.
 			const ret = await callHook(h, subject, fallbackMs);
 			// A `beforeEach` returning a function registers it as a test-scoped
-			// cleanup (Vitest/helix parity). Ignored for `afterEach`.
+			// cleanup (Vitest parity). Ignored for `afterEach`.
 			if (registerCleanups && isTestCleanup(ret)) {
 				registerTestCleanup(ret);
 			}
@@ -435,15 +435,15 @@ interface RunCtx {
 	retries: number;
 	grep: RegExp | undefined;
 	tagFilter: TagFilter | undefined;
-	/** Exact test titles to run (helix `--tests`); `undefined` = no title filter. */
+	/** Exact test titles to run (`--tests`); `undefined` = no title filter. */
 	testTitles: Set<string> | undefined;
-	/** Exact group titles to run (helix `--groups`); `undefined` = no group filter. */
+	/** Exact group titles to run (`--groups`); `undefined` = no group filter. */
 	groupTitles: Set<string> | undefined;
 	/** The test file being executed — surfaced as `ctx.test.options.meta.fileName`. */
 	file: string;
-	/** The suite these tests belong to (helix `meta.suite` / `suite:*`). */
+	/** The suite these tests belong to (`meta.suite` / `suite:*`). */
 	suite: SuiteIdentity;
-	/** Stop after the first failure (helix `--bail`). */
+	/** Stop after the first failure (`--bail`). */
 	bail: boolean;
 	/** How far a bail reaches — `"group"` resets at each group boundary. */
 	bailLayer: "group" | "suite" | "runner";
@@ -482,9 +482,9 @@ function suiteHasRunnableTest(node: SuiteNode, ctx: RunCtx): boolean {
 }
 
 /**
- * The suite a run belongs to (helix `meta.suite`). Helix runs one process per
+ * The suite a run belongs to (`meta.suite`). Helix runs one process per
  * FILE, so the suite is a name the run carries — `"default"` unless
- * `configure({ suite })` or `--suite` says otherwise, exactly like helix's
+ * `configure({ suite })` or `--suite` says otherwise, exactly like the
  * implicit suite.
  */
 export interface SuiteIdentity {
@@ -507,7 +507,7 @@ function testMeta(node: TestNode, ctx: RunCtx): Record<string, unknown> {
 	};
 }
 
-/** Nearest enclosing `test.group(...)` instance, if any (helix `meta.group`). */
+/** Nearest enclosing `test.group(...)` instance, if any (`meta.group`). */
 function enclosingGroup(node: TestNode): Group | undefined {
 	for (
 		let s: SuiteNode | undefined = node.parent;
@@ -612,7 +612,7 @@ async function runTest(
 	const filteredOut = isFilteredOut(node, ctx);
 
 	// A dataset test with no body (`test('x').with(rows)` and no `.run(fn)` / no
-	// body in `test`) is a `todo` — same as a bodiless plain test (helix parity).
+	// body in `test`) is a `todo` — same as a bodiless plain test.
 	const datasetTodo =
 		node.datasetFn !== undefined && node.datasetBody === undefined;
 	if (node.mode === "todo" || datasetTodo) {
@@ -673,7 +673,7 @@ async function runTest(
 	const grepOut = (fullName: string): boolean =>
 		ctx.grep !== undefined && !ctx.grep.test(fullName);
 
-	// Dataset expansion (helix `test(name, fn).with(rows)`): resolve the rows at
+	// Dataset expansion (`test(name, fn).with(rows)`): resolve the rows at
 	// run time (awaiting an async source), then run one test per row with an
 	// interpolated title. The full resolved dataset is exposed as `ctx.test.dataset`.
 	if (node.datasetFn !== undefined) {
@@ -851,7 +851,7 @@ async function runAttempt(
 	const timeoutCtl = makeTimeoutController(timeoutMs, `test "${fullName}"`);
 
 	// The running test's instance — injected as `ctx.test`, passed to the test
-	// hooks (helix parity), and threaded into the frame so cleanups receive it.
+	// hooks, and threaded into the frame so cleanups receive it.
 	const testInstance: TestInstance = {
 		title,
 		fullName,
@@ -861,7 +861,7 @@ async function runAttempt(
 			retries,
 			tags: node.tags ?? [],
 			isTodo: false,
-			// `test.fails()` — a helix plugin reads it to know an error was the
+			// `test.fails()` — a plugin reads it to know an error was the
 			// point (`helix's assert` skips its assertion check for such a test).
 			isFailing: node.failing === true,
 			meta,
@@ -876,7 +876,7 @@ async function runAttempt(
 	setFrameTest(testInstance);
 
 	// Build the injected context BEFORE the `beforeEach` chain so hooks can reach
-	// it as `$test.context` (helix parity) — the SAME context flows to the body.
+	// it as `$test.context` — the SAME context flows to the body.
 	// Built inside the per-test frame so `ctx.cleanup` / getters bind here.
 	const context = buildTestContext(testInstance);
 	// A helix `Test.executed` hook reads `test.context` — `helix's assert` validates
@@ -899,7 +899,7 @@ async function runAttempt(
 	}
 
 	let testErr: SerializedError | undefined;
-	// Which phase produced `testErr` — surfaced on `test:end` (helix parity).
+	// Which phase produced `testErr` — surfaced on `test:end`.
 	let errorPhase: ErrorPhase | undefined;
 
 	// Per-test setup hooks (`test.setup`) run after the group `each.setup` chain,
@@ -915,7 +915,7 @@ async function runAttempt(
 		errorPhase = "setup";
 	} else {
 		try {
-			// `done` callback (helix `waitForDone`): the test completes when the
+			// `done` callback (`waitForDone`): the test completes when the
 			// body calls done()/done(error). Built even when unused (harmless).
 			let doneResolve: () => void = noop;
 			let doneReject: (error: unknown) => void = noop;
@@ -1085,7 +1085,7 @@ async function runSuite(
 	if (skipEntire) return runSkippedSuite(node, fullName, ctx);
 
 	const hookErrors: SerializedError[] = [];
-	// The group's instance (helix parity) passed to group hooks, and cleanups a
+	// The group's instance passed to group hooks, and cleanups a
 	// `group.setup()` returns — run in the afterAll phase with `(hadError, group)`.
 	// For a `test.group()` this is the SAME object the body received and the call
 	// returned (`self === group`); a plain `describe` suite has no group handle,
@@ -1126,7 +1126,7 @@ async function runSuite(
 	if (!beforeAllFailed) {
 		for (const child of node.children) {
 			if (child.kind === "test") {
-				// A dataset test expands to one result per row (helix parity).
+				// A dataset test expands to one result per row.
 				for (const r of await runTest(child, fullName, ctx)) children.push(r);
 			} else {
 				children.push(await runSuite(child, fullName, ctx));
@@ -1158,7 +1158,7 @@ async function runSuite(
 			// is what helix's GroupRunner reports.
 			hasError: groupHadError || hookErrors.length > 0,
 			// The group's own `errors` are its hook failures only; a test's failure
-			// travels on that test's `test:end` (helix parity).
+			// travels on that test's `test:end`.
 			errors: hookErrors.map(
 				(error, i): EmittedError => ({
 					phase: i < setupErrorCount ? "setup" : "teardown",
@@ -1252,7 +1252,7 @@ async function runBeforeAllHooks(
 	for (const h of node.hooks) {
 		if (h.type !== "beforeAll") continue;
 		try {
-			// helix parity: group hooks receive the Group instance; a returned
+			// group hooks receive the Group instance; a returned
 			// function becomes a group-scoped cleanup (run in the afterAll phase).
 			const ret = await callHook(h, group, ctx.timeoutMs);
 			if (isCleanupFn(ret)) groupCleanups.push(ret);
@@ -1424,7 +1424,7 @@ export async function executeRoot(
 	if (!rootBeforeAllFailed) {
 		for (const child of root.children) {
 			if (child.kind === "test") {
-				// A dataset test expands to one result per row (helix parity).
+				// A dataset test expands to one result per row.
 				const trs = await runTest(child, "", ctx);
 				suites.push({
 					name: "",

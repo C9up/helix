@@ -449,14 +449,14 @@ export interface Assert {
 
 	/** Force a failure with a message. */
 	fail(message?: string): never;
-	/** Force a failure carrying actual/expected/operator (chai/@helix parity). */
+	/** Force a failure carrying actual/expected/operator (chai parity). */
 	fail(
 		actual: unknown,
 		expected: unknown,
 		message?: string,
 		operator?: string,
 	): never;
-	/** Declare the exact number of assertions this test must make (helix parity). */
+	/** Declare the exact number of assertions this test must make. */
 	plan(count: number): void;
 }
 

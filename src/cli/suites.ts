@@ -48,14 +48,14 @@ export type SuiteFiles = string | string[] | (() => URL[] | Promise<URL[]>);
 export interface SuiteDefinition {
 	/** Suite name — what `helix test <name>` selects. */
 	name: string;
-	/** Paths, globs, or a callback returning the files (helix `TestFiles`). */
+	/** Paths, globs, or a callback returning the files (`TestFiles`). */
 	files: SuiteFiles;
 	/** Per-test timeout for this suite (ms). */
 	timeout?: number;
 	/** Extra attempts on failure for this suite. */
 	retries?: number;
 	/**
-	 * Configure the suite before it runs (helix `TestSuite.configure`). Receives
+	 * Configure the suite before it runs (`TestSuite.configure`). Receives
 	 * the same handle as the bootstrap's `configureSuite`, and runs after it.
 	 *
 	 * Costs an import of this config module in every worker, since a function
@@ -262,7 +262,7 @@ export async function resolveSuiteFiles(
 	root: string,
 	discovery: DiscoveryOptions | undefined,
 ): Promise<string[]> {
-	// A callback picks the files itself (helix `TestFiles`); there is no pattern
+	// A callback picks the files itself (`TestFiles`); there is no pattern
 	// to compile and nothing to exclude, so it short-circuits the whole loop.
 	if (typeof suite.files === "function") {
 		return [...new Set((await suite.files()).map((url) => fileURLToPath(url)))];

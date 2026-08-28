@@ -140,7 +140,7 @@ export async function runTestFile(
 	);
 	return withViContext(async () => {
 		const root = await withCollection(async () => {
-			// `configure({ importer })` (helix parity) replaces the plain dynamic
+			// `configure({ importer })` replaces the plain dynamic
 			// import — the seam a consumer needs to compile or instrument a file
 			// on the way in.
 			const importer = getConfiguredDefaults().importer;
@@ -176,7 +176,7 @@ export async function runTestFile(
 			const defaults = getConfiguredDefaults();
 			const filters = defaults.filters;
 			// Read through the shared `cliArgs` object rather than the env: a
-			// plugin may have edited it (helix parity), and an edit that the
+			// plugin may have edited it, and an edit that the
 			// runtime ignored would be worse than not offering it at all.
 			const flags = cliArgs();
 			const raw = await executeRoot(root, absolutePath, {

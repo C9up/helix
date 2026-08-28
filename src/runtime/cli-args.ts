@@ -5,7 +5,7 @@
  * worker through the environment (`HELIX_TAGS`, `HELIX_TESTS`, …), because a
  * worker is spawned by either orchestrator (Node pool or the Rust engine) with
  * a fixed instruction shape. Reading them back here is what lets both the
- * runtime and a plugin (`api.cliArgs`, helix parity) see the same filters.
+ * runtime and a plugin (`api.cliArgs`) see the same filters.
  *
  * One named deviation from helix's `CLIArgs`: values are parsed (`string[]`,
  * `number`, `boolean`) rather than kept as raw CLI strings. They have been
@@ -36,7 +36,7 @@ export interface CLIArgs {
 	grep?: string;
 	/** `--suite` — the suite name these files belong to. */
 	suite?: string;
-	/** `--files` — substrings matched against the test file path (helix `--files`). */
+	/** `--files` — substrings matched against the test file path (`--files`). */
 	files?: string[];
 	/** `--reporters` — the reporters activated for this run. */
 	reporters?: string[];

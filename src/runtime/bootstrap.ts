@@ -22,7 +22,7 @@
  * that inherit the CLI's env).
  *
  * `runnerHooks` run ONCE for the whole run, in the process that spawns the
- * workers — helix's semantics. See `global-hooks.ts`. Everything else here is
+ * workers. See `global-hooks.ts`. Everything else here is
  * per worker because it has to be: a context macro, a filter, an importer only
  * mean anything in the process that loads the test file.
  */
