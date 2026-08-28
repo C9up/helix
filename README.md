@@ -43,12 +43,12 @@ export default {
 ```
 
 A suite's name reaches the tests as `ctx.test.options.meta.suite.name`
-and rides on the `suite:*` events — `meta.suite` is the suite object, as
-in Japa, not the bare string. Without a config file — or when a
+and rides on the `suite:*` events — `meta.suite` is the suite object,
+not the bare string. Without a config file — or when a
 positional is not a suite name — positionals stay paths, exactly as
 before.
 
-A suite may carry `configure(suite)` — Japa's `TestSuite.configure` — which
+A suite may carry `configure(suite)`, which
 gets the same handle as the bootstrap's `configureSuite` and runs after it.
 It costs an import of the config module in EVERY worker, because a function
 cannot cross the process boundary: `configureSuite` in `tests/bootstrap.ts`
@@ -60,7 +60,7 @@ flags act on: `--watch` re-runs every selected suite on each change (one
 watcher for the whole sequence), `--bail` stops at the suite that failed,
 and the `--failed` cache holds every suite's failures.
 
-`files` takes Japa's three forms — one pattern, an array of them, or a
+`files` takes three forms — one pattern, an array of them, or a
 callback returning the URLs (`files: () => [pathToFileURL(…)]`), which
 runs in the CLI process and can therefore reach files no suffix-based
 discovery would find.
@@ -77,33 +77,33 @@ One form is refused rather than approximated: the negated extglob GROUP
 near-miss would silently select the wrong files — the one thing a file
 selector must not do. Write a `!pattern` entry instead.
 
-Filters follow Japa: `--tests` and `--groups` take exact titles,
+Filters: `--tests` and `--groups` take exact titles,
 `--files` matches path segments (`--files=user`, `--files=unit/*`),
 `--tags` matches ANY of the given tags (`--match-all`, spelled
 `--matchAll` too, requires every one), and a `~@tag` / `!@tag` entry
 excludes. `--suite=<name>` names the suite the files belong to
-(`"default"` otherwise, like Japa's implicit suite). `--grep` is a helix
+(`"default"` otherwise — the implicit suite). `--grep` is a helix
 extra: a regex or substring over the full test name.
 
 `--bail` stops at the first failure; `--bail-layer=group|suite|runner`
 says how far that reaches. Within a file the remaining tests are
-reported as SKIPPED, like Japa. Files not yet started are dropped
+reported as SKIPPED. Files not yet started are dropped
 rather than skipped — a named deviation that follows from per-file
 process isolation: reporting them as skipped would mean spawning every
 remaining file just to collect names.
 
 `--list-pinned` collects the files, prints the tests marked `.pin()` and
-runs nothing — the global `setup` hooks are skipped too, as in Japa,
+runs nothing — the global `setup` hooks are skipped too,
 since nothing they would open gets used. It stays on the TypeScript
 pool: it prints a list rather than executing, so the native engine's
 fast path buys nothing.
 
 `--failed` re-runs only what failed last time, from the cache each run
-writes to `node_modules/.cache/helix/summary.json` (same `{ tests }`
-shape as Japa). `--reporters=spec,json` activates several reporters at
+writes to `node_modules/.cache/helix/summary.json` (a `{ tests }`
+shape). `--reporters=spec,json` activates several reporters at
 once. `--force-exit` (or `forceExit` in the config) calls
 `process.exit()` as soon as the run ends; without it the process exits
-on its own once the event loop drains, as in Japa — so a resource a test
+on its own once the event loop drains — so a resource a test
 left open surfaces as a diagnosable hang instead of being swallowed.
 
 All of these work on BOTH orchestrators: the native (Rust) engine
@@ -139,77 +139,32 @@ the AdonisJS idiom (`setup: [() => testUtils.db().migrate()]`, where
 `migrate()` resolves to the rollback). Returned undos unwind first, then
 the declared teardowns, both in reverse order.
 
-`configureSuite` receives Japa's `Suite` surface: `name`, `setup`,
+`configureSuite` receives the `Suite` surface: `name`, `setup`,
 `teardown`, `bail`, and the `onTest` / `onGroup` taps — each mapped onto
 the node the runtime actually reads, so `suite.onTest(t => t.timeout(30_000))`
 really does change the timeout. What a callback cannot get is what only
 the owner of execution has (`add`, `stack`, `exec`, `failed`): helix
 builds the tree from the file's own `describe`/`test` and runs it itself.
 
-Two more Japa `Config` fields live here too, since helix has no
+Two more `Config` fields live here too, since helix has no
 `bin/test.ts` to put them in: `filters` (`{ tests, groups, tags, matchAll }`
 — the CLI flags still win over them) and `importer`, the hook that replaces
-the plain dynamic import of a test file. Japa's `filters.files` /
+the plain dynamic import of a test file. `filters.files` /
 `filters.suites` stay CLI-side (`--files`, a suite positional): helix
 settles the file list before any worker — and so any bootstrap — exists,
 and filtering there still avoids the spawn.
 
 `runnerHooks` run ONCE for the whole run, in the process that spawns the
-workers — Japa's semantics. A migration in `setup` migrates once, not once
+workers. A migration in `setup` migrates once, not once
 per test file. Everything else in the bootstrap is per worker because it has
 to be: a context macro, a filter, an importer only mean anything in the
 process that loads the test file, which is why `plugins` are where an
 in-memory resource belongs.
 
-## Official Japa plugins
-
-`japaPlugins: true` in `helix.config` points `@japa/runner/core` at a helix
-shim in every worker, so a plugin written for Japa instruments helix:
-
-```ts
-// helix.config.ts
-export default { japaPlugins: true }
-
-// tests/bootstrap.ts
-import { assert } from "@japa/assert"
-export const plugins = [assert()]
-```
-
-This is what "not drop-in" meant for the whole of this package's life, and
-it was never an API-shape problem: a plugin does not talk to the runner
-through an interface, it imports `Test` / `TestContext` and mutates them.
-Nothing helix does at runtime can change what that import already resolved
-to — module resolution can.
-
-Off by default: redirecting a package specifier is not something to do
-behind a user's back, and a project with no Japa plugin gains nothing. The
-shim exports every name the real module does — a missing one is an
-ImportError before any test runs, not a degraded experience. `Emitter` is
-helix's own and `Refiner` collects for real; `BaseReporter`, `Group`,
-`Suite` and `Runner` exist so imports resolve and `instanceof` answers
-`false` (a helix group is not a Japa `Group`), and throw on construction
-with the reason. `Test.isHelixShim` answers "which module did this import
-resolve to?", a question that otherwise costs an afternoon.
-
-The alias goes into the PARENT too, not just the workers: the parent
-imports the bootstrap for `runnerHooks`, and two processes resolving that
-specifier differently is how a top-level registration lands on a class
-nothing reads. It is switched off again when the run ends —
-`node:module.register()` has no counterpart, so a host running twice in one
-process would otherwise keep resolving to the shim after asking for the
-real module. ESM only — under a CJS build the import is a `require`, which an ESM
-resolve hook never sees.
-
-A `Test.executed` hook is a VERDICT: what it throws fails the test, which is
-how `@japa/assert` enforces `assert.plan(n)`. And a plugin may replace
-`assert` — helix ships one, but a project installing `@japa/assert` is
-asking for that one. `cleanup` and `test` stay helix's: the runtime hands
-them to the body, and a test with someone else's `cleanup` is not a test.
-
 ## Plugins
 
-A plugin is a function run once at `configure()` time, handed the same
-object Japa hands its plugins — plus two helix extras:
+A plugin is a function run once at `configure()` time, handed the
+run's configuration object — plus two helix extras:
 
 ```ts
 await configure({
@@ -223,17 +178,17 @@ await configure({
 })
 ```
 
-- `config` — Japa's `BaseConfig`, filled in with what this run actually is:
+- `config` — the run's `BaseConfig`, filled in with what this run actually is:
   `cwd`, `timeout`, `retries`, `filters`, `configureSuite`, `reporters`,
   `plugins`, `importer`, `refiner`, `forceExit`, `setup`, `teardown`. What a
   plugin can STEER is marked as such below; `filters.files` / `filters.suites`
   and `reporters.activated` report what the CLI decided, because the file list
   and the reporter chain are settled before a worker exists
-- `cliArgs` — every flag the CLI forwarded to this worker (Japa's set:
+- `cliArgs` — every flag the CLI forwarded to this worker (the set:
   `tags`, `tests`, `groups`, `files`, `matchAll`, `timeout`, `retries`,
   `reporters`, `bail`, `bailLayer`, `failed`, `forceExit`, `suite`)
 - `runner` — `getSummary()`, `failed`, `bail()`, `onSuite()`, `suites`,
-  and `registerReporter()`, which hands a Japa reporter this worker's
+  and `registerReporter()`, which hands a reporter this worker's
   runner and emitter. It observes THIS FILE; run-wide output is the CLI's
   (`--reporters`, `run({ reporterInstance })`). `add` / `start` / `exec` /
   `end` throw a `RunnerNotDrivableError` explaining that the CLI owns
@@ -241,16 +196,15 @@ await configure({
   crash they would otherwise be
 - `emitter` — `runner:start` / `suite:*` / `group:*` / `test:*`, with
   `errors[].error` the thrown `Error` itself
-- `context` — `macro` / `getter` (also on the `TestContext` class, as
-  in Japa)
+- `context` — `macro` / `getter` (also on the `TestContext` class)
 - `cleanup` — a teardown run once the file's tests finish
 
 `config` and `cliArgs` are handed over MUTABLE and read back once every
 plugin has run, so a plugin can raise `config.timeout`, push a `setup`
 hook, narrow `cliArgs.tags`, call `config.refiner.add("tags", […])` or
-replace `config.configureSuite` and have the run follow — Japa's contract.
+replace `config.configureSuite` and have the run follow.
 Plugins therefore run BEFORE both the run's `setup` hooks and
-`configureSuite`, as in Japa.
+`configureSuite`.
 
 In `package.json`, call the `helix` bin directly — in npm scripts it resolves to
 `node_modules/.bin/helix` and bootstraps the TS loader itself, so the verbose
@@ -280,46 +234,6 @@ Both commands run independently in CI. Stage 2b will retire vitest
 once the helix self-test corpus reaches parity coverage with the
 vitest suite.
 
-### Japa parity proofs (golden tests)
-
-`tests/golden/` runs helix against the **real `@japa/runner`**. Every
-spec under `specs/helix/` has a byte-identical twin under
-`specs/japa/` — only the runner import differs. Each pair is executed
-by its own runner; both harnesses write the same event
-journal (`runner:start`, `group:start`, `test:start`, `test:end`, …)
-and the journals must match event for event:
-
-| Spec | What it pins down |
-| --- | --- |
-| `lifecycle` | group `setup`/`teardown`/`each.*` order |
-| `outcomes` | pass / fail / `.skip()` / todo / tags, as reported |
-| `dataset` | `.with()` expansion and `{prop}` / `{$i}` titles |
-| `retries` | one start/end pair per test, 1-based `retryAttempt` |
-| `macros` | `test.macro(callback)` + `t.cleanup` |
-| `group_identity` | `test.group()` returns the instance its hooks get |
-| `filters` | `--tags` (OR), `--match-all`, `~@tag`, `--tests`, `--groups` |
-
-Each journal entry also carries the payload's RAW key set, so the
-comparison is not "the two runners agree on the fields we chose to look
-at" but "they hand a reporter the same object". That is what pinned
-`isTodo`/`retries` to always-present, `isSkipped`/`isFailing`/
-`skipReason` to only-when-set, and the bail skip reason to Japa's own
-wording.
-
-The filter matrix runs the same flags through both runners, including
-the rules that a group — or a whole suite — with no runnable test
-announces nothing.
-
-`tests/golden/assert-surface.test.ts` does the same for assertions: it
-asserts helix exposes every public assertion of the installed
-`@japa/assert`, then runs a battery of inputs through BOTH
-implementations and requires the same verdict (this is what pinned
-`sameMembers` to strict equality and `sameDeepMembers` to structural).
-
-Since helix runs one process per FILE, `suite:*` fires once per file
-rather than once for a multi-file suite. That is the only deviation the
-golden journals still carry.
-
 ### Vitest parity proofs
 
 A handful of identical test bodies live in BOTH directories
@@ -334,8 +248,8 @@ currently cover:
 - assertion failure shapes (`AssertionError` thrown, message contains
   both received and expected values)
 
-What the VITEST parity proofs do **NOT** cover today (the Japa golden
-tests above cover the runner semantics):
+What the VITEST parity proofs do **NOT** cover today (the runner semantics are covered by the
+self-test suite):
 
 - Spy / fake-timer parity (`vi.fn`, `vi.spyOn`, `vi.useFakeTimers`).
 - Failure-pipeline parity (i.e. that both runners REPORT a failed
