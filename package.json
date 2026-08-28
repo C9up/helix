@@ -39,7 +39,8 @@
   "scripts": {
     "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc -p tsconfig.build.json",
-    "build:napi": "cargo build --release -p ream-test-napi && node scripts/copy-napi.mjs",
+    "build:napi": "cargo build --release -p ream-test-napi && pnpm build:napi-types && node scripts/copy-napi.mjs",
+    "build:napi-types": "node scripts/build-napi-types.mjs",
     "test": "vitest run",
     "test:self": "node bin/helix.js test tests/selftest --timeout=30000",
     "lint": "biome check src/",

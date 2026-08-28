@@ -35,39 +35,22 @@ function platformSuffix(): string {
 	return suffix;
 }
 
-/** Mirror of the Rust `RunConfig` (camelCase). */
-export interface NativeRunConfig {
-	readonly root: string;
-	readonly files?: readonly string[];
-	readonly threads?: number;
-	readonly timeoutMs?: number;
-	readonly reporter?: string;
-	readonly workerEntry: string;
-	readonly nodeBin?: string;
-	readonly nodeArgs?: readonly string[];
-	readonly useColors?: boolean;
-	/** Activate several reporters at once (Japa `--reporters`). */
-	readonly reporters?: readonly string[];
-	/** Stop the run at the first failing file (Japa `--bail`). */
-	readonly bail?: boolean;
-}
+/**
+ * The Rust `RunConfig` and `SummaryPayload`, and the surface that carries
+ * them.
+ *
+ * Derived from `../native/generated.js` — written by `pnpm build:napi-types`
+ * from napi-derive's own `type-def` output — rather than mirrored here by
+ * hand, where nothing would notice the Rust struct gaining, losing or
+ * renaming a field. The runtime guard below still checks `run` is actually
+ * there: a declaration says what the Rust promises, not what a stale binary
+ * shipped.
+ */
+export type NativeRunConfig = import("../native/generated.js").RunConfig;
+export type NativeSummaryPayload =
+	import("../native/generated.js").SummaryPayload;
 
-/** Mirror of the Rust `SummaryPayload` (camelCase). */
-export interface NativeSummaryPayload {
-	readonly pass: number;
-	readonly fail: number;
-	readonly skip: number;
-	readonly todo: number;
-	readonly fileErrors: number;
-	readonly durationMs: number;
-	readonly exitCode: number;
-	/** Full `Summary` serialized as JSON (same shape as TS `Summary`). */
-	readonly json: string;
-}
-
-interface NativeExports {
-	readonly run: (config: NativeRunConfig) => Promise<NativeSummaryPayload>;
-}
+type NativeExports = typeof import("../native/generated.js");
 
 function isNativeExports(value: unknown): value is NativeExports {
 	if (value === null || typeof value !== "object") return false;
