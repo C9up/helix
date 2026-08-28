@@ -1,4 +1,5 @@
 import { equals, partialEquals } from "./equals.js";
+import { hasLength, isThenable } from "./thenable.js";
 
 /**
  * Matcher signature. Returns `{ pass, message }`:
@@ -143,10 +144,7 @@ export const matchers = {
 	},
 
 	toHaveLength(received: unknown, length: number): MatcherResult {
-		const actual =
-			received && typeof (received as { length?: unknown }).length === "number"
-				? (received as { length: number }).length
-				: undefined;
+		const actual = hasLength(received) ? received.length : undefined;
 		return {
 			pass: actual === length,
 			message: () =>
@@ -358,11 +356,7 @@ export const matchers = {
 		} catch (err) {
 			error = err;
 		}
-		if (
-			error === undefined &&
-			returned &&
-			typeof (returned as { then?: unknown }).then === "function"
-		) {
+		if (error === undefined && returned && isThenable(returned)) {
 			// Swallow the rejection so it doesn't become an unhandledRejection.
 			(returned as Promise<unknown>).catch(() => {});
 			return {

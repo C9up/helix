@@ -10,6 +10,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { TestContext } from "./context.js";
 import { getFrameTest, type TestCleanup } from "./test-context.js";
+import { isThenable } from "./thenable.js";
 
 /**
  * Signals completion of a `waitForDone()` test. Call `done()` to pass, or
@@ -563,7 +564,7 @@ function registerSuite(name: string, mode: RunMode, body: SuiteFn): void {
 	// Async describe bodies would register nested describe/test against the
 	// wrong parent after the first `await` (because we've already popped).
 	// Fail loudly rather than silently mis-collect.
-	if (result && typeof (result as { then?: unknown }).then === "function") {
+	if (isThenable(result)) {
 		throw new Error(
 			`describe(${JSON.stringify(name)}): body returned a Promise. Async describe is not supported — await the setup in a \`beforeAll\` hook instead.`,
 		);

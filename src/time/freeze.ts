@@ -159,7 +159,8 @@ function inputToMs(input: TimeInput): number {
 	} else if (
 		typeof input === "object" &&
 		input !== null &&
-		typeof (input as MillisLike).toMillis === "function"
+		"toMillis" in input &&
+		typeof input.toMillis === "function"
 	) {
 		const result = (input as MillisLike).toMillis();
 		if (typeof result !== "number") {

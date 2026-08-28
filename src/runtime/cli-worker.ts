@@ -75,9 +75,12 @@ async function readInstruction(): Promise<RunMessage> {
 		if (
 			parsed &&
 			typeof parsed === "object" &&
-			(parsed as { type?: unknown }).type === "run" &&
-			typeof (parsed as { file?: unknown }).file === "string" &&
-			typeof (parsed as { nonce?: unknown }).nonce === "string"
+			"type" in parsed &&
+			parsed.type === "run" &&
+			"file" in parsed &&
+			typeof parsed.file === "string" &&
+			"nonce" in parsed &&
+			typeof parsed.nonce === "string"
 		) {
 			return parsed as RunMessage;
 		}

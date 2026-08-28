@@ -25,6 +25,7 @@ import {
 	setExpectedAssertions,
 	setHasAssertions,
 } from "./test-context.js";
+import { isThenable } from "./thenable.js";
 
 type MatcherArgs<Name extends MatcherName> = (typeof matchers)[Name] extends (
 	received: unknown,
@@ -115,10 +116,7 @@ function buildAsync(
 	const api = {} as AsyncChain;
 	for (const name of matcherNames) {
 		const fn = async (...args: unknown[]) => {
-			if (
-				!received ||
-				typeof (received as { then?: unknown }).then !== "function"
-			) {
+			if (!isThenable(received)) {
 				throw new AssertionError({
 					message: `expected a Promise (for .${mode}), got ${typeof received}`,
 					operator: `${mode}.${name}`,
