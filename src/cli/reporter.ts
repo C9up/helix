@@ -42,7 +42,12 @@ const ANSI = {
 };
 
 export class DotReporter implements Reporter {
-	constructor(private readonly sink: Sink = stdoutSink()) {}
+	readonly #sink: Sink;
+
+	constructor(sink: Sink = stdoutSink()) {
+		this.#sink = sink;
+	}
+
 	onFileStart(_file: string): void {}
 	onFileResult(result: FileResult): void {
 		for (const t of result.tests) {
@@ -54,49 +59,53 @@ export class DotReporter implements Reporter {
 						: t.status === "skip"
 							? "-"
 							: "*";
-			this.sink.write(c);
+			this.#sink.write(c);
 		}
 	}
 	onFileError(_error: WorkerErrorMessage): void {
-		this.sink.write("E");
+		this.#sink.write("E");
 	}
 	onSummary(summary: Summary): void {
-		this.sink.writeLine("");
-		printSummary(this.sink, summary);
+		this.#sink.writeLine("");
+		printSummary(this.#sink, summary);
 	}
 }
 
 export class SpecReporter implements Reporter {
-	constructor(
-		private readonly sink: Sink = stdoutSink(),
-		private readonly useColors = true,
-	) {}
+	readonly #sink: Sink;
+	readonly #useColors: boolean;
+
+	constructor(sink: Sink = stdoutSink(), useColors = true) {
+		this.#sink = sink;
+		this.#useColors = useColors;
+	}
+
 	onFileStart(file: string): void {
-		this.sink.writeLine(
-			`${ANSI.dim("▶", this.useColors)} ${ANSI.dim(file, this.useColors)}`,
+		this.#sink.writeLine(
+			`${ANSI.dim("▶", this.#useColors)} ${ANSI.dim(file, this.#useColors)}`,
 		);
 	}
 	onFileResult(result: FileResult): void {
 		for (const t of result.tests) {
 			const marker =
 				t.status === "pass"
-					? ANSI.green("✔", this.useColors)
+					? ANSI.green("✔", this.#useColors)
 					: t.status === "fail"
-						? ANSI.red("✘", this.useColors)
+						? ANSI.red("✘", this.#useColors)
 						: t.status === "skip"
-							? ANSI.yellow("○", this.useColors)
-							: ANSI.dim("☐", this.useColors);
-			this.sink.writeLine(`  ${marker} ${t.fullName}`);
+							? ANSI.yellow("○", this.#useColors)
+							: ANSI.dim("☐", this.#useColors);
+			this.#sink.writeLine(`  ${marker} ${t.fullName}`);
 			if (t.error) {
-				this.sink.writeLine(
-					`      ${ANSI.red(t.error.message, this.useColors)}`,
+				this.#sink.writeLine(
+					`      ${ANSI.red(t.error.message, this.#useColors)}`,
 				);
 				if (t.error.actual !== undefined && t.error.expected !== undefined) {
-					this.sink.writeLine(
-						`      ${ANSI.dim("actual:  ", this.useColors)} ${JSON.stringify(t.error.actual)}`,
+					this.#sink.writeLine(
+						`      ${ANSI.dim("actual:  ", this.#useColors)} ${JSON.stringify(t.error.actual)}`,
 					);
-					this.sink.writeLine(
-						`      ${ANSI.dim("expected:", this.useColors)} ${JSON.stringify(t.error.expected)}`,
+					this.#sink.writeLine(
+						`      ${ANSI.dim("expected:", this.#useColors)} ${JSON.stringify(t.error.expected)}`,
 					);
 				}
 			}
@@ -104,29 +113,34 @@ export class SpecReporter implements Reporter {
 	}
 	onFileError(error: WorkerErrorMessage): void {
 		const file = error.file ?? "<unknown>";
-		this.sink.writeLine(
-			`${ANSI.red("✘", this.useColors)} ${file}: ${error.message}`,
+		this.#sink.writeLine(
+			`${ANSI.red("✘", this.#useColors)} ${file}: ${error.message}`,
 		);
 	}
 	onSummary(summary: Summary): void {
-		this.sink.writeLine("");
-		printSummary(this.sink, summary);
+		this.#sink.writeLine("");
+		printSummary(this.#sink, summary);
 	}
 }
 
 export class JsonReporter implements Reporter {
-	constructor(private readonly sink: Sink = stdoutSink()) {}
+	readonly #sink: Sink;
+
+	constructor(sink: Sink = stdoutSink()) {
+		this.#sink = sink;
+	}
+
 	onFileStart(file: string): void {
-		this.sink.writeLine(JSON.stringify({ event: "file:start", file }));
+		this.#sink.writeLine(JSON.stringify({ event: "file:start", file }));
 	}
 	onFileResult(result: FileResult): void {
-		this.sink.writeLine(JSON.stringify({ event: "file:end", result }));
+		this.#sink.writeLine(JSON.stringify({ event: "file:end", result }));
 	}
 	onFileError(error: WorkerErrorMessage): void {
-		this.sink.writeLine(JSON.stringify({ event: "file:error", error }));
+		this.#sink.writeLine(JSON.stringify({ event: "file:error", error }));
 	}
 	onSummary(summary: Summary): void {
-		this.sink.writeLine(JSON.stringify({ event: "summary", summary }));
+		this.#sink.writeLine(JSON.stringify({ event: "summary", summary }));
 	}
 }
 
