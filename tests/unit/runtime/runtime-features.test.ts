@@ -1,9 +1,8 @@
 /**
- * Parity coverage for the `helix` + Vitest features added to the
- * runtime: retries, per-test timeout, `--grep`/`--tags` filtering,
- * `test.fails`, `onTestFinished`/`onTestFailed`, hook cleanup returns,
- * `test.each(fn)`, assertion counting, and the new matchers / asymmetric
- * matchers.
+ * The runtime features helix carries beyond the basics: retries, per-test
+ * timeout, `--grep`/`--tags` filtering, `test.fails`, `onTestFinished` /
+ * `onTestFailed`, hook cleanup returns, `test.each(fn)`, assertion counting,
+ * and the matchers, asymmetric ones included.
  */
 
 import { describe, expect as vExpect, it as vIt } from "vitest";
