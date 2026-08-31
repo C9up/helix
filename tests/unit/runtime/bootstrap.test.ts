@@ -218,7 +218,11 @@ describe("helix > a conventional bootstrap says so", () => {
 		// The trap this exists for: run through the framework's command the
 		// declared bootstrap wins, run helix directly this one does, and the
 		// two disagreed without a word.
+		// Forward slashes on every platform — the path is shown to a human, not
+		// handed to the filesystem. Asserting the native separator here is how
+		// the same mistake reached CI on Windows once already.
 		expect(stderr).toContain("tests/bootstrap.ts");
+		expect(stderr).not.toContain("\\");
 		expect(stderr).toContain("reamrc.ts");
 	});
 

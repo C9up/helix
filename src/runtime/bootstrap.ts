@@ -169,8 +169,12 @@ function announceConventionalBootstrap(root: string, picked: string): void {
 
 	if (rc === undefined) return;
 	announcedRoots.add(root);
+	// Forward slashes whatever the platform: this line is read by a person and
+	// pasted into a command, and `tests\\bootstrap.ts` is neither what they
+	// wrote nor what they would type back.
+	const shown = path.relative(root, picked).split(path.sep).join("/");
 	process.stderr.write(
-		`helix: using ${path.relative(root, picked)} (found by convention — no helix.config.* here).\n` +
+		`helix: using ${shown} (found by convention — no helix.config.* here).\n` +
 			`  ${rc} may declare its own test bootstrap; helix does not read it. If the two differ, run the tests through your framework's own command so its answer wins.\n`,
 	);
 }
