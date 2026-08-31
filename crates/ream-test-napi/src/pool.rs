@@ -98,8 +98,8 @@ pub async fn run_pool(
     let mut results = Vec::new();
     let mut errors = Vec::new();
     while let Some(join) = tasks.next().await {
-        let outcome = join
-            .map_err(|e| Error::from_reason(format!("worker task join failed: {}", e)))?;
+        let outcome =
+            join.map_err(|e| Error::from_reason(format!("worker task join failed: {}", e)))?;
         match outcome {
             // `None` = the file was never started because the bail gate closed.
             Ok(Some(fr)) => results.push(fr),
@@ -248,9 +248,7 @@ async fn read_frame<R: tokio::io::AsyncRead + Unpin>(
         // (fixtures still can't claim a fake success).
         let nonce_ok = match msg.get("nonce").and_then(|v| v.as_str()) {
             Some(n) if n == expected_nonce => true,
-            Some(PRE_HANDSHAKE_NONCE) => {
-                msg.get("type").and_then(|v| v.as_str()) == Some("error")
-            }
+            Some(PRE_HANDSHAKE_NONCE) => msg.get("type").and_then(|v| v.as_str()) == Some("error"),
             _ => false,
         };
         if !nonce_ok {
@@ -385,9 +383,10 @@ process.stdin.on("end", () => {
         Arc<std::sync::Mutex<Vec<String>>>,
     ) {
         let log = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let reporter: Arc<Mutex<Box<dyn Reporter + Send>>> = Arc::new(Mutex::new(Box::new(
-            RecordingReporter { started: log.clone() },
-        )));
+        let reporter: Arc<Mutex<Box<dyn Reporter + Send>>> =
+            Arc::new(Mutex::new(Box::new(RecordingReporter {
+                started: log.clone(),
+            })));
         (reporter, log)
     }
 
@@ -399,10 +398,15 @@ process.stdin.on("end", () => {
 
     /// `green`, then `red`, then two more — the last two are what bail must drop.
     fn files(dir: &std::path::Path) -> Vec<PathBuf> {
-        ["a-green.test.ts", "b-red.test.ts", "c-green.test.ts", "d-green.test.ts"]
-            .iter()
-            .map(|name| dir.join(name))
-            .collect()
+        [
+            "a-green.test.ts",
+            "b-red.test.ts",
+            "c-green.test.ts",
+            "d-green.test.ts",
+        ]
+        .iter()
+        .map(|name| dir.join(name))
+        .collect()
     }
 
     #[tokio::test]
@@ -411,8 +415,9 @@ process.stdin.on("end", () => {
         let entry = fake_worker(&dir);
         let (reporter, _log) = recorder();
 
-        let (results, errors) =
-            run_pool(files(&dir), config(entry, false), reporter).await.unwrap();
+        let (results, errors) = run_pool(files(&dir), config(entry, false), reporter)
+            .await
+            .unwrap();
 
         assert_eq!(errors.len(), 0);
         assert_eq!(results.len(), 4);
@@ -425,8 +430,9 @@ process.stdin.on("end", () => {
         let entry = fake_worker(&dir);
         let (reporter, _log) = recorder();
 
-        let (results, errors) =
-            run_pool(files(&dir), config(entry, true), reporter).await.unwrap();
+        let (results, errors) = run_pool(files(&dir), config(entry, true), reporter)
+            .await
+            .unwrap();
 
         assert_eq!(errors.len(), 0);
         // The green file, then the red one that closed the gate. The two behind
@@ -442,7 +448,9 @@ process.stdin.on("end", () => {
         let entry = fake_worker(&dir);
         let (reporter, log) = recorder();
 
-        run_pool(files(&dir), config(entry, true), reporter).await.unwrap();
+        run_pool(files(&dir), config(entry, true), reporter)
+            .await
+            .unwrap();
 
         // `on_file_start` for a file the gate dropped would print a banner for
         // a test that never ran — the reporter must not see it at all.

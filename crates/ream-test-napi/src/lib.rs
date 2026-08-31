@@ -208,7 +208,10 @@ mod tests {
 
     impl Reporter for Spy {
         fn on_file_start(&mut self, file: &str) {
-            self.log.lock().unwrap().push(format!("{}:start:{}", self.tag, file));
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("{}:start:{}", self.tag, file));
         }
         fn on_file_result(&mut self, result: &FileResult) {
             self.log
@@ -223,7 +226,10 @@ mod tests {
                 .push(format!("{}:error:{}", self.tag, error.message));
         }
         fn on_summary(&mut self, _summary: &Summary) {
-            self.log.lock().unwrap().push(format!("{}:summary", self.tag));
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("{}:summary", self.tag));
         }
     }
 
@@ -232,7 +238,12 @@ mod tests {
             file: "a.test.ts".into(),
             suites: vec![],
             tests: vec![],
-            totals: FileTotals { pass: 1, fail: 0, skip: 0, todo: 0 },
+            totals: FileTotals {
+                pass: 1,
+                fail: 0,
+                skip: 0,
+                todo: 0,
+            },
             duration_ms: 1,
         }
     }
@@ -243,8 +254,14 @@ mod tests {
         // first would silently drop the machine-readable half of the output.
         let log = Arc::new(Mutex::new(Vec::new()));
         let mut multi = MultiReporter::new(vec![
-            Box::new(Spy { tag: "a", log: log.clone() }),
-            Box::new(Spy { tag: "b", log: log.clone() }),
+            Box::new(Spy {
+                tag: "a",
+                log: log.clone(),
+            }),
+            Box::new(Spy {
+                tag: "b",
+                log: log.clone(),
+            }),
         ]);
 
         multi.on_file_start("a.test.ts");
@@ -274,12 +291,17 @@ mod tests {
     #[test]
     fn a_single_reporter_still_receives_everything() {
         let log = Arc::new(Mutex::new(Vec::new()));
-        let mut multi = MultiReporter::new(vec![Box::new(Spy { tag: "only", log: log.clone() })]);
+        let mut multi = MultiReporter::new(vec![Box::new(Spy {
+            tag: "only",
+            log: log.clone(),
+        })]);
 
         multi.on_file_start("a.test.ts");
         multi.on_summary(&Summary::default());
 
-        assert_eq!(log.lock().unwrap().as_slice(), ["only:start:a.test.ts", "only:summary"]);
+        assert_eq!(
+            log.lock().unwrap().as_slice(),
+            ["only:start:a.test.ts", "only:summary"]
+        );
     }
-
 }
