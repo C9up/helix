@@ -134,10 +134,52 @@ export function resolveBootstrap(
 	}
 	for (const name of BOOTSTRAP_FILENAMES) {
 		const candidate = path.resolve(root, name);
-		if (existsSync(candidate)) return candidate;
+		if (existsSync(candidate)) {
+			announceConventionalBootstrap(root, candidate);
+			return candidate;
+		}
 	}
 	return undefined;
 }
+
+/**
+ * Say out loud that a bootstrap was picked up by convention.
+ *
+ * Nothing here is wrong — a project with no config gets the conventional file,
+ * which is the point. What was wrong is that it happened without a word, and
+ * helix is not always the only thing that decides: a framework may keep its own
+ * answer in its own rc file, which helix neither reads nor should. Run through
+ * that framework's command, the declared bootstrap wins; run `helix` directly
+ * in the same project, this one does — and the two disagree silently.
+ *
+ * The reported shape: a `tests/bootstrap.ts` that starts the application, so a
+ * unit suite that needed no server opened one, with a connection pool behind
+ * it, and nothing said why.
+ *
+ * Once per project, and only when there is a framework rc file to disagree
+ * with — otherwise this is noise on every run of every project. Keyed by root
+ * rather than a single process-wide flag, so a run covering two projects warns
+ * about both instead of only the first.
+ */
+const announcedRoots = new Set<string>();
+
+function announceConventionalBootstrap(root: string, picked: string): void {
+	if (announcedRoots.has(root)) return;
+	const rc = RC_FILENAMES.find((name) => existsSync(path.resolve(root, name)));
+
+	if (rc === undefined) return;
+	announcedRoots.add(root);
+	process.stderr.write(
+		`helix: using ${path.relative(root, picked)} (found by convention — no helix.config.* here).\n` +
+			`  ${rc} may declare its own test bootstrap; helix does not read it. If the two differ, run the tests through your framework's own command so its answer wins.\n`,
+	);
+}
+
+/**
+ * Framework rc files that can carry a competing bootstrap. Named, not guessed:
+ * helix stays agnostic and only checks whether one exists, never reads it.
+ */
+const RC_FILENAMES = ["reamrc.ts", "reamrc.js", "adonisrc.ts", "adonisrc.js"];
 
 /** Memoised so a worker that runs several files bootstraps exactly once. */
 let loaded: Promise<void> | undefined;
