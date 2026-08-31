@@ -1,6 +1,6 @@
 {
   "name": "@c9up/helix",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Helix \u2014 framework-agnostic test runtime for the Ream ecosystem (Vitest-compatible runner, spies, container overrides, time-travel). Per-package fakes live in each package's /testing.",
   "license": "MIT",
   "type": "module",
