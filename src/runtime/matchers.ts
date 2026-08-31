@@ -341,7 +341,14 @@ export const matchers = {
 
 	toThrow(
 		received: unknown,
-		expected?: string | RegExp | Error | (new (...args: unknown[]) => Error),
+		// `never[]`, not `unknown[]`: constructor parameters are contravariant,
+		// so a class declaring `constructor(message: string)` is NOT assignable
+		// to `new (...args: unknown[]) => Error` — `unknown` cannot be passed
+		// where a `string` is expected. A bare `Error` slipped through and every
+		// class that types its arguments was rejected at compile time while the
+		// matcher worked perfectly at runtime. `never[]` accepts any parameter
+		// list, which is what a constructor-shaped parameter means.
+		expected?: string | RegExp | Error | (new (...args: never[]) => Error),
 	): MatcherResult {
 		if (typeof received !== "function") {
 			return {
@@ -566,7 +573,7 @@ function compareLte(a: number | bigint, b: number | bigint): boolean {
 
 function matchThrownError(
 	error: unknown,
-	expected: string | RegExp | Error | (new (...args: unknown[]) => Error),
+	expected: string | RegExp | Error | (new (...args: never[]) => Error),
 ): boolean {
 	const msg = error instanceof Error ? error.message : String(error);
 	if (typeof expected === "string") return msg.includes(expected);
@@ -579,11 +586,11 @@ function matchThrownError(
 		);
 	}
 	// Ctor.
-	return error instanceof (expected as new (...args: unknown[]) => Error);
+	return error instanceof (expected as new (...args: never[]) => Error);
 }
 
 function reprExpected(
-	expected: string | RegExp | Error | (new (...args: unknown[]) => Error),
+	expected: string | RegExp | Error | (new (...args: never[]) => Error),
 ): string {
 	if (typeof expected === "string") return `"${expected}"`;
 	if (expected instanceof RegExp) return String(expected);

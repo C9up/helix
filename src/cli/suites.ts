@@ -80,11 +80,31 @@ export interface HelixConfig {
 	forceExit?: boolean;
 }
 
-/** Config file names probed at the project root, in order. */
+/**
+ * Config file names probed at the project root, in order.
+ *
+ * helix's own file comes first and always wins. After it come the framework rc
+ * files, because a project that keeps its test settings there was getting two
+ * different answers from the same directory: run through the framework's own
+ * command the declared bootstrap was used, run `helix` directly the
+ * conventional `tests/bootstrap.ts` was — and one of the two was always wrong.
+ * The reported cost was a bootstrap that starts the application running inside
+ * a unit suite, opening a server and a connection pool for tests that touch
+ * neither.
+ *
+ * This does not make helix framework-aware: it reads the same `tests` block it
+ * already knows how to unwrap, out of a file it locates by name, and imports
+ * nothing else from it. What it will not do is guess — a name is either on this
+ * list or it is not read.
+ */
 const CONFIG_FILENAMES = [
 	"helix.config.ts",
 	"helix.config.js",
 	"helix.config.mjs",
+	"reamrc.ts",
+	"reamrc.js",
+	"adonisrc.ts",
+	"adonisrc.js",
 ];
 
 /**

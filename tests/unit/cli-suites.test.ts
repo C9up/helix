@@ -225,3 +225,49 @@ describe("resolveSuiteFiles", () => {
 		expect(files).toEqual([file]);
 	});
 });
+
+describe("helix > a framework rc file answers when helix has no config", () => {
+	let root: string;
+
+	beforeEach(async () => {
+		root = await mkdtemp(path.join(tmpdir(), "helix-rc-"));
+		await mkdir(path.join(root, "tests/http"), { recursive: true });
+		await writeFile(path.join(root, "tests/bootstrap.ts"), "export {}\n");
+		await writeFile(path.join(root, "tests/http/bootstrap.ts"), "export {}\n");
+	});
+
+	afterEach(async () => {
+		await rm(root, { recursive: true, force: true });
+	});
+
+	it("reads the bootstrap declared under the rc file's tests block", async () => {
+		await writeFile(
+			path.join(root, "reamrc.ts"),
+			"export default { tests: { bootstrap: 'tests/http/bootstrap.ts' } }\n",
+		);
+
+		// The reported failure: the declared bootstrap was ignored and the
+		// conventional tests/bootstrap.ts ran instead — one that starts the
+		// application, inside a unit suite that touches no database.
+		expect((await loadHelixConfig(root)).bootstrap).toBe(
+			"tests/http/bootstrap.ts",
+		);
+	});
+
+	it("lets helix.config.* win when both are present", async () => {
+		await writeFile(
+			path.join(root, "reamrc.ts"),
+			"export default { tests: { bootstrap: 'tests/http/bootstrap.ts' } }\n",
+		);
+		await writeFile(
+			path.join(root, "helix.config.ts"),
+			"export default { bootstrap: 'tests/bootstrap.ts' }\n",
+		);
+
+		expect((await loadHelixConfig(root)).bootstrap).toBe("tests/bootstrap.ts");
+	});
+
+	it("answers nothing when neither file exists", async () => {
+		expect(await loadHelixConfig(root)).toEqual({});
+	});
+});

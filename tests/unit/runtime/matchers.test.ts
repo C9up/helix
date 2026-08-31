@@ -133,3 +133,51 @@ describe("core matchers — positive and negative", () => {
 		);
 	});
 });
+
+describe("helix > toThrow accepts a constructor that types its arguments", () => {
+	class MoneyError extends Error {
+		constructor(message: string) {
+			super(message);
+			this.name = "MoneyError";
+		}
+	}
+	class TaggedError extends Error {
+		constructor(
+			message: string,
+			readonly tag: number,
+		) {
+			super(message);
+		}
+	}
+
+	it("takes a class whose constructor declares a parameter", () => {
+		// The signature used `new (...args: unknown[]) => Error`, and constructor
+		// parameters are contravariant: `unknown` is not assignable to `string`,
+		// so every class that types its arguments was rejected at compile time
+		// while the matcher worked at runtime. Callers wrote helpers by hand to
+		// get around a type error that was never about their code.
+		expect(() => {
+			throw new MoneyError("nope");
+		}).toThrow(MoneyError);
+	});
+
+	it("takes one with several typed parameters", () => {
+		expect(() => {
+			throw new TaggedError("nope", 42);
+		}).toThrow(TaggedError);
+	});
+
+	it("still takes a bare Error", () => {
+		expect(() => {
+			throw new Error("nope");
+		}).toThrow(Error);
+	});
+
+	it("still refuses an error of another class", () => {
+		expect(() => {
+			expect(() => {
+				throw new Error("nope");
+			}).toThrow(MoneyError);
+		}).toThrow();
+	});
+});
