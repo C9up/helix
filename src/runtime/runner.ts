@@ -157,7 +157,14 @@ export class Runner {
 	registerReporter(reporter: ReporterContract): this {
 		const handler =
 			typeof reporter === "function" ? reporter : reporter.handler;
-		void handler(this, emitter);
+		// Chainable and synchronous, as upstream — so the handler's promise is
+		// nobody's to await. A reporter that fails to attach must say so and
+		// leave the run alone: unhandled, its rejection ended the worker, and
+		// the file it was reporting on showed up as a crash rather than as
+		// results plus a broken reporter.
+		void (async () => handler(this, emitter))().catch((err: unknown) => {
+			console.error("[helix] reporter failed to attach:", err);
+		});
 		return this;
 	}
 
