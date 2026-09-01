@@ -49,9 +49,9 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "tsx": "^4.21.0"
   },
   "devDependencies": {
+		"tsx": "^4.21.0",
     "@biomejs/biome": "^2.4.10",
     "@types/node": "*",
     "typescript": "^6.0.2",
