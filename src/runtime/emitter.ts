@@ -187,16 +187,32 @@ export class Emitter {
 		this.#listeners.clear();
 	}
 
-	/** Broadcast an event. Listener failures are isolated. */
+	/**
+	 * Broadcast an event. Listener failures are isolated — both kinds.
+	 *
+	 * `EventHandler` returns `void`, and TypeScript ACCEPTS an async function
+	 * for a `void` return: a reporter written as `async (payload) => …` type-
+	 * checks here and its rejection walked straight past the try/catch, which
+	 * only ever saw a synchronous throw. In a test runner that means one
+	 * reporter awaiting something that fails takes down the run it is
+	 * reporting on.
+	 *
+	 * The handler is still CALLED synchronously — reporters observe in order,
+	 * and the runtime relies on that — only a returned promise is followed.
+	 */
 	emit<E extends keyof RunnerEvents>(event: E, payload: RunnerEvents[E]): void {
 		const set = this.#listeners.get(event);
 		if (set === undefined) return;
+		const report = (err: unknown): void => {
+			console.error(`[helix] "${event}" listener failed:`, err);
+		};
 		// Snapshot: a `once` listener removes itself while we iterate.
 		for (const entry of [...set]) {
 			try {
-				entry.fn(payload);
+				const returned: unknown = entry.fn(payload);
+				if (returned instanceof Promise) returned.catch(report);
 			} catch (err) {
-				console.error(`[helix] "${event}" listener failed:`, err);
+				report(err);
 			}
 		}
 	}
