@@ -196,7 +196,28 @@ async fn run_one_file(
         stack: None,
     })?;
 
-    let _ = child.wait().await;
+    // Bound that wait. The worker has already reported; we are only giving
+    // `atExit` hooks time to flush. A test that left a server, a timer or a
+    // connection running means the exit never comes, and the run then hangs
+    // after its last file with nothing printed — a passing suite that reads as
+    // a crash, and in CI a timeout scored as a failure.
+    //
+    // Separate from the per-file watchdog above on purpose: that one is sized
+    // for a test to RUN (tens of seconds), this one for a flush (milliseconds).
+    // Wording is the TS pool's, verbatim, so the two paths are indistinguishable.
+    if tokio::time::timeout(EXIT_GRACE, child.wait())
+        .await
+        .is_err()
+    {
+        eprint!(
+            "helix: {} finished but its worker did not exit within {}ms — \
+something it started is still running (a server, a timer, a connection).\n\
+helix: killing it and keeping the result. Close it in a teardown hook to silence this.\n",
+            path_str,
+            EXIT_GRACE.as_millis()
+        );
+        let _ = child.kill().await;
+    }
 
     outcome.map_err(|e| WorkerError {
         file: Some(path_str.clone()),
@@ -204,6 +225,13 @@ async fn run_one_file(
         stack: None,
     })
 }
+
+/// How long a worker may take to exit AFTER reporting its result.
+///
+/// It is only flushing `atExit` hooks by then, which is milliseconds. Anything
+/// past this is a resource the test left running, and waiting on it turns a
+/// passing run into a silent hang. Mirrors the TS pool's `EXIT_GRACE_MS`.
+const EXIT_GRACE: Duration = Duration::from_millis(2000);
 
 const FRAME_PREFIX: &str = "__HELIX_RESULT__";
 
@@ -477,5 +505,65 @@ process.stdin.on("end", () => {
 
         assert_eq!(results.len(), 0);
         assert_eq!(errors.len(), 1);
+    }
+
+    /// The failure mode with no diagnostic at all: the worker does everything
+    /// right, reports its result, and then never exits because the test left a
+    /// server or a timer running. The run used to wait on it forever — a green
+    /// suite that reads as a crash, and in CI a budget burnt with nothing said.
+    #[tokio::test]
+    async fn a_worker_that_reports_then_refuses_to_exit_does_not_hang_the_run() {
+        let dir = temp_dir("leak");
+        let entry = dir.join("leaking-worker.mjs");
+        std::fs::write(
+            &entry,
+            br#"
+let raw = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (c) => { raw += c; });
+process.stdin.on("end", () => {
+  const instr = JSON.parse(raw.trim());
+  const result = {
+    file: instr.file,
+    suites: [],
+    tests: [],
+    totals: { pass: 1, fail: 0, skip: 0, todo: 0 },
+    durationMs: 1,
+  };
+  process.stderr.write(
+    "__HELIX_RESULT__" +
+      JSON.stringify({ type: "result", nonce: instr.nonce, result }) +
+      "\n",
+  );
+  // What an unclosed TestClient leaves behind: something keeping the loop alive.
+  setInterval(() => {}, 1000);
+});
+"#,
+        )
+        .unwrap();
+        let (reporter, _log) = recorder();
+
+        let started = std::time::Instant::now();
+        let (results, errors) = run_pool(
+            vec![dir.join("a.test.ts")],
+            config(entry.to_string_lossy().into_owned(), false),
+            reporter,
+        )
+        .await
+        .unwrap();
+
+        // The result is kept: the test passed, only the cleanup did not.
+        assert_eq!(errors.len(), 0);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].totals.pass, 1);
+
+        // The grace is 2s and the per-file timeout in `config` is 20s. Landing
+        // well under that ceiling is the assertion — before the fix this call
+        // never returned at all.
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(15),
+            "the pool waited {elapsed:?} on a worker that will never exit"
+        );
     }
 }
