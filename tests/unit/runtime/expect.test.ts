@@ -77,6 +77,21 @@ describe("expect — async chains", () => {
 });
 
 describe("expect — the message argument", () => {
+	// `expect(total, row.label)` where the label happens to be empty is the
+	// ordinary way to get here, and it used to open the failure on a bare ": ".
+	it("treats an empty label as no label at all", () => {
+		let thrown: unknown;
+		try {
+			expect(3, "").toBe(4);
+		} catch (err) {
+			thrown = err;
+		}
+
+		vExpect(thrown).toBeInstanceOf(AssertionError);
+		if (!(thrown instanceof AssertionError)) return;
+		vExpect(thrown.message.startsWith("expected")).toBe(true);
+	});
+
 	it("puts the label in front of the matcher's own explanation", () => {
 		let thrown: unknown;
 		try {

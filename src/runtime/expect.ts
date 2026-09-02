@@ -66,7 +66,13 @@ interface EvalContext {
  * "the total after tax" would trade the diagnosis for the intent.
  */
 function labelled(label: string | undefined, message: string): string {
-	return label === undefined ? message : `${label}: ${message}`;
+	// The type is checked as well as the value. `expect()` is public API a
+	// JavaScript caller reaches too, and a symbol there throws inside the
+	// template instead of labelling anything — turning a failed assertion into a
+	// TypeError that says nothing about what broke. An empty string is not a
+	// label either: it would leave the message opening on a bare ": ".
+	if (typeof label !== "string" || label === "") return message;
+	return `${label}: ${message}`;
 }
 
 type MatcherInvoker = (
