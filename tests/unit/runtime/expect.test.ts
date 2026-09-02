@@ -75,3 +75,52 @@ describe("expect — async chains", () => {
 		vExpect(() => expect({}).toBeInstanceOf(Trap)).toThrow(AssertionError);
 	});
 });
+
+describe("expect — the message argument", () => {
+	it("puts the label in front of the matcher's own explanation", () => {
+		let thrown: unknown;
+		try {
+			expect(3, "the total after tax").toBe(4);
+		} catch (err) {
+			thrown = err;
+		}
+
+		vExpect(thrown).toBeInstanceOf(AssertionError);
+		vExpect(String(thrown)).toContain("the total after tax");
+		// The diagnosis survives the label rather than being replaced by it.
+		vExpect(String(thrown)).toContain("4");
+	});
+
+	it("says nothing extra when no label was given", () => {
+		let thrown: unknown;
+		try {
+			expect(3).toBe(4);
+		} catch (err) {
+			thrown = err;
+		}
+
+		vExpect(thrown).toBeInstanceOf(AssertionError);
+		// No label means no prefix: the message opens on the diagnosis itself.
+		if (!(thrown instanceof AssertionError)) throw new Error("not thrown");
+		vExpect(thrown.message.startsWith("expected")).toBe(true);
+	});
+
+	it("carries the label through .not", () => {
+		vExpect(() => expect(1, "the flag").not.toBe(1)).toThrow(/the flag/);
+	});
+
+	it("carries the label through .resolves and .rejects", async () => {
+		await vExpect(
+			expect(Promise.resolve(1), "the fetched id").resolves.toBe(2),
+		).rejects.toThrow(/the fetched id/);
+
+		await vExpect(
+			expect(Promise.resolve(1), "the failing call").rejects.toThrow(),
+		).rejects.toThrow(/the failing call/);
+	});
+
+	it("leaves a passing assertion alone", () => {
+		expect(1, "still fine").toBe(1);
+		expect(1, "still fine").not.toBe(2);
+	});
+});

@@ -54,6 +54,19 @@ export type Assertion = SyncChain & {
 interface EvalContext {
 	received: unknown;
 	negate: boolean;
+	/** The optional second argument to `expect()`, prefixed onto any failure. */
+	label?: string;
+}
+
+/**
+ * Prefix a failure with the label the caller passed to `expect()`.
+ *
+ * The matcher's own message is what explains the failure, so the label goes in
+ * front of it rather than replacing it — losing "expected 3 to be 4" to keep
+ * "the total after tax" would trade the diagnosis for the intent.
+ */
+function labelled(label: string | undefined, message: string): string {
+	return label === undefined ? message : `${label}: ${message}`;
 }
 
 type MatcherInvoker = (
@@ -77,7 +90,7 @@ function evaluate(ctx: EvalContext, name: MatcherName, args: unknown[]): void {
 		// failure so reporters can render it uniformly.
 		const why = err instanceof Error ? err.message : String(err);
 		throw new AssertionError({
-			message: `matcher ${name} threw: ${why}`,
+			message: labelled(ctx.label, `matcher ${name} threw: ${why}`),
 			actual: ctx.received,
 			expected: args.length === 1 ? args[0] : args,
 			operator: ctx.negate ? `not.${name}` : name,
@@ -87,7 +100,7 @@ function evaluate(ctx: EvalContext, name: MatcherName, args: unknown[]): void {
 	if (pass) return;
 	const prefix = ctx.negate ? "expected NOT: " : "";
 	throw new AssertionError({
-		message: `${prefix}${result.message()}`,
+		message: labelled(ctx.label, `${prefix}${result.message()}`),
 		actual: ctx.received,
 		expected: args,
 		operator: ctx.negate ? `not.${name}` : name,
@@ -96,11 +109,15 @@ function evaluate(ctx: EvalContext, name: MatcherName, args: unknown[]): void {
 
 const matcherNames = Object.keys(matchers) as MatcherName[];
 
-function buildSync(received: unknown, negate: boolean): SyncChain {
+function buildSync(
+	received: unknown,
+	negate: boolean,
+	label?: string,
+): SyncChain {
 	const api = {} as SyncChain;
 	for (const name of matcherNames) {
 		const fn = (...args: unknown[]) =>
-			evaluate({ received, negate }, name, args);
+			evaluate({ received, negate, label }, name, args);
 		Reflect.set(api, name, fn);
 	}
 	return api;
@@ -112,13 +129,17 @@ function buildAsync(
 	received: unknown,
 	mode: PromiseMode,
 	negate: boolean,
+	label?: string,
 ): AsyncChain {
 	const api = {} as AsyncChain;
 	for (const name of matcherNames) {
 		const fn = async (...args: unknown[]) => {
 			if (!isThenable(received)) {
 				throw new AssertionError({
-					message: `expected a Promise (for .${mode}), got ${typeof received}`,
+					message: labelled(
+						label,
+						`expected a Promise (for .${mode}), got ${typeof received}`,
+					),
 					operator: `${mode}.${name}`,
 				});
 			}
@@ -134,16 +155,22 @@ function buildAsync(
 			if (mode === "resolves") {
 				if (didReject) {
 					throw new AssertionError({
-						message: `expected promise to resolve, but it rejected with ${String(rejected)}`,
+						message: labelled(
+							label,
+							`expected promise to resolve, but it rejected with ${String(rejected)}`,
+						),
 						operator: `resolves.${name}`,
 					});
 				}
-				evaluate({ received: resolved, negate }, name, args);
+				evaluate({ received: resolved, negate, label }, name, args);
 				return;
 			}
 			if (!didReject) {
 				throw new AssertionError({
-					message: `expected promise to reject, but it resolved with ${String(resolved)}`,
+					message: labelled(
+						label,
+						`expected promise to reject, but it resolved with ${String(resolved)}`,
+					),
 					operator: `rejects.${name}`,
 				});
 			}
@@ -155,7 +182,7 @@ function buildAsync(
 							throw rejected;
 						}
 					: rejected;
-			evaluate({ received: target, negate }, name, args);
+			evaluate({ received: target, negate, label }, name, args);
 		};
 		Reflect.set(api, name, fn);
 	}
@@ -164,7 +191,12 @@ function buildAsync(
 
 /** The callable `expect(...)` plus its static asymmetric matchers + assertion controls. */
 export interface ExpectStatic {
-	(received: unknown): Assertion;
+	/**
+	 * `message` labels every failure this chain raises — Vitest's second
+	 * argument. Playwright users reach for it, and without it a failing
+	 * assertion in a loop says what broke but not which iteration.
+	 */
+	(received: unknown, message?: string): Assertion;
 	/** Matches an object that contains (superset of) `subset`. */
 	objectContaining(subset: Record<string, unknown>): AsymmetricMatcher;
 	/** Matches an array that contains every item in `items`. */
@@ -183,23 +215,27 @@ export interface ExpectStatic {
 	hasAssertions(): void;
 }
 
-function expectImpl(received: unknown): Assertion {
-	const base = buildSync(received, false);
+function expectImpl(received: unknown, message?: string): Assertion {
+	const base = buildSync(received, false, message);
 
 	// `.not` returns a chain that negates every matcher. It also exposes
 	// `.resolves` / `.rejects` so `expect(p).not.resolves.toBe(x)` works, matching
 	// Vitest's full surface.
-	const notSync = Object.assign(buildSync(received, true), {
-		resolves: buildAsync(received, "resolves", true),
-		rejects: buildAsync(received, "rejects", true),
+	const notSync = Object.assign(buildSync(received, true, message), {
+		resolves: buildAsync(received, "resolves", true, message),
+		rejects: buildAsync(received, "rejects", true, message),
 	});
 
-	const resolves = Object.assign(buildAsync(received, "resolves", false), {
-		not: buildAsync(received, "resolves", true),
-	});
-	const rejects = Object.assign(buildAsync(received, "rejects", false), {
-		not: buildAsync(received, "rejects", true),
-	});
+	const resolves = Object.assign(
+		buildAsync(received, "resolves", false, message),
+		{ not: buildAsync(received, "resolves", true, message) },
+	);
+	const rejects = Object.assign(
+		buildAsync(received, "rejects", false, message),
+		{
+			not: buildAsync(received, "rejects", true, message),
+		},
+	);
 
 	return Object.assign(base, {
 		not: notSync,
