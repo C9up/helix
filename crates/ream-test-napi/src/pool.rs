@@ -148,7 +148,7 @@ async fn run_one_file(
 
     // Drain stdout in a background task so the worker can freely
     // `console.log` without filling the 64 KiB pipe buffer.
-    tokio::spawn(async move {
+    let _drain = AbortOnDrop(tokio::spawn(async move {
         let mut reader = stdout;
         let mut buf = [0u8; 8192];
         loop {
@@ -157,7 +157,7 @@ async fn run_one_file(
                 Ok(_) => continue,
             }
         }
-    });
+    }));
 
     // Per-invocation nonce — the worker echoes it so malicious `console.error`
     // lines in a fixture cannot spoof the frame.
@@ -196,7 +196,8 @@ async fn run_one_file(
         stack: None,
     })?;
 
-    // Bound that wait. The worker has already reported; we are only giving
+    // Bound that wait, but only when there is a result to protect. The worker
+    // has already reported by then; we are only giving
     // `atExit` hooks time to flush. A test that left a server, a timer or a
     // connection running means the exit never comes, and the run then hangs
     // after its last file with nothing printed — a passing suite that reads as
@@ -205,7 +206,13 @@ async fn run_one_file(
     // Separate from the per-file watchdog above on purpose: that one is sized
     // for a test to RUN (tens of seconds), this one for a flush (milliseconds).
     // Wording is the TS pool's, verbatim, so the two paths are indistinguishable.
-    if tokio::time::timeout(EXIT_GRACE, child.wait())
+    if outcome.is_err() {
+        // No readable result came back. There is nothing to flush and nothing
+        // to protect, and the frame error is already the diagnosis — waiting
+        // the grace out here would only delay it and print a second, wrong
+        // message saying the file "finished".
+        let _ = child.kill().await;
+    } else if tokio::time::timeout(EXIT_GRACE, child.wait())
         .await
         .is_err()
     {
@@ -224,6 +231,20 @@ helix: killing it and keeping the result. Close it in a teardown hook to silence
         message: e,
         stack: None,
     })
+}
+
+/// Stops the stdout drain when `run_one_file` returns, on every path out.
+///
+/// The task reads until EOF, and EOF only arrives once every holder of the
+/// write end is gone. A worker we had to kill may have spawned something that
+/// still holds it, so the task would go on waiting for a file that has already
+/// been reported — one task leaked per such file, for the rest of the run.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// How long a worker may take to exit AFTER reporting its result.
@@ -505,6 +526,62 @@ process.stdin.on("end", () => {
 
         assert_eq!(results.len(), 0);
         assert_eq!(errors.len(), 1);
+    }
+
+    /// A worker can report a failure and then still refuse to exit — the file
+    /// blew up *and* left something running. The exit grace exists to protect a
+    /// result; there is none here, so paying it only delays the error the run
+    /// already has, under a message claiming the file "finished".
+    #[tokio::test]
+    async fn a_failing_worker_that_will_not_exit_is_not_made_to_wait_out_the_grace() {
+        let dir = temp_dir("errleak");
+        let entry = dir.join("failing-leaking-worker.mjs");
+        std::fs::write(
+            &entry,
+            br#"
+let raw = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (c) => { raw += c; });
+process.stdin.on("end", () => {
+  const instr = JSON.parse(raw.trim());
+  process.stderr.write(
+    "__HELIX_RESULT__" +
+      JSON.stringify({
+        type: "error",
+        nonce: instr.nonce,
+        message: "the suite could not be loaded",
+      }) +
+      "\n",
+  );
+  setInterval(() => {}, 1000);
+});
+"#,
+        )
+        .unwrap();
+        let (reporter, _log) = recorder();
+
+        let started = std::time::Instant::now();
+        let (results, errors) = run_pool(
+            vec![dir.join("a.test.ts")],
+            config(entry.to_string_lossy().into_owned(), false),
+            reporter,
+        )
+        .await
+        .unwrap();
+
+        // The worker's own diagnosis survives; nothing replaces it.
+        assert_eq!(results.len(), 0);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message, "the suite could not be loaded");
+
+        // Spawning node costs a few hundred milliseconds; the grace is 2s. A
+        // ceiling between the two is what separates "killed at once" from
+        // "waited the grace out first", which is what this path used to do.
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(1500),
+            "the pool waited {elapsed:?} on a worker that had already failed"
+        );
     }
 
     /// The failure mode with no diagnostic at all: the worker does everything
