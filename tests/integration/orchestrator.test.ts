@@ -155,3 +155,53 @@ describe("orchestrator — end-to-end", () => {
 		expect(stderr).toMatch(/malformed instruction JSON/);
 	}, 30_000);
 });
+
+describe("orchestrator — how long a finished worker may take to exit", () => {
+	const lingering = path.join(fixturesDir, "lingering.test.ts");
+
+	it("keeps the result of a worker it had to kill", async () => {
+		const outcome = await run({
+			root: fixturesDir,
+			files: [lingering],
+			workerEntry,
+			nodeArgs,
+			reporterInstance: silent,
+			exitGraceMs: 200,
+		});
+
+		// The worker reported a pass and then refused to exit. Killing it must
+		// not turn that pass into a failure.
+		expect(outcome.summary.totals.fail).toBe(0);
+		expect(outcome.summary.totals.pass).toBe(1);
+		expect(outcome.exitCode).toBe(0);
+	}, 30_000);
+
+	it("waits the grace it was given, not a constant", async () => {
+		const quick = Date.now();
+		await run({
+			root: fixturesDir,
+			files: [lingering],
+			workerEntry,
+			nodeArgs,
+			reporterInstance: silent,
+			exitGraceMs: 100,
+		});
+		const quickMs = Date.now() - quick;
+
+		const slow = Date.now();
+		await run({
+			root: fixturesDir,
+			files: [lingering],
+			workerEntry,
+			nodeArgs,
+			reporterInstance: silent,
+			exitGraceMs: 2_500,
+		});
+		const slowMs = Date.now() - slow;
+
+		// The second run waits longer for the same file, by roughly the
+		// difference between the two graces. A hard-coded constant would make
+		// these two indistinguishable.
+		expect(slowMs - quickMs).toBeGreaterThan(1_500);
+	}, 60_000);
+});

@@ -79,6 +79,12 @@ export interface RunConfig {
 	threads?: number;
 	/** Per-file timeout (ms). Default 60 000. */
 	timeoutMs?: number;
+	/**
+	 * How long a worker may take to exit after reporting its result, in ms.
+	 * Default 2 000 — raise it when a large coverage dump on a slow runner is
+	 * being cut short.
+	 */
+	exitGraceMs?: number;
 	/** Reporter name: `"dot" | "spec" | "json"`. Default `"spec"`. */
 	reporter?: string;
 	/**
@@ -596,6 +602,7 @@ async function runOnce(
 				nodeArgs: config.nodeArgs,
 				threads,
 				timeoutMs: config.timeoutMs,
+				exitGraceMs: config.exitGraceMs,
 				extraEnv: session?.env,
 				bail: config.bail,
 			},

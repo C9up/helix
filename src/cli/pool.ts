@@ -39,6 +39,17 @@ export interface PoolConfig {
 	 */
 	killGraceMs?: number;
 	/**
+	 * How long a worker may take to exit AFTER reporting its result, in ms.
+	 * Default 2 000.
+	 *
+	 * It is only flushing `atExit` hooks by then, which is milliseconds — except
+	 * where it is not: a large V8 coverage dump on a slow disk, or a CI runner
+	 * under load, can take longer, and the run then kills a worker that was
+	 * about to finish writing. A fixed constant made that unfixable from the
+	 * outside; the only way out was to stop asking for coverage.
+	 */
+	exitGraceMs?: number;
+	/**
 	 * Extra environment variables merged into every spawned worker's env.
 	 * Used by coverage to forward `NODE_V8_COVERAGE=<tmp-dir>`.
 	 */
@@ -70,13 +81,16 @@ export type FileOutcome =
 const MAX_STDERR_BUFFER_BYTES = 4 * 1024 * 1024; // 4 MiB
 
 /**
- * How long a worker may take to exit AFTER reporting its result.
+ * How long a worker may take to exit AFTER reporting its result, when nothing
+ * says otherwise.
  *
  * It is only flushing `atExit` hooks by then — the V8 coverage writer is the
  * slow one, and it is milliseconds. Anything past this is a resource the test
  * left running, and waiting on it turns a passing run into a silent hang.
+ * Overridable through {@link PoolConfig.exitGraceMs}, because "milliseconds"
+ * stops being true on a loaded CI runner writing a large coverage dump.
  */
-const EXIT_GRACE_MS = 2000;
+const DEFAULT_EXIT_GRACE_MS = 2000;
 
 interface ActiveChild {
 	kill(): void;
@@ -246,14 +260,9 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		// (@swc-node/register, tsx, ts-node/esm, …). Callers that want the
 		// child to run with a clean argv pass `nodeArgs: []` explicitly.
 		const nodeArgs = cfg.nodeArgs ?? inheritedLoaderArgs();
-		const timeoutMs =
-			Number.isFinite(cfg.timeoutMs) && (cfg.timeoutMs ?? 0) > 0
-				? Math.floor(cfg.timeoutMs as number)
-				: 60_000;
-		const killGraceMs =
-			Number.isFinite(cfg.killGraceMs) && (cfg.killGraceMs ?? 0) > 0
-				? Math.floor(cfg.killGraceMs as number)
-				: 2_000;
+		const timeoutMs = positiveMs(cfg.timeoutMs, 60_000);
+		const killGraceMs = positiveMs(cfg.killGraceMs, 2_000);
+		const exitGraceMs = positiveMs(cfg.exitGraceMs, DEFAULT_EXIT_GRACE_MS);
 		// Per-invocation nonce — the worker echoes it inside every frame so
 		// malicious or confused test code can't spoof a `__HELIX_RESULT__` line.
 		const nonce = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -317,13 +326,13 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 			exitGrace = setTimeout(() => {
 				if (settled) return;
 				process.stderr.write(
-					`helix: ${file} finished but its worker did not exit within ${EXIT_GRACE_MS}ms — ` +
+					`helix: ${file} finished but its worker did not exit within ${exitGraceMs}ms — ` +
 						"something it started is still running (a server, a timer, a connection).\n" +
 						"helix: killing it and keeping the result. Close it in a teardown hook to silence this.\n",
 				);
 				killChild(child, killGraceMs);
 				settle(pendingOutcome ?? outcome);
-			}, EXIT_GRACE_MS);
+			}, exitGraceMs);
 			exitGrace.unref?.();
 		};
 
@@ -507,6 +516,19 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
  * process.
  */
 const killedChildren = new WeakSet<ReturnType<typeof spawn>>();
+
+/**
+ * A millisecond option, or the default when it is not one. Read once into a
+ * local rather than three times off the config: narrowing an optional property
+ * does not survive to the next read, which is why this used to end in a cast
+ * asserting back what the check had just established.
+ */
+function positiveMs(value: number | undefined, fallback: number): number {
+	if (value === undefined || !Number.isFinite(value) || value <= 0) {
+		return fallback;
+	}
+	return Math.floor(value);
+}
 
 function killChild(child: ReturnType<typeof spawn>, graceMs: number): void {
 	if (killedChildren.has(child)) return;
