@@ -1281,9 +1281,9 @@ async function runAfterAllHooks(
 ): Promise<void> {
 	// Group-scoped cleanups (returned by `group.setup()`) run first, in reverse
 	// insertion order, receiving `(hadError, group)` — helix lifecycle parity.
-	for (let i = groupCleanups.length - 1; i >= 0; i -= 1) {
+	for (const cleanup of [...groupCleanups].reverse()) {
 		try {
-			await groupCleanups[i](hadError, group);
+			await cleanup(hadError, group);
 		} catch (err) {
 			hookErrors.push(serializeError(err));
 		}

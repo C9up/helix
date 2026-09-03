@@ -309,17 +309,21 @@ export function createFakeTimerController(): FakeTimerController {
 					`vi: fake-timer drain exceeded ${MAX} iterations — likely a self-rescheduling immediate / interval. Use runOnlyPendingTimers or clearAllTimers.`,
 				);
 			}
+			// The winner is kept as the timer itself, not just its index: read
+			// back out of the queue afterwards it was "a timer, or nothing", and
+			// the scan is exactly what proves it is there.
 			let nextIdx = -1;
+			let next: Timer | undefined;
 			let nextDue = Number.POSITIVE_INFINITY;
-			for (let i = 0; i < s.queue.length; i += 1) {
-				const t = s.queue[i];
+			for (const [i, t] of s.queue.entries()) {
 				if (t.dueMs <= target && t.dueMs < nextDue) {
 					nextDue = t.dueMs;
 					nextIdx = i;
+					next = t;
 				}
 			}
-			if (nextIdx < 0) break;
-			const timer = s.queue[nextIdx];
+			if (next === undefined) break;
+			const timer = next;
 			s.queue.splice(nextIdx, 1);
 			s.now = Math.max(s.now, timer.dueMs);
 			if (timer.intervalMs !== null) {

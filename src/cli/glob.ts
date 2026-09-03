@@ -78,6 +78,9 @@ export function globToRegExp(entry: string): RegExp {
 	let i = 0;
 	while (i < entry.length) {
 		const char = entry[i];
+		// The loop condition already bounds `i`, so this cannot fire — it is
+		// where that bound is stated rather than asserted past.
+		if (char === undefined) break;
 		// `@(a|b)`, `?(a|b)`, `*(a|b)`, `+(a|b)` — the prefix quantifies the group
 		// rather than standing on its own, so it is consumed here before the `*`
 		// and `?` cases could claim it.

@@ -99,7 +99,8 @@ export function parseDiffString(diff: string, cwd: string): DiffMap {
 		if (!currentFile) continue;
 		const hunkMatch = line.match(HUNK_HEADER);
 		if (hunkMatch) {
-			nextAddedLine = Number.parseInt(hunkMatch[1], 10);
+			const [, startLine] = hunkMatch;
+			nextAddedLine = Number.parseInt(startLine ?? "1", 10);
 			continue;
 		}
 		if (line.startsWith("+") && !line.startsWith("+++")) {

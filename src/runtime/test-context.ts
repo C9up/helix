@@ -66,9 +66,9 @@ export async function withTestContext<T>(body: () => Promise<T>): Promise<T> {
 	try {
 		return await storage.run(frame, body);
 	} finally {
-		for (let i = frame.cleanups.length - 1; i >= 0; i -= 1) {
+		for (const cleanup of [...frame.cleanups].reverse()) {
 			try {
-				await frame.cleanups[i](frame.hadError, frame.test);
+				await cleanup(frame.hadError, frame.test);
 			} catch (err) {
 				// One cleanup failing must not block the others — but log it
 				// so silent leaks become noisy. `console.error` matches what
@@ -218,17 +218,17 @@ export async function drainTestOutcomeHooks(failed: boolean): Promise<unknown> {
 	// `onTestFailed` first (diagnostics), then `onTestFinished` — both in
 	// reverse insertion order to mirror Vitest teardown semantics.
 	if (failed) {
-		for (let i = frame.onFailed.length - 1; i >= 0; i -= 1) {
+		for (const onFailed of [...frame.onFailed].reverse()) {
 			try {
-				await frame.onFailed[i](failed, frame.test);
+				await onFailed(failed, frame.test);
 			} catch (err) {
 				console.error("[helix] onTestFailed callback threw:", err);
 			}
 		}
 	}
-	for (let i = frame.onFinished.length - 1; i >= 0; i -= 1) {
+	for (const onFinished of [...frame.onFinished].reverse()) {
 		try {
-			await frame.onFinished[i](failed, frame.test);
+			await onFinished(failed, frame.test);
 		} catch (err) {
 			console.error("[helix] onTestFinished callback threw:", err);
 		}

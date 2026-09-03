@@ -213,7 +213,8 @@ class MultiReporter implements Reporter {
  * the common path.
  */
 export function makeReportersFrom(reporters: readonly Reporter[]): Reporter {
-	if (reporters.length === 1) return reporters[0];
+	const [only, ...rest] = reporters;
+	if (only !== undefined && rest.length === 0) return only;
 	return new MultiReporter([...reporters]);
 }
 

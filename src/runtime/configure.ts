@@ -336,17 +336,20 @@ export async function drainRunnerTeardowns(): Promise<void> {
 	// Cleanups returned by `setup` unwind first — they are the innermost thing
 	// that was opened. `null` for the error: the drain only happens once the run
 	// itself has finished, so there is no setup failure left to report.
-	for (let i = runnerCleanups.length - 1; i >= 0; i -= 1) {
+	// A reversed copy read by value: the index form gave every callback the
+	// type "a function, or nothing", which is not what a list you just walked
+	// the length of contains.
+	for (const cleanup of [...runnerCleanups].reverse()) {
 		try {
-			await runnerCleanups[i](null, runner);
+			await cleanup(null, runner);
 		} catch (err) {
 			console.error("[helix] runner cleanup failed:", err);
 		}
 	}
 	runnerCleanups.length = 0;
-	for (let i = runnerTeardowns.length - 1; i >= 0; i -= 1) {
+	for (const teardown of [...runnerTeardowns].reverse()) {
 		try {
-			await runnerTeardowns[i](runner);
+			await teardown(runner);
 		} catch (err) {
 			console.error("[helix] runner teardown failed:", err);
 		}

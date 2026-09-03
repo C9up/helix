@@ -101,16 +101,16 @@ async function unwind(
 	teardown: SuiteHook[],
 	runner: Runner,
 ): Promise<void> {
-	for (let i = undos.length - 1; i >= 0; i -= 1) {
+	for (const undo of [...undos].reverse()) {
 		try {
-			await undos[i](null, runner);
+			await undo(null, runner);
 		} catch (err) {
 			console.error("[helix] global cleanup failed:", err);
 		}
 	}
-	for (let i = teardown.length - 1; i >= 0; i -= 1) {
+	for (const down of [...teardown].reverse()) {
 		try {
-			await teardown[i](runner);
+			await down(runner);
 		} catch (err) {
 			console.error("[helix] global teardown failed:", err);
 		}

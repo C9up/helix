@@ -37,7 +37,7 @@ export async function collect(dir: string): Promise<RawFileCoverage[]> {
 			// V8 sometimes appends `?query` params (our worker uses them as
 			// cache-busters) — strip them so the same file from two workers
 			// merges correctly.
-			const cleanUrl = script.url.split("?")[0];
+			const [cleanUrl = script.url] = script.url.split("?");
 			let file: string;
 			try {
 				file = fileURLToPath(cleanUrl);

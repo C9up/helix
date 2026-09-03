@@ -73,7 +73,8 @@ function buildOffsetToLine(
 		let hi = lineStarts.length - 1;
 		while (lo < hi) {
 			const mid = (lo + hi + 1) >>> 1;
-			if (lineStarts[mid] <= clamped) lo = mid;
+			const start = lineStarts[mid];
+			if (start !== undefined && start <= clamped) lo = mid;
 			else hi = mid - 1;
 		}
 		return lo + 1;
