@@ -1,3 +1,4 @@
+import { defined } from "../../__helpers__/defined.js";
 /**
  * The runtime features helix carries beyond the basics: retries, per-test
  * timeout, `--grep`/`--tags` filtering, `test.fails`, `onTestFinished` /
@@ -152,7 +153,7 @@ describe("per-test timeout", () => {
 		}).timeout(20);
 		const result = await executeRoot(root, "inline");
 		vExpect(result.totals.fail).toBe(1);
-		vExpect(result.tests[0].error?.message).toMatch(/timeout/);
+		vExpect(defined(result.tests[0]).error?.message).toMatch(/timeout/);
 	});
 
 	vIt("options object timeout via 3rd arg", async () => {

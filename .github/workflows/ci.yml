@@ -77,6 +77,11 @@ jobs:
           node-version: '22'
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm exec tsc -p tsconfig.build.json --noEmit
+      # The build project is `src` alone, so a type error in a test file
+      # reached nothing that runs here. `tsconfig.test.json` is the project
+      # that includes them — in their own program, where the selftest's
+      # `declare module` augmentations apply without leaking into `src`.
+      - run: pnpm typecheck:tests
       - run: pnpm lint
   # 5-platform NAPI matrix. helix is fully self-contained: its runtime and
   # test suite have zero @c9up dependencies, so it builds and tests standalone

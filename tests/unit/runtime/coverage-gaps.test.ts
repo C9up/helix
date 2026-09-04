@@ -11,6 +11,7 @@ import { executeRoot } from "../../../src/runtime/run.js";
 import { resetRoot, test } from "../../../src/runtime/suite.js";
 import { vi } from "../../../src/runtime/vi/index.js";
 import { runTestFile } from "../../../src/runtime/worker.js";
+import { defined } from "../../__helpers__/defined.js";
 
 describe("matchers.toThrow — advanced expected forms", () => {
 	class MyErr extends Error {
@@ -196,36 +197,36 @@ describe("suite.interpolateEach — object row paths", () => {
 			{ a: 10, b: 20 },
 		])("row $# — $a + $b", () => {});
 		const result = await executeRoot(root, "inline");
-		expect(result.tests[0].name).toBe("row 0 — 1 + 2");
-		expect(result.tests[1].name).toBe("row 1 — 10 + 20");
+		expect(defined(result.tests[0]).name).toBe("row 0 — 1 + 2");
+		expect(defined(result.tests[1]).name).toBe("row 1 — 10 + 20");
 	});
 
 	it("expands nested $field.subfield", async () => {
 		const root = resetRoot();
 		test.each([{ user: { name: "ada" } }])("greet $user.name", () => {});
 		const result = await executeRoot(root, "inline");
-		expect(result.tests[0].name).toBe("greet ada");
+		expect(defined(result.tests[0]).name).toBe("greet ada");
 	});
 
 	it("missing field renders as literal 'undefined'", async () => {
 		const root = resetRoot();
 		test.each([{ a: 1 }])("has $nope", () => {});
 		const result = await executeRoot(root, "inline");
-		expect(result.tests[0].name).toBe("has undefined");
+		expect(defined(result.tests[0]).name).toBe("has undefined");
 	});
 
 	it("object field whose value is an object stringifies as JSON", async () => {
 		const root = resetRoot();
 		test.each([{ user: { id: 1 } }])("row $user", () => {});
 		const result = await executeRoot(root, "inline");
-		expect(result.tests[0].name).toBe('row {"id":1}');
+		expect(defined(result.tests[0]).name).toBe('row {"id":1}');
 	});
 
 	it("array row supports %j / %o / %%", async () => {
 		const root = resetRoot();
 		test.each([[{ n: 1 }]])("obj=%j done %%", () => {});
 		const result = await executeRoot(root, "inline");
-		expect(result.tests[0].name).toBe('obj={"n":1} done %');
+		expect(defined(result.tests[0]).name).toBe('obj={"n":1} done %');
 	});
 
 	it("array row with circular object uses String() fallback", async () => {
@@ -235,7 +236,7 @@ describe("suite.interpolateEach — object row paths", () => {
 		cyc.self = cyc;
 		test.each([[cyc]])("cyc=%o", () => {});
 		const result = await executeRoot(root, "inline");
-		expect(result.tests[0].name).toContain("[object Object]");
+		expect(defined(result.tests[0]).name).toContain("[object Object]");
 	});
 });
 

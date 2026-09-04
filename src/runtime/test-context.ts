@@ -20,11 +20,12 @@ import type { TestInstance } from "./suite.js";
  * A per-test teardown. Receives `(hasError, test)`: whether the
  * test failed, and the running test's instance. Both params are optional so
  * plain `() => …` cleanups stay valid.
+ *
+ * Returns `unknown`: the value is awaited and dropped, so a one-liner like
+ * `() => log.push('done')` is not a type error for returning what `push`
+ * returns.
  */
-export type TestCleanup = (
-	hasError?: boolean,
-	test?: TestInstance,
-) => void | Promise<void>;
+export type TestCleanup = (hasError?: boolean, test?: TestInstance) => unknown;
 
 /** Per-test assertion bookkeeping (drives `expect.assertions`/`hasAssertions`). */
 export interface AssertionState {

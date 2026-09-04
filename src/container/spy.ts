@@ -11,7 +11,7 @@
  */
 
 import { vi } from "../runtime/vi/index.js";
-import type { AnyFn, Spy } from "../runtime/vi/spy.js";
+import type { AnyFn, AnyFunction, Spy } from "../runtime/vi/spy.js";
 
 /**
  * Wrap (don't bind) `vi.fn` so `spy` always reaches through to the
@@ -20,6 +20,8 @@ import type { AnyFn, Spy } from "../runtime/vi/spy.js";
  * object. The cost over `export const spy = vi.fn` is one extra
  * function call per spawn.
  */
-export function spy<Fn extends AnyFn>(implementation?: Fn): Spy<Fn> {
+export function spy<Fn extends AnyFunction = AnyFn>(
+	implementation?: Fn,
+): Spy<Fn> {
 	return vi.fn(implementation);
 }

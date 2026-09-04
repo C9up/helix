@@ -17,7 +17,11 @@
 import { pathToFileURL } from "node:url";
 import { emitter } from "./emitter.js";
 import { Runner } from "./runner.js";
-import type { SuiteHook, SuiteHookCleanup } from "./suite-taps.js";
+import {
+	isSuiteHookCleanup,
+	type SuiteHook,
+	type SuiteHookCleanup,
+} from "./suite-taps.js";
 
 /** Set for the workers, so they do not run what the parent already ran. */
 export const GLOBAL_HOOKS_ENV = "HELIX_GLOBAL_HOOKS";
@@ -66,7 +70,7 @@ export async function runGlobalHooks(
 
 		for (const fn of setup) {
 			const undo = await fn(runner);
-			if (typeof undo === "function") undos.push(undo);
+			if (isSuiteHookCleanup(undo)) undos.push(undo);
 		}
 		if (setup.length > 0 || teardown.length > 0) {
 			process.env[GLOBAL_HOOKS_ENV] = "1";

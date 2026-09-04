@@ -1,3 +1,4 @@
+import { defined } from "../../../__helpers__/defined.js";
 /**
  * Coverage for the review patches applied on 2026-04-24: `this` forwarding
  * in spyOn, per-context system time, Vitest-parity mock semantics, timer
@@ -88,7 +89,7 @@ describe("vi patches — Vitest parity semantics", () => {
 		// Synchronously after the call, results has an incomplete entry.
 		expect(spy.mock.calls.length).toBe(1);
 		expect(spy.mock.results.length).toBe(1);
-		expect(spy.mock.results[0].type).toBe("return");
+		expect(defined(spy.mock.results[0]).type).toBe("return");
 		await promise;
 	});
 

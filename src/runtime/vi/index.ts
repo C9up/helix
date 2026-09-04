@@ -13,7 +13,13 @@ import {
 	createFakeTimerController,
 	type FakeTimerController,
 } from "./fake-timers.js";
-import { type AnyFn, createSpy, isSpy, type Spy } from "./spy.js";
+import {
+	type AnyFn,
+	type AnyFunction,
+	createSpy,
+	isSpy,
+	type Spy,
+} from "./spy.js";
 import { type SpyOnOptions, spyOn } from "./spyOn.js";
 import {
 	clearFakeEpoch,
@@ -37,7 +43,14 @@ export type ContainerToken =
 	| symbol;
 
 interface ViState {
-	spies: Set<Spy>;
+	/**
+	 * Every spy this run created, for the teardown.
+	 *
+	 * Typed by what the teardown uses, not by `Spy` — a `Spy<Fn>` for a specific
+	 * function is not assignable to `Spy<AnyFn>`, because a call signature is
+	 * compared contravariantly, and the registry never calls what it holds.
+	 */
+	spies: Set<RegisteredSpy>;
 	timers: FakeTimerController;
 	clock: SystemClock;
 	/** Returned by `registerSystemClockContext` — removes this context's clock from the global resolver. */
@@ -108,7 +121,18 @@ export async function withViContext<T>(body: () => Promise<T>): Promise<T> {
 	}
 }
 
-function fn<Fn extends AnyFn>(implementation?: Fn): Spy<Fn> {
+/** The slice of a spy the teardown touches. */
+interface RegisteredSpy {
+	mockClear(): unknown;
+	mockReset(): unknown;
+	mockRestore(): unknown;
+	readonly __isSpyOn: boolean;
+}
+
+// Defaulted to `AnyFn`, not to the constraint: `vi.fn()` with no implementation
+// would otherwise infer the constraint itself, whose `never[]` parameters make
+// the spy uncallable — `spy("hi")` was rejected for passing an argument.
+function fn<Fn extends AnyFunction = AnyFn>(implementation?: Fn): Spy<Fn> {
 	const spy = createSpy<Fn>({
 		name: "spy",
 		defaultImplementation: implementation,

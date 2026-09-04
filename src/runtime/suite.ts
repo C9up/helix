@@ -23,7 +23,16 @@ export type DoneFn = (error?: unknown) => void;
  * and a `done` callback as its second. Existing zero/one-argument
  * bodies stay valid — they simply ignore the extra parameters.
  */
-export type TestFn = (ctx: TestContext, done: DoneFn) => void | Promise<void>;
+/**
+ * A test body. Receives the injected {@link TestContext} as its first argument
+ * and a `done` callback as its second. Existing zero/one-argument bodies stay
+ * valid — they simply ignore the extra parameters.
+ *
+ * Returns `unknown`: whatever a body returns is awaited and then dropped, so a
+ * one-liner like `() => expect(x).toBe(1)` is not a type error for returning
+ * something.
+ */
+export type TestFn = (ctx: TestContext, done: DoneFn) => unknown;
 export type SuiteFn = () => void;
 
 /**
@@ -102,7 +111,7 @@ export interface TestNode {
 	 * without a cast (the type-erasure boundary between the generic `.with<Row>`
 	 * surface and this untyped node storage).
 	 */
-	datasetBody?(ctx: TestContext, row: unknown): void | Promise<void>;
+	datasetBody?(ctx: TestContext, row: unknown): unknown;
 	/** Wait for the `done()` callback before completing — `test.waitForDone()`. */
 	waitForDone?: boolean;
 	/**

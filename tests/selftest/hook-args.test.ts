@@ -14,7 +14,12 @@ test.group("hook args", (group) => {
 		seen.eachSetupTitle = subject?.title;
 		// helix parity (F2): the injected context is reachable as `$test.context`
 		// from within the hook — built BEFORE `beforeEach` runs.
-		seen.eachSetupHasContext = subject?.context !== undefined;
+		// Only a TestInstance carries one; the hook's parameter is the union of
+		// both, so ask before reading.
+		seen.eachSetupHasContext =
+			subject !== undefined &&
+			"context" in subject &&
+			subject.context !== undefined;
 	});
 	group.setup((subject) => {
 		// A group hook receives the Group instance...

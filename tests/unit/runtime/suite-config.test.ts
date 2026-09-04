@@ -1,3 +1,4 @@
+import { defined } from "../../__helpers__/defined.js";
 /**
  * `suites[].configure` — helix's per-suite callback, re-imported in the worker
  * because a function cannot cross the CLI→worker boundary.
@@ -58,7 +59,7 @@ describe("applySuiteConfigure", () => {
 		await applySuiteConfigure("e2e", makeSuiteHandle("e2e", setup, []));
 
 		expect(setup).toHaveLength(1);
-		expect(setup[0]()).toBe("e2e");
+		expect(defined(setup[0])()).toBe("e2e");
 	});
 
 	it("finds the suites under a dotted key, as ream declares them", async () => {

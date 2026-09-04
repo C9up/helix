@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { vi } from "../../../../src/runtime/vi/index.js";
+import { defined } from "../../../__helpers__/defined.js";
 
 describe("vi.fn", () => {
 	it("records every call and its arguments", () => {
@@ -22,7 +23,7 @@ describe("vi.fn", () => {
 			throw new Error("boom");
 		});
 		expect(() => spy()).toThrow("boom");
-		expect(spy.mock.results[0].type).toBe("throw");
+		expect(defined(spy.mock.results[0]).type).toBe("throw");
 	});
 
 	it("mockReturnValue / mockReturnValueOnce", () => {

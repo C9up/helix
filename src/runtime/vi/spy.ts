@@ -20,13 +20,26 @@ export interface MockInternals<
 	lastCall: Args | undefined;
 }
 
+/**
+ * Anything callable, as a CONSTRAINT.
+ *
+ * `never` in the parameter position, because parameters are compared
+ * contravariantly: `(...args: unknown[]) => unknown` accepts only a function
+ * whose own parameters accept `unknown`, so `vi.fn((a: number, b: number) =>
+ * a + b)` was rejected — every typed function was. `never` is assignable to
+ * every parameter type, which is what makes this the constraint that admits
+ * them all. Vitest reaches the same place with `any[]`.
+ */
+export type AnyFunction = (...args: never[]) => unknown;
+
+/** Anything callable, as a VALUE — the default a bare `Spy` stands for. */
 export type AnyFn = (...args: unknown[]) => unknown;
 
-type CallSignature<Fn extends AnyFn> = (
+type CallSignature<Fn extends AnyFunction> = (
 	...args: Parameters<Fn>
 ) => ReturnType<Fn>;
 
-interface SpyMethods<Fn extends AnyFn> {
+interface SpyMethods<Fn extends AnyFunction> {
 	readonly __helixIsSpy: true;
 	readonly mock: MockInternals<Parameters<Fn>, ReturnType<Fn>>;
 	readonly calls: Parameters<Fn>[];
@@ -50,11 +63,12 @@ interface SpyMethods<Fn extends AnyFn> {
 	readonly __isSpyOn: boolean;
 }
 
-export type Spy<Fn extends AnyFn = AnyFn> = CallSignature<Fn> & SpyMethods<Fn>;
+export type Spy<Fn extends AnyFunction = AnyFn> = CallSignature<Fn> &
+	SpyMethods<Fn>;
 
-type Impl<Fn extends AnyFn> = (...args: Parameters<Fn>) => ReturnType<Fn>;
+type Impl<Fn extends AnyFunction> = (...args: Parameters<Fn>) => ReturnType<Fn>;
 
-export interface CreateSpyOptions<Fn extends AnyFn> {
+export interface CreateSpyOptions<Fn extends AnyFunction> {
 	name?: string;
 	defaultImplementation?: Fn;
 }
@@ -64,7 +78,7 @@ export interface CreateSpyOptions<Fn extends AnyFn> {
  * callable (executing the current implementation) and an object carrying
  * `.mock`, the Helix brand, and the `mockFoo()` mutators.
  */
-export function createSpy<Fn extends AnyFn = AnyFn>(
+export function createSpy<Fn extends AnyFunction = AnyFn>(
 	options: CreateSpyOptions<Fn> = {},
 ): Spy<Fn> {
 	const onceQueue: Array<Impl<Fn> | Fn> = [];

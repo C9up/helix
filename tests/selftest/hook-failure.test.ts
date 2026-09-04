@@ -1,3 +1,4 @@
+import { defined } from "../__helpers__/defined.js";
 /**
  * Self-test: hook-failure attribution.
  *
@@ -98,7 +99,7 @@ describe("hook-failure — attribution", () => {
 		expect(flat.length).toBeGreaterThanOrEqual(2);
 		const failed = flat.filter((t) => t.status === "fail");
 		expect(failed.length).toBeGreaterThanOrEqual(2);
-		expect(failed[0].error?.message).toContain("boom-before-all");
+		expect(defined(failed[0]).error?.message).toContain("boom-before-all");
 	});
 
 	test("a throwing beforeEach fails the next test but later siblings", async () => {
@@ -121,6 +122,6 @@ describe("hook-failure — attribution", () => {
 		// At LEAST one test fails because of the hook error; runtime may
 		// also fail t2 (each iteration runs beforeEach).
 		expect(failed.length).toBeGreaterThanOrEqual(1);
-		expect(failed[0].error?.message).toContain("boom-before-each");
+		expect(defined(failed[0]).error?.message).toContain("boom-before-each");
 	});
 });

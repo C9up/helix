@@ -23,6 +23,7 @@ import { type TestContext, TestContextRegistry } from "./context.js";
 import { type Emitter, emitter } from "./emitter.js";
 import { Runner } from "./runner.js";
 import {
+	isSuiteHookCleanup,
 	makeSuiteHandle,
 	type SuiteHandle,
 	type SuiteHook,
@@ -322,7 +323,7 @@ export async function configure(options: ConfigureOptions): Promise<void> {
 		// A `setup` hook may resolve to its own undo (the AdonisJS idiom); park it
 		// with the teardowns so it runs in reverse order with everything else.
 		const undo = await fn(runner);
-		if (typeof undo === "function") runnerCleanups.push(undo);
+		if (isSuiteHookCleanup(undo)) runnerCleanups.push(undo);
 	}
 	for (const fn of teardown) runnerTeardowns.push(fn);
 }

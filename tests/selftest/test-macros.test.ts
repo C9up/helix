@@ -9,9 +9,17 @@ import { expect, Test, test } from "@c9up/helix";
 
 // --- Test.macro: class-level handle extension (chainable) ---
 // Typing side: a macro pairs a runtime registration with a declaration merge.
+//
+// Optional, and that is the honest shape: a macro exists on a handle only once
+// `Test.macro` has registered it, which happens at collection time. Declared as
+// required, the augmentation reached the source too — it is a `declare module`,
+// so it is global — and `src/runtime/suite.ts`, which builds a handle before
+// any macro is registered, was reported as missing a method nothing had put
+// there yet. That single error is why the whole test tree sat outside the
+// typecheck.
 declare module "@c9up/helix" {
 	interface TestHandle {
-		asSlow(): TestHandle;
+		asSlow?(): TestHandle;
 	}
 }
 
@@ -29,7 +37,7 @@ test("Test.macro extends the handle and chains", (ctx) => {
 		"Test.macro extends the handle and chains",
 	);
 	expect(ctx.test.options.isTodo).toBe(false);
-}).asSlow();
+}).asSlow?.();
 
 // --- test.macro: resource macro receiving the running test `t` (helix parity) ---
 let cleaned = false;

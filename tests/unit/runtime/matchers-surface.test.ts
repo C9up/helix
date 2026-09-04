@@ -8,6 +8,7 @@
  */
 import { describe, expect as vExpect, it as vIt } from "vitest";
 import { matchers } from "../../../src/runtime/matchers.js";
+import { defined } from "../../__helpers__/defined.js";
 
 /** `[name, arguments that pass, arguments that fail]` */
 type Row = [string, unknown[], unknown[]];
@@ -42,7 +43,7 @@ const run = (name: string, args: unknown[]) => {
 			(...a: unknown[]) => { pass: boolean; message(): string }
 		>
 	)[name];
-	return matcher(...args);
+	return defined(matcher, `matcher "${name}"`)(...args);
 };
 
 describe("helix > every matcher answers both ways", () => {

@@ -10,6 +10,7 @@ import {
 } from "../../src/cli/reporter.js";
 import type { Summary } from "../../src/cli/summary.js";
 import type { FileResult } from "../../src/runtime/run.js";
+import { defined } from "../__helpers__/defined.js";
 
 interface CapturedSink {
 	write(chunk: string): void;
@@ -33,9 +34,11 @@ function makeSink(): CapturedSink {
 const passResult = (file = "a.test.ts"): FileResult => ({
 	file,
 	tests: [
-		{ fullName: "passes", status: "pass", durationMs: 1 },
-		{ fullName: "skipped", status: "skip", durationMs: 0 },
+		{ name: "passes", fullName: "passes", status: "pass", durationMs: 1 },
+		{ name: "skipped", fullName: "skipped", status: "skip", durationMs: 0 },
 	],
+	suites: [],
+	totals: { pass: 1, fail: 0, skip: 1, todo: 0 },
 	durationMs: 1,
 });
 
@@ -43,16 +46,20 @@ const failResult = (): FileResult => ({
 	file: "b.test.ts",
 	tests: [
 		{
+			name: "boom",
 			fullName: "boom",
 			status: "fail",
 			durationMs: 2,
 			error: {
+				name: "AssertionError",
 				message: "expected 1 to be 2",
 				actual: 1,
 				expected: 2,
 			},
 		},
 	],
+	suites: [],
+	totals: { pass: 0, fail: 1, skip: 0, todo: 0 },
 	durationMs: 2,
 });
 
@@ -73,7 +80,7 @@ describe("helix > cli > reporter > DotReporter", () => {
 		const sink = makeSink();
 		const r = new DotReporter(sink);
 		r.onFileResult(failResult());
-		r.onFileError({ type: "error", file: "x", message: "crashed" });
+		r.onFileError({ file: "x", message: "crashed" });
 		expect(sink.output).toBe("FE");
 	});
 
@@ -124,7 +131,7 @@ describe("helix > cli > reporter > SpecReporter", () => {
 	it("falls back to '<unknown>' for file errors with no file field", () => {
 		const sink = makeSink();
 		const r = new SpecReporter(sink, false);
-		r.onFileError({ type: "error", message: "no file" });
+		r.onFileError({ file: undefined, message: "no file" });
 		expect(sink.output).toContain("<unknown>");
 		expect(sink.output).toContain("no file");
 	});
@@ -136,15 +143,19 @@ describe("helix > cli > reporter > JsonReporter", () => {
 		const r = new JsonReporter(sink);
 		r.onFileStart("a.test.ts");
 		r.onFileResult(passResult());
-		r.onFileError({ type: "error", file: "b", message: "boom" });
+		r.onFileError({ file: "b", message: "boom" });
 		r.onSummary(summary);
 
 		const lines = sink.output.trim().split("\n");
 		expect(lines).toHaveLength(4);
-		expect(JSON.parse(lines[0])).toMatchObject({ event: "file:start" });
-		expect(JSON.parse(lines[1])).toMatchObject({ event: "file:end" });
-		expect(JSON.parse(lines[2])).toMatchObject({ event: "file:error" });
-		expect(JSON.parse(lines[3])).toMatchObject({ event: "summary" });
+		expect(JSON.parse(defined(lines[0]))).toMatchObject({
+			event: "file:start",
+		});
+		expect(JSON.parse(defined(lines[1]))).toMatchObject({ event: "file:end" });
+		expect(JSON.parse(defined(lines[2]))).toMatchObject({
+			event: "file:error",
+		});
+		expect(JSON.parse(defined(lines[3]))).toMatchObject({ event: "summary" });
 	});
 });
 

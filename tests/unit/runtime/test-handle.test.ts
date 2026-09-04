@@ -202,15 +202,41 @@ vDescribe("helix > .with() turns one test into a row per case", () => {
 	vIt("runs the body once per row", async () => {
 		const root = resetRoot();
 		const seen: number[] = [];
-		test("each", (_ctx, row: number) => {
-			seen.push(row);
-		}).with([1, 2, 3]);
+		test("each")
+			.with([1, 2, 3])
+			.run((_ctx, row) => {
+				seen.push(row);
+			});
 
 		const result = await executeRoot(root, "inline");
 
 		vExpect(seen).toEqual([1, 2, 3]);
 		vExpect(result.totals.pass).toBe(3);
 	});
+
+	/**
+	 * A body given to `test(name, fn)` before `.with()` becomes the dataset
+	 * body — it runs once per row rather than once.
+	 *
+	 * The row itself is read through `.run()`, which is the typed entry: the
+	 * second parameter of a plain test body is the `done` callback, so a body
+	 * written for `test(name, fn).with(rows)` cannot declare the row's type.
+	 */
+	vIt(
+		"re-homes a body supplied before .with() as the dataset body",
+		async () => {
+			const root = resetRoot();
+			let runs = 0;
+			test("each", () => {
+				runs++;
+			}).with([1, 2, 3]);
+
+			const result = await executeRoot(root, "inline");
+
+			vExpect(runs).toBe(3);
+			vExpect(result.totals.pass).toBe(3);
+		},
+	);
 
 	vIt("takes the body through .run() instead", async () => {
 		const root = resetRoot();
@@ -230,9 +256,11 @@ vDescribe("helix > .with() turns one test into a row per case", () => {
 	vIt("resolves the rows at run time, so an async source works", async () => {
 		const root = resetRoot();
 		const seen: number[] = [];
-		test("each", (_ctx, row: number) => {
-			seen.push(row);
-		}).with(async () => [7, 8]);
+		test("each")
+			.with(async () => [7, 8])
+			.run((_ctx, row) => {
+				seen.push(row);
+			});
 
 		await executeRoot(root, "inline");
 
@@ -259,9 +287,11 @@ vDescribe("helix > .with() turns one test into a row per case", () => {
 
 	vIt("reports each row separately when one of them fails", async () => {
 		const root = resetRoot();
-		test("each", (_ctx, row: number) => {
-			expect(row).toBeLessThan(3);
-		}).with([1, 2, 3]);
+		test("each")
+			.with([1, 2, 3])
+			.run((_ctx, row) => {
+				expect(row).toBeLessThan(3);
+			});
 
 		const result = await executeRoot(root, "inline");
 

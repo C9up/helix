@@ -1,0 +1,24 @@
+{
+  // The tests, typechecked in their own program.
+  //
+  // They cannot share the build's: `tests/selftest` carries `declare module`
+  // augmentations that register runtime macros (`asSlow`), and in one program
+  // those leak into `src` — where `makeHandle` is then reported as missing a
+  // method nothing declared at compile time. Kept out of the build with
+  // `include: ["src"]`, they were not typechecked at all, which is a worse
+  // trade: nothing read the test files but the runtime.
+  //
+  // Here the augmentation applies where it was written, and `src` is compiled
+  // beside the tests rather than instead of them.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src", "tests", "scripts", "bin"],
+  "exclude": [
+    "node_modules",
+    // Deliberately unparseable: the fixture exists so the orchestrator can be
+    // seen reporting a file it could not load.
+    "tests/fixtures/orchestrator/syntax-error.test.ts"
+  ]
+}

@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { overlay } from "../../src/cli/coverage/diff/overlay.js";
 import { parseDiffString } from "../../src/cli/coverage/diff/parse.js";
 import type { CoverageSummary } from "../../src/cli/coverage/types.js";
+import { defined } from "../__helpers__/defined.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -151,8 +152,8 @@ describe("diff coverage — overlay", () => {
 		const diffMap = new Map([["/repo/src/a.ts", new Set([11, 12, 13])]]);
 		const result = overlay(summary, diffMap);
 		expect(result.files).toHaveLength(1);
-		expect(result.files[0].added).toBe(3);
-		expect(result.files[0].covered).toBe(2);
+		expect(defined(result.files[0]).added).toBe(3);
+		expect(defined(result.files[0]).covered).toBe(2);
 		expect(result.total.pct).toBeCloseTo(66.67, 1);
 	});
 
@@ -183,8 +184,8 @@ describe("diff coverage — overlay", () => {
 		// count: added=2 (10,12), covered=1 → 50%, not 25% (audit 2026-06-13).
 		const diffMap = new Map([["/repo/src/a.ts", new Set([10, 11, 12, 13])]]);
 		const result = overlay(summary, diffMap);
-		expect(result.files[0].added).toBe(2);
-		expect(result.files[0].covered).toBe(1);
+		expect(defined(result.files[0]).added).toBe(2);
+		expect(defined(result.files[0]).covered).toBe(1);
 		expect(result.total.pct).toBeCloseTo(50, 1);
 	});
 

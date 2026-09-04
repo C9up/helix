@@ -181,12 +181,20 @@ export type SuiteHookCleanup = (
  * idiom AdonisJS is written in (`setup: [() => testUtils.db().migrate()]`,
  * where `migrate()` resolves to the rollback). Both are honoured.
  *
+ * The return type is `unknown` because a hook may legitimately return anything
+ * — the value is ignored unless it is a function, which is the undo. Spelt as a
+ * union of "void" and "a cleanup", a hook that happened to return a string was
+ * a type error for doing something the runtime already ignores.
+ *
  * The `Runner` import is type-only, so this module stays a leaf at runtime even
  * though `runner.ts` imports it.
  */
-export type SuiteHook =
-	| ((runner: Runner) => void | Promise<void>)
-	| ((runner: Runner) => SuiteHookCleanup | Promise<SuiteHookCleanup>);
+export type SuiteHook = (runner: Runner) => unknown;
+
+/** Is what a hook returned its undo? */
+export function isSuiteHookCleanup(value: unknown): value is SuiteHookCleanup {
+	return typeof value === "function";
+}
 
 /**
  * What `configureSuite` and `runner.onSuite` receive — helix's `Suite`, minus

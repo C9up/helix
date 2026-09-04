@@ -12,6 +12,7 @@ import {
 	resetRoot,
 	test,
 } from "../../../src/runtime/suite.js";
+import { defined } from "../../__helpers__/defined.js";
 
 vDescribe("suite + run — nested DSL", () => {
 	vIt("runs a flat test", async () => {
@@ -31,8 +32,8 @@ vDescribe("suite + run — nested DSL", () => {
 		});
 		const result = await executeRoot(root, "inline");
 		vExpect(result.totals.fail).toBe(1);
-		vExpect(result.tests[0].error?.name).toBe("AssertionError");
-		vExpect(result.tests[0].error?.operator).toBe("toBe");
+		vExpect(defined(result.tests[0]).error?.name).toBe("AssertionError");
+		vExpect(defined(result.tests[0]).error?.operator).toBe("toBe");
 	});
 
 	vIt("nests describe and runs hooks in order", async () => {
@@ -98,12 +99,15 @@ vDescribe("suite + run — nested DSL", () => {
 			[1, 2, 3],
 			[2, 3, 5],
 		])("%d + %d = %d", ([a, b, c]) => {
-			expect(a + b).toBe(c);
+			// An index into an array says nothing about its length, so each
+			// binding is "possibly undefined". The row IS a triple; reading it
+			// through `defined` says so without asserting it.
+			expect(defined(a) + defined(b)).toBe(defined(c));
 		});
 		const result = await executeRoot(root, "inline");
 		vExpect(result.tests.length).toBe(2);
-		vExpect(result.tests[0].name).toBe("1 + 2 = 3");
-		vExpect(result.tests[1].name).toBe("2 + 3 = 5");
+		vExpect(defined(result.tests[0]).name).toBe("1 + 2 = 3");
+		vExpect(defined(result.tests[1]).name).toBe("2 + 3 = 5");
 		vExpect(result.totals.pass).toBe(2);
 	});
 
@@ -200,8 +204,8 @@ vDescribe("suite + run — nested DSL", () => {
 		});
 		const result = await executeRoot(root, "inline");
 		vExpect(result.totals.fail).toBe(1);
-		vExpect(result.tests[0].error?.message).toContain("body fail");
-		vExpect(result.tests[0].error?.message).toContain("cleanup fail");
+		vExpect(defined(result.tests[0]).error?.message).toContain("body fail");
+		vExpect(defined(result.tests[0]).error?.message).toContain("cleanup fail");
 	});
 
 	vIt("root-level beforeAll/afterAll execute once", async () => {
@@ -234,7 +238,7 @@ vDescribe("suite + run — nested DSL", () => {
 		const root = resetRoot();
 		test.each([[50]])("value=%d%%", () => {});
 		const result = await executeRoot(root, "inline");
-		vExpect(result.tests[0].name).toBe("value=50%");
+		vExpect(defined(result.tests[0]).name).toBe("value=50%");
 	});
 
 	vIt("test timeout surfaces as a fail", async () => {
@@ -242,7 +246,7 @@ vDescribe("suite + run — nested DSL", () => {
 		test("hangs", () => new Promise<void>(() => {}));
 		const result = await executeRoot(root, "inline", { timeoutMs: 50 });
 		vExpect(result.totals.fail).toBe(1);
-		vExpect(result.tests[0].error?.message).toMatch(/timeout/);
+		vExpect(defined(result.tests[0]).error?.message).toMatch(/timeout/);
 	});
 
 	vIt("beforeAll failure fails flat tests (legacy case)", async () => {
@@ -256,7 +260,7 @@ vDescribe("suite + run — nested DSL", () => {
 		});
 		const result = await executeRoot(root, "inline");
 		vExpect(result.totals.fail).toBe(2);
-		vExpect(result.tests[0].error?.message).toBe("setup fail");
+		vExpect(defined(result.tests[0]).error?.message).toBe("setup fail");
 	});
 
 	vIt("getRoot returns the current root", () => {
@@ -282,7 +286,7 @@ vDescribe("helix > hook timeouts", () => {
 			const result = await executeRoot(root, "inline");
 
 			vExpect(result.totals.fail).toBe(1);
-			vExpect(result.tests[0].error?.message).toMatch(
+			vExpect(defined(result.tests[0]).error?.message).toMatch(
 				/beforeAll hook exceeded/,
 			);
 		},
