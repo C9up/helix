@@ -8,7 +8,6 @@
  * just the last one's.
  */
 
-import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -16,20 +15,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readFailedCache } from "../../src/cli/failed-cache.js";
 import { type RunConfig, runSuites, type SuiteRun } from "../../src/cli/run.js";
+import { resolveTsxLoader } from "../__helpers__/tsx-loader.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const workerEntry = path.resolve(here, "../../src/runtime/cli-worker.ts");
 
 /** Same virtual-store scan as the other integration tests. */
-function resolveTsxLoader(): string | undefined {
-	const workspaceRoot = path.resolve(here, "../../../..");
-	const store = path.join(workspaceRoot, "node_modules/.pnpm");
-	if (!existsSync(store)) return undefined;
-	const entry = readdirSync(store).find((name) => name.startsWith("tsx@"));
-	if (!entry) return undefined;
-	const candidate = path.join(store, entry, "node_modules/tsx/dist/loader.mjs");
-	return existsSync(candidate) ? `file://${candidate}` : undefined;
-}
 
 const tsxLoader = resolveTsxLoader();
 const nodeArgs = tsxLoader ? ["--import", tsxLoader] : undefined;

@@ -3,7 +3,6 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
-	readdirSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
@@ -16,18 +15,9 @@ import { overlay } from "../../src/cli/coverage/diff/overlay.js";
 import { parseDiffString } from "../../src/cli/coverage/diff/parse.js";
 import type { CoverageSummary } from "../../src/cli/coverage/types.js";
 import { defined } from "../__helpers__/defined.js";
+import { resolveTsxLoader } from "../__helpers__/tsx-loader.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-
-function resolveTsxLoader(): string | undefined {
-	const workspaceRoot = path.resolve(here, "../../../..");
-	const store = path.join(workspaceRoot, "node_modules/.pnpm");
-	if (!existsSync(store)) return undefined;
-	const entry = readdirSync(store).find((name) => name.startsWith("tsx@"));
-	if (!entry) return undefined;
-	const candidate = path.join(store, entry, "node_modules/tsx/dist/loader.mjs");
-	return existsSync(candidate) ? `file://${candidate}` : undefined;
-}
 
 const tsxLoader = resolveTsxLoader();
 

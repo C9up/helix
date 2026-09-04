@@ -1,29 +1,13 @@
-import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { discover } from "../../src/cli/discover.js";
 import { run } from "../../src/cli/run.js";
+import { resolveTsxLoader } from "../__helpers__/tsx-loader.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.resolve(here, "../fixtures/orchestrator");
 const workerEntry = path.resolve(here, "../../src/runtime/cli-worker.ts");
-
-/**
- * Resolve the `tsx` ESM loader from the workspace virtual store. pnpm's
- * isolated-modules layout means `node --import tsx` fails unless we pass
- * the full path, and the version suffix (`tsx@X.Y.Z`) changes on upgrades
- * — so we scan instead of hard-coding.
- */
-function resolveTsxLoader(): string | undefined {
-	const workspaceRoot = path.resolve(here, "../../../..");
-	const store = path.join(workspaceRoot, "node_modules/.pnpm");
-	if (!existsSync(store)) return undefined;
-	const entry = readdirSync(store).find((name) => name.startsWith("tsx@"));
-	if (!entry) return undefined;
-	const candidate = path.join(store, entry, "node_modules/tsx/dist/loader.mjs");
-	return existsSync(candidate) ? `file://${candidate}` : undefined;
-}
 
 const tsxLoader = resolveTsxLoader();
 const nodeArgs = tsxLoader ? ["--import", tsxLoader] : undefined;
