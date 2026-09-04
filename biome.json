@@ -1,0 +1,43 @@
+{
+	"root": true,
+	"$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "on"
+			}
+		}
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"suspicious": {
+				"noExplicitAny": "error"
+			},
+			"style": {
+				"noNonNullAssertion": "error",
+				"useConst": "error",
+				"useImportType": "error"
+			},
+			"correctness": {
+				"noUnusedImports": "error"
+			}
+		}
+	},
+	"files": {
+		"includes": [
+			"**",
+			"!**/dist/**",
+			"!**/coverage/**",
+			"!**/target/**",
+			"!**/index.js",
+			"!**/index.d.ts",
+			"!**/tsconfig*.json",
+			"!**/package.json",
+			"!**/vitest.config.ts",
+			"!**/scripts/**",
+			"!tests/fixtures/orchestrator/syntax-error.test.ts"
+		]
+	}
+}
