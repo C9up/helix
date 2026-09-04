@@ -412,6 +412,24 @@ process.stdin.on("end", () => {
         fn on_summary(&mut self, _summary: &Summary) {}
     }
 
+    /// Records the moment the pool announced a file error. Spawning node costs
+    /// whatever the machine costs — on a loaded CI runner, seconds — so a
+    /// wall-clock ceiling measured from before the spawn cannot tell "killed
+    /// at once" from "started slowly", which is the only thing the grace test
+    /// is about.
+    struct ErrorClock {
+        at: Arc<std::sync::Mutex<Option<std::time::Instant>>>,
+    }
+
+    impl Reporter for ErrorClock {
+        fn on_file_start(&mut self, _file: &str) {}
+        fn on_file_result(&mut self, _result: &FileResult) {}
+        fn on_file_error(&mut self, _error: &WorkerError) {
+            *self.at.lock().unwrap() = Some(std::time::Instant::now());
+        }
+        fn on_summary(&mut self, _summary: &Summary) {}
+    }
+
     fn config(entry: String, bail: bool) -> PoolConfig {
         PoolConfig {
             node_bin: "node".into(),
@@ -558,9 +576,12 @@ process.stdin.on("end", () => {
 "#,
         )
         .unwrap();
-        let (reporter, _log) = recorder();
+        let errored_at = Arc::new(std::sync::Mutex::new(None));
+        let reporter: Arc<Mutex<Box<dyn Reporter + Send>>> =
+            Arc::new(Mutex::new(Box::new(ErrorClock {
+                at: errored_at.clone(),
+            })));
 
-        let started = std::time::Instant::now();
         let (results, errors) = run_pool(
             vec![dir.join("a.test.ts")],
             config(entry.to_string_lossy().into_owned(), false),
@@ -568,19 +589,25 @@ process.stdin.on("end", () => {
         )
         .await
         .unwrap();
+        let finished = std::time::Instant::now();
 
         // The worker's own diagnosis survives; nothing replaces it.
         assert_eq!(results.len(), 0);
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].message, "the suite could not be loaded");
 
-        // Spawning node costs a few hundred milliseconds; the grace is 2s. A
-        // ceiling between the two is what separates "killed at once" from
-        // "waited the grace out first", which is what this path used to do.
-        let elapsed = started.elapsed();
+        // From the moment the error was known to the moment the run ended: the
+        // grace is 2s, and paying it here only delays an error the run already
+        // has. Measured from the announcement, so a slow `node` start-up cannot
+        // look like a pool that waited.
+        let announced = errored_at
+            .lock()
+            .unwrap()
+            .expect("the pool never announced the file error");
+        let waited = finished.duration_since(announced);
         assert!(
-            elapsed < Duration::from_millis(1500),
-            "the pool waited {elapsed:?} on a worker that had already failed"
+            waited < Duration::from_millis(1000),
+            "the pool waited {waited:?} on a worker that had already failed"
         );
     }
 
