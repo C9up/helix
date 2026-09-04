@@ -217,11 +217,12 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm build:napi
       - run: pnpm exec vitest run tests/unit
+      - run: pnpm build
       # The whole vitest suite, which is what the thresholds in
       # vitest.config.ts were measured against — `tests/unit` alone is a
-      # subset and could never meet them.
+      # subset and could never meet them. After `build`, because the
+      # integration tests spawn `bin/helix.js`, which runs out of `dist`.
       - run: pnpm test:coverage
-      - run: pnpm build
       - run: pnpm test:self
 
   # Publish job — gated on workflow_dispatch (manual maintainer trigger).
