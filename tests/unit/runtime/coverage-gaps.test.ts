@@ -303,6 +303,7 @@ describe("run.executeRoot — root-level hook failures", () => {
 	it("root afterAll failure surfaces as a synthetic test fail", async () => {
 		const root = resetRoot();
 		const { afterAll } = await import("../../../src/runtime/suite.js");
+		// biome-ignore lint/suspicious/noDuplicateTestHooks: helix's own afterAll, under test
 		afterAll(() => {
 			throw new Error("root teardown fail");
 		});

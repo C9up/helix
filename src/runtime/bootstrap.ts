@@ -58,7 +58,7 @@ interface BootstrapModule {
 	runnerHooks?: { setup?: RunnerHook[]; teardown?: RunnerHook[] };
 	configureSuite?: (suite: SuiteHandle) => unknown;
 	filters?: ConfigureFilters;
-	importer?: (file: URL) => void | Promise<void>;
+	importer?: (file: URL) => unknown;
 }
 
 /** `filters` as exported — every field optional, so read each defensively. */
@@ -91,7 +91,7 @@ function readModule(imported: unknown): BootstrapModule {
 		filters: readFilters(imported),
 		importer:
 			typeof importer === "function"
-				? (file: URL): void | Promise<void> => importer(file)
+				? (file: URL): unknown => importer(file)
 				: undefined,
 		plugins: Array.isArray(plugins)
 			? plugins.filter((p): p is Plugin => typeof p === "function")

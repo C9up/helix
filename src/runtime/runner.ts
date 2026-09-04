@@ -22,10 +22,7 @@ import { type Emitter, emitter } from "./emitter.js";
 import { currentSuite, type SuiteHandle, setBail } from "./suite-taps.js";
 
 /** A helix reporter: a handler, or a named one wrapping it. */
-export type ReporterHandler = (
-	runner: Runner,
-	emitter: Emitter,
-) => void | Promise<void>;
+export type ReporterHandler = (runner: Runner, emitter: Emitter) => unknown;
 
 export type ReporterContract =
 	| ReporterHandler

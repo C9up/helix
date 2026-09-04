@@ -43,7 +43,7 @@
 		"build:napi-types": "node scripts/build-napi-types.mjs",
 		"test": "vitest run",
 		"test:self": "node bin/helix.js test tests/selftest --timeout=30000",
-		"lint": "biome check src/",
+		"lint": "biome check src/ tests/",
 		"test:coverage": "vitest run --coverage",
 		"typecheck": "tsc --noEmit",
 		"prepublishOnly": "pnpm build",

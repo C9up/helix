@@ -118,6 +118,9 @@ vDescribe("suite + run — nested DSL", () => {
 				// should be skipped
 				throw new Error("should not run");
 			});
+			// This is helix's own `test.only`, under test — the rule cannot tell
+			// it from vitest's, and this file is run by vitest.
+			// biome-ignore lint/suspicious/noFocusedTests: helix's own, under test
 			test.only("b", () => {
 				expect(1).toBe(1);
 			});
@@ -135,6 +138,7 @@ vDescribe("suite + run — nested DSL", () => {
 				throw new Error("should not run");
 			});
 		});
+		// biome-ignore lint/suspicious/noFocusedTests: helix's own, under test
 		describe.only("b", () => {
 			test("b1", () => {
 				expect(1).toBe(1);

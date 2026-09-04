@@ -43,7 +43,7 @@ export type SuiteFn = () => void;
 export type CleanupFn = (
 	hasError?: boolean,
 	subject?: TestInstance | GroupInstance,
-) => void | Promise<void>;
+) => unknown;
 /**
  * A lifecycle hook. Receives the Test instance (test hooks) or Group instance
  * (group hooks) as its argument; may return a {@link CleanupFn}.
@@ -256,7 +256,7 @@ export interface DatasetHandle<Row> {
 	 * name); the name came from `test()`. Returns the base handle for further
 	 * chaining.
 	 */
-	run(fn: (ctx: TestContext, row: Row) => void | Promise<void>): TestHandle;
+	run(fn: (ctx: TestContext, row: Row) => unknown): TestHandle;
 }
 
 export interface SuiteNode {
@@ -676,7 +676,7 @@ type TestApi = {
 	todo(name: string): void;
 	each<Row extends EachRow>(
 		rows: EachRows<Row>,
-	): (name: string, fn: (row: Row) => void | Promise<void>) => void;
+	): (name: string, fn: (row: Row) => unknown) => void;
 	/**
 	 * helix-style grouping: `test.group(name, (group) => { … })`. Returns the
 	 * {@link Group} — the SAME instance passed to the body and to the group's
@@ -865,7 +865,7 @@ testFn.todo = (name) => {
 	registerTest(name, "todo", undefined);
 };
 testFn.each = <Row extends EachRow>(rows: EachRows<Row>) => {
-	return (name: string, fn: (row: Row) => void | Promise<void>) => {
+	return (name: string, fn: (row: Row) => unknown) => {
 		// A function source (`test.each(() => rows)`) is resolved eagerly at
 		// collection time — per-row nodes need concrete rows to register.
 		const resolved = typeof rows === "function" ? rows() : rows;

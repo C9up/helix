@@ -81,7 +81,7 @@ export interface PluginApi {
  * A helix plugin. Runs once at bootstrap; may be async — e.g. to boot a server
  * before registering `client` on the test context.
  */
-export type Plugin = (api: PluginApi) => void | Promise<void>;
+export type Plugin = (api: PluginApi) => unknown;
 
 /**
  * Filters applied to the tests a file declares (`config.filters`).
@@ -156,7 +156,7 @@ export interface ConfigureOptions {
 	 * `configure` has to re-import the config module, and hooks it registers must
 	 * exist before the setup hooks are drained.
 	 */
-	configureSuite?: (suite: SuiteHandle) => void | Promise<void>;
+	configureSuite?: (suite: SuiteHandle) => unknown;
 	/**
 	 * The reporters this run activated (`reporters.activated`). Read-only
 	 * truth: reporters live in the CLI process, so naming one here would not
@@ -183,7 +183,7 @@ export interface ConfigureOptions {
 	 * `import(file.href)`. Receives the URL helix would have imported —
 	 * cache-busting query included, so repeated runs still re-evaluate.
 	 */
-	importer?: (file: URL) => void | Promise<void>;
+	importer?: (file: URL) => unknown;
 	/** Run once before the tests (runner `setup`). */
 	setup?: RunnerHook[];
 	/** Run once after the tests, reverse order (runner `teardown`). */
@@ -220,7 +220,7 @@ interface ConfiguredDefaults {
 	retries?: number;
 	suite?: string;
 	filters?: ConfigureFilters;
-	importer?: (file: URL) => void | Promise<void>;
+	importer?: (file: URL) => unknown;
 }
 
 const configuredDefaults: ConfiguredDefaults = {};

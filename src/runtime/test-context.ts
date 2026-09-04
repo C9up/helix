@@ -183,7 +183,7 @@ export function onTestFailed(cb: TestCleanup): void {
 type ExecutedHook = (
 	test: { options: unknown; context: unknown },
 	hasError: boolean,
-) => void | Promise<void>;
+) => unknown;
 
 const executedHooks: ExecutedHook[] = [];
 

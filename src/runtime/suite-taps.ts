@@ -169,10 +169,7 @@ export function groupHandle(node: SuiteNode): GroupHandle {
  * What a `setup` hook may return so it gets undone afterwards — helix's
  * `@poppinss/hooks` cleanup handler, called with `(error, runner)`.
  */
-export type SuiteHookCleanup = (
-	error: Error | null,
-	runner: Runner,
-) => void | Promise<void>;
+export type SuiteHookCleanup = (error: Error | null, runner: Runner) => unknown;
 
 /**
  * A run-level hook, as `suite.setup()` / `suite.teardown()` take it.

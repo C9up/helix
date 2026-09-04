@@ -131,7 +131,7 @@ jobs:
       # exit code and not one word about which test failed.
       - name: Vitest (JSON reporter)
         if: matrix.test
-        run: pnpm exec vitest run tests/unit --reporter=default --reporter=json --outputFile=test-results.json
+        run: pnpm exec vitest run --coverage tests/unit --reporter=default --reporter=json --outputFile=test-results.json
         shell: bash
 
       - name: Smoke gate — tests ran AND zero skipped (Linux/macOS)
@@ -216,7 +216,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm build:napi
-      - run: pnpm exec vitest run tests/unit
+      - run: pnpm exec vitest run --coverage tests/unit
       - run: pnpm build
       - run: pnpm test:self
 
