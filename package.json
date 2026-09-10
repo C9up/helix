@@ -1,7 +1,7 @@
 {
 	"name": "@c9up/helix",
 	"version": "0.2.10",
-	"description": "Helix \u2014 framework-agnostic test runtime for the Ream ecosystem (Vitest-compatible runner, spies, container overrides, time-travel). Per-package fakes live in each package's /testing.",
+	"description": "Helix — framework-agnostic test runtime for the Ream ecosystem (Vitest-compatible runner, spies, container overrides, time-travel). Per-package fakes live in each package's /testing.",
 	"license": "MIT",
 	"type": "module",
 	"main": "./src/index.ts",
@@ -49,14 +49,13 @@
 		"prepublishOnly": "pnpm build",
 		"typecheck:tests": "tsc --noEmit -p tsconfig.test.json"
 	},
-	"dependencies": {},
 	"devDependencies": {
-		"@vitest/coverage-v8": "^4.1.2",
-		"tsx": "^4.21.0",
-		"@biomejs/biome": "^2.4.10",
-		"@types/node": "*",
-		"typescript": "^6.0.2",
-		"vitest": "^4.1.2"
+		"@biomejs/biome": "^2.5.12",
+		"@types/node": "^22.20.1",
+		"@vitest/coverage-v8": "4.1.11",
+		"tsx": "^4.23.13",
+		"typescript": "^6.0.3",
+		"vitest": "4.1.11"
 	},
 	"files": [
 		"bin",
