@@ -1,6 +1,6 @@
 {
 	"name": "@c9up/helix",
-	"version": "0.2.10",
+	"version": "0.2.11",
 	"description": "Helix — framework-agnostic test runtime for the Ream ecosystem (Vitest-compatible runner, spies, container overrides, time-travel). Per-package fakes live in each package's /testing.",
 	"license": "MIT",
 	"type": "module",
@@ -35,6 +35,9 @@
 			"import": "./src/cli/runner.ts"
 		},
 		"./bin/helix.js": "./bin/helix.js"
+	},
+	"engines": {
+		"node": ">=22.0.0"
 	},
 	"scripts": {
 		"prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
