@@ -74,7 +74,7 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm exec tsc -p tsconfig.build.json --noEmit
       # The build project is `src` alone, so a type error in a test file
@@ -107,7 +107,7 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -216,7 +216,7 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
       - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm build:napi
@@ -250,7 +250,7 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
       - name: Verify NPM_TOKEN secret
         run: |

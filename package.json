@@ -1,106 +1,107 @@
 {
-	"name": "@c9up/helix",
-	"version": "0.2.11",
-	"description": "Helix — framework-agnostic test runtime for the Ream ecosystem (Vitest-compatible runner, spies, container overrides, time-travel). Per-package fakes live in each package's /testing.",
-	"license": "MIT",
-	"type": "module",
-	"main": "./src/index.ts",
-	"types": "./src/index.ts",
-	"bin": {
-		"helix": "bin/helix.js"
-	},
-	"exports": {
-		".": {
-			"types": "./src/index.ts",
-			"import": "./src/index.ts"
-		},
-		"./container": {
-			"types": "./src/container/index.ts",
-			"import": "./src/container/index.ts"
-		},
-		"./time": {
-			"types": "./src/time/index.ts",
-			"import": "./src/time/index.ts"
-		},
-		"./runtime": {
-			"types": "./src/runtime/index.ts",
-			"import": "./src/runtime/index.ts"
-		},
-		"./runtime/worker": {
-			"types": "./src/runtime/worker.ts",
-			"import": "./src/runtime/worker.ts"
-		},
-		"./runner": {
-			"types": "./src/cli/runner.ts",
-			"import": "./src/cli/runner.ts"
-		},
-		"./bin/helix.js": "./bin/helix.js"
-	},
-	"engines": {
-		"node": ">=22.0.0"
-	},
-	"scripts": {
-		"prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-		"build": "tsc -p tsconfig.build.json",
-		"build:napi": "cargo build --release -p ream-test-napi && pnpm build:napi-types && node scripts/copy-napi.mjs",
-		"build:napi-types": "node scripts/build-napi-types.mjs",
-		"test": "vitest run",
-		"test:self": "node bin/helix.js test tests/selftest --timeout=30000",
-		"lint": "biome check src/ tests/",
-		"test:coverage": "vitest run --coverage",
-		"typecheck": "tsc --noEmit",
-		"prepublishOnly": "pnpm build",
-		"typecheck:tests": "tsc --noEmit -p tsconfig.test.json"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^2.5.12",
-		"@types/node": "^22.20.1",
-		"@vitest/coverage-v8": "4.1.11",
-		"tsx": "^4.23.13",
-		"typescript": "^6.0.3",
-		"vitest": "4.1.11"
-	},
-	"files": [
-		"bin",
-		"dist",
-		"index.*.node",
-		"README.md",
-		"LICENSE"
-	],
-	"publishConfig": {
-		"main": "./dist/index.js",
-		"types": "./dist/index.d.ts",
-		"exports": {
-			".": {
-				"types": "./dist/index.d.ts",
-				"import": "./dist/index.js"
-			},
-			"./container": {
-				"types": "./dist/container/index.d.ts",
-				"import": "./dist/container/index.js"
-			},
-			"./time": {
-				"types": "./dist/time/index.d.ts",
-				"import": "./dist/time/index.js"
-			},
-			"./runtime": {
-				"types": "./dist/runtime/index.d.ts",
-				"import": "./dist/runtime/index.js"
-			},
-			"./runtime/worker": {
-				"types": "./dist/runtime/worker.d.ts",
-				"import": "./dist/runtime/worker.js"
-			},
-			"./runner": {
-				"types": "./dist/cli/runner.d.ts",
-				"import": "./dist/cli/runner.js"
-			},
-			"./bin/helix.js": "./bin/helix.js"
-		},
-		"access": "public"
-	},
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/C9up/helix.git"
-	}
+  "name": "@c9up/helix",
+  "version": "0.2.11",
+  "description": "Helix — framework-agnostic test runtime for the Ream ecosystem (Vitest-compatible runner, spies, container overrides, time-travel). Per-package fakes live in each package's /testing.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "helix": "bin/helix.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./container": {
+      "types": "./src/container/index.ts",
+      "import": "./src/container/index.ts"
+    },
+    "./time": {
+      "types": "./src/time/index.ts",
+      "import": "./src/time/index.ts"
+    },
+    "./runtime": {
+      "types": "./src/runtime/index.ts",
+      "import": "./src/runtime/index.ts"
+    },
+    "./runtime/worker": {
+      "types": "./src/runtime/worker.ts",
+      "import": "./src/runtime/worker.ts"
+    },
+    "./runner": {
+      "types": "./src/cli/runner.ts",
+      "import": "./src/cli/runner.ts"
+    },
+    "./bin/helix.js": "./bin/helix.js"
+  },
+  "//engines": "Node 24, not 22, because AsyncLocalStorage sits on the request hot path — the container resolves through it, HttpContext is it, and the emitter reads it on every event. Node 24 backs it with AsyncContextFrame by default, and measured on that exact pattern (one context per request, six async boundaries, several reads) it costs 0.61 us per request instead of 1.55 us: 2.5x, on every request, for free. Before 24 the same mechanism existed only behind an experimental flag, and a framework cannot base its performance on a flag the application has to remember to pass. This is NOT 'track the current LTS' — security fixes still land in 22 until 2027, npm 11 is irrelevant under pnpm, and node:sqlite is not what atlas uses.",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "tsc -p tsconfig.build.json",
+    "build:napi": "cargo build --release -p ream-test-napi && pnpm build:napi-types && node scripts/copy-napi.mjs",
+    "build:napi-types": "node scripts/build-napi-types.mjs",
+    "test": "vitest run",
+    "test:self": "node bin/helix.js test tests/selftest --timeout=30000",
+    "lint": "biome check src/ tests/",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.test.json"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@types/node": "^22.20.1",
+    "@vitest/coverage-v8": "4.1.11",
+    "tsx": "^4.23.13",
+    "typescript": "^6.0.3",
+    "vitest": "4.1.11"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "index.*.node",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./container": {
+        "types": "./dist/container/index.d.ts",
+        "import": "./dist/container/index.js"
+      },
+      "./time": {
+        "types": "./dist/time/index.d.ts",
+        "import": "./dist/time/index.js"
+      },
+      "./runtime": {
+        "types": "./dist/runtime/index.d.ts",
+        "import": "./dist/runtime/index.js"
+      },
+      "./runtime/worker": {
+        "types": "./dist/runtime/worker.d.ts",
+        "import": "./dist/runtime/worker.js"
+      },
+      "./runner": {
+        "types": "./dist/cli/runner.d.ts",
+        "import": "./dist/cli/runner.js"
+      },
+      "./bin/helix.js": "./bin/helix.js"
+    },
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/C9up/helix.git"
+  }
 }
