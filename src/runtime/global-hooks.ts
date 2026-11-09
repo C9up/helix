@@ -52,6 +52,10 @@ export async function runGlobalHooks(
 	if (bootstrap === undefined || bootstrap === "") {
 		return async () => {};
 	}
+	// The bootstrap and its setup hooks belong to the test run; a caller that
+	// reaches this before `run()` must not have them resolve another
+	// environment's connections.
+	process.env.NODE_ENV = "test";
 
 	// Everything below needs unwinding if it throws: the import can fail, and so
 	// can a setup hook — half-way through, with earlier hooks already having

@@ -39,6 +39,31 @@ async function bootstrap(body: string): Promise<string> {
 }
 
 describe("runGlobalHooks", () => {
+	it("runs the bootstrap and its setup in the test environment", async () => {
+		const log = path.join(root, "env.log");
+		const file = await bootstrap(
+			[
+				'import { appendFileSync } from "node:fs"',
+				`appendFileSync(${JSON.stringify(log)}, "import=" + process.env.NODE_ENV + "\\n")`,
+				"export const runnerHooks = {",
+				`  setup: [() => appendFileSync(${JSON.stringify(log)}, "setup=" + process.env.NODE_ENV + "\\n")],`,
+				"}",
+				"",
+			].join("\n"),
+		);
+		const saved = process.env.NODE_ENV;
+		process.env.NODE_ENV = "development";
+		try {
+			const drop = await runGlobalHooks(file);
+			await drop();
+		} finally {
+			process.env.NODE_ENV = saved;
+		}
+
+		const { readFileSync } = await import("node:fs");
+		expect(readFileSync(log, "utf8")).toBe("import=test\nsetup=test\n");
+	});
+
 	it("runs setup once and marks the workers to skip it", async () => {
 		const log = path.join(root, "log.json");
 		const file = await bootstrap(

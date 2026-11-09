@@ -328,6 +328,12 @@ async function expandPositionals(positional, discover, discovery) {
 }
 
 async function main() {
+	// A test run executes in the `test` environment, from its very first
+	// statement: the config file, the bootstrap and its `runnerHooks.setup`
+	// (migrations, seeds) all run in this process, before any worker exists.
+	// Set unconditionally, as AdonisJS `bin/test.ts` does — a `NODE_ENV` left in
+	// the shell or by CI must not point a global setup at another database.
+	process.env.NODE_ENV = "test";
 	const argv = process.argv.slice(2);
 	const subcommand = argv[0] ?? "test";
 	if (subcommand === "-h" || subcommand === "--help") {
