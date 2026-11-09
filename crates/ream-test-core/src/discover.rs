@@ -152,10 +152,14 @@ mod tests {
     }
 
     fn tempfile_dir() -> PathBuf {
+        // Tests run in parallel and two can read the same clock value, so a
+        // counter keeps each one in its own directory.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let mut dir = std::env::temp_dir();
         let id = format!(
-            "helix-test-{}-{}",
+            "helix-test-{}-{}-{}",
             std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
