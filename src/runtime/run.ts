@@ -928,9 +928,12 @@ async function runAttempt(
 	setFrameContext(context);
 	testInstance.context = context;
 
-	const beforeErr = await runHooks(before, true, testInstance);
+	// Every per-test hook runs under the test's timeout, as the group hooks do
+	// under the run's: one that never settles fails its test, named, instead of
+	// hanging the file until its worker is killed and its results are lost.
+	const beforeErr = await runHooks(before, true, testInstance, timeoutMs);
 	if (beforeErr) {
-		const afterErrBE = await runHooks(after, false, testInstance);
+		const afterErrBE = await runHooks(after, false, testInstance, timeoutMs);
 		await drainTestOutcomeHooks(true);
 		return {
 			name: title,
@@ -953,6 +956,7 @@ async function runAttempt(
 		asHooks(node.setups, "beforeEach"),
 		true,
 		testInstance,
+		timeoutMs,
 	);
 	if (setupErr) {
 		testErr = setupErr;
@@ -1029,8 +1033,9 @@ async function runAttempt(
 		asHooks(node.teardowns, "afterEach"),
 		false,
 		testInstance,
+		timeoutMs,
 	);
-	const afterErr = await runHooks(after, false, testInstance);
+	const afterErr = await runHooks(after, false, testInstance, timeoutMs);
 	const finalErr = combineErrors(combineErrors(testErr, teardownErr), afterErr);
 	// Record the outcome BEFORE the frame's cleanup drain (finally) fires, so
 	// `ctx.cleanup((hasError, test) => …)` sees the right `hasError`.
