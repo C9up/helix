@@ -8,7 +8,12 @@
  *   3. We emit a single framed line on **stderr** prefixed with
  *      `__HELIX_RESULT__`, with the parent's `nonce` echoed back so a
  *      test that happens to print that prefix can't spoof the result.
- *   4. Exit with code 0 on `result`, 1 on `error`.
+ *   4. Exit with code 0 on a clean `result`, 1 on a failing one or on `error`.
+ *
+ * An error nobody handled (a floating rejection, a timer that throws) is sent
+ * as an `unhandled` frame whenever it happens — during the tests or after the
+ * result — and the worker keeps going. The parent reads frames until the worker
+ * exits, so a late one still turns the file red.
  *
  * Pre-handshake errors (e.g. malformed instruction on stdin) are emitted
  * with the `__helix_pre_handshake__` magic nonce — the parent accepts
@@ -17,9 +22,8 @@
  *
  * Flush discipline: on the happy path we await the stream drain callback
  * before setting `process.exitCode` so the frame always reaches the
- * parent. For the fatal `unhandledRejection` path we use `fs.writeSync`
- * on fd 2 to guarantee the bytes hit the pipe before Node tears the
- * process down.
+ * parent. For the `unhandled` frames we use `fs.writeSync` on fd 2 to
+ * guarantee the bytes hit the pipe before Node tears the process down.
  */
 
 import { writeSync } from "node:fs";
@@ -108,24 +112,41 @@ async function main(): Promise<void> {
 	}
 
 	// Installed AFTER the instruction is read so we can echo the right nonce.
-	// Synchronous write so Node's default "crash on unhandledRejection"
-	// behaviour can't evict the frame before the parent reads it.
-	process.on("unhandledRejection", (reason) => {
+	// An error nobody handled is recorded, not fatal: the file keeps running so
+	// its results still arrive, and the `unhandled` frame makes the parent count
+	// the file as errored. Listening for `uncaughtException` is what keeps a
+	// timer that throws from killing the worker before it can say so. Written
+	// synchronously so a tear-down racing the pipe cannot drop the frame.
+	let reported = false;
+	let unhandled = 0;
+	const onUnhandled = (kind: string, reason: unknown): void => {
+		unhandled += 1;
+		process.exitCode = 1;
+		const when = reported ? " after the file reported its result" : "";
 		emitSync({
-			type: "error",
+			type: "unhandled",
 			file: instr.file,
-			message: `unhandledRejection: ${reason instanceof Error ? reason.message : String(reason)}`,
+			message: `${kind}${when}: ${reason instanceof Error ? reason.message : String(reason)}`,
 			stack: reason instanceof Error ? reason.stack : undefined,
 			nonce: instr.nonce,
 		});
-	});
+	};
+	process.on("unhandledRejection", (reason) =>
+		onUnhandled("unhandledRejection", reason),
+	);
+	process.on("uncaughtException", (err) =>
+		onUnhandled("uncaughtException", err),
+	);
 
 	try {
 		const result = await runTestFile(instr.file, {
 			timeoutMs: instr.timeoutMs,
 		});
 		await emit({ type: "result", result, nonce: instr.nonce });
-		process.exitCode = result.totals.fail > 0 ? 1 : 0;
+		reported = true;
+		// The status the parent checks the exit against: anything else means
+		// something happened after this line that the frames did not explain.
+		process.exitCode = result.totals.fail > 0 || unhandled > 0 ? 1 : 0;
 	} catch (err) {
 		await emit({
 			type: "error",

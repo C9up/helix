@@ -77,21 +77,19 @@ pub async fn run_pool(
             }
             let outcome = run_one_file(&file, &cfg).await;
             let mut r = reporter.lock().await;
-            match &outcome {
-                Ok(result) => {
-                    r.on_file_result(result);
-                    if cfg.bail && result.totals.fail > 0 {
-                        gate_closed.store(true, Ordering::SeqCst);
-                    }
-                }
-                Err(err) => {
-                    r.on_file_error(err);
-                    if cfg.bail {
-                        gate_closed.store(true, Ordering::SeqCst);
-                    }
+            if let Some(result) = &outcome.result {
+                r.on_file_result(result);
+                if cfg.bail && result.totals.fail > 0 {
+                    gate_closed.store(true, Ordering::SeqCst);
                 }
             }
-            outcome.map(Some)
+            for err in &outcome.errors {
+                r.on_file_error(err);
+                if cfg.bail {
+                    gate_closed.store(true, Ordering::SeqCst);
+                }
+            }
+            Ok(Some(outcome))
         }));
     }
 
@@ -102,7 +100,10 @@ pub async fn run_pool(
             join.map_err(|e| Error::from_reason(format!("worker task join failed: {}", e)))?;
         match outcome {
             // `None` = the file was never started because the bail gate closed.
-            Ok(Some(fr)) => results.push(fr),
+            Ok(Some(file)) => {
+                results.extend(file.result);
+                errors.extend(file.errors);
+            }
             Ok(None) => {}
             Err(err) => errors.push(err),
         }
@@ -110,11 +111,34 @@ pub async fn run_pool(
     Ok((results, errors))
 }
 
-async fn run_one_file(
-    file: &std::path::Path,
-    cfg: &PoolConfig,
-) -> std::result::Result<FileResult, WorkerError> {
+/// What one file produced: its result when the worker reported one, and every
+/// error that belongs to it — a fatal one instead of the result, or ones raised
+/// beside it (an unhandled rejection, a late throw, an unexpected exit).
+pub struct FileOutcome {
+    pub result: Option<FileResult>,
+    pub errors: Vec<WorkerError>,
+}
+
+/// One frame the worker wrote on stderr, already checked against the nonce.
+enum Frame {
+    Result(FileResult),
+    Fatal(WorkerError),
+    Unhandled(WorkerError),
+    /// The stream itself is unusable (an oversized line, a frame that does not
+    /// parse): the pool diagnoses the file and stops.
+    Broken(String),
+}
+
+async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
     let path_str = file.to_string_lossy().into_owned();
+    let fail = |message: String| FileOutcome {
+        result: None,
+        errors: vec![WorkerError {
+            file: Some(path_str.clone()),
+            message,
+            stack: None,
+        }],
+    };
     let mut cmd = Command::new(&cfg.node_bin);
     for a in &cfg.node_args {
         cmd.arg(a);
@@ -125,26 +149,16 @@ async fn run_one_file(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let mut child = cmd.spawn().map_err(|e| WorkerError {
-        file: Some(path_str.clone()),
-        message: format!("spawn failed: {}", e),
-        stack: None,
-    })?;
-    let mut stdin = child.stdin.take().ok_or_else(|| WorkerError {
-        file: Some(path_str.clone()),
-        message: "no stdin on worker".into(),
-        stack: None,
-    })?;
-    let stdout = child.stdout.take().ok_or_else(|| WorkerError {
-        file: Some(path_str.clone()),
-        message: "no stdout on worker".into(),
-        stack: None,
-    })?;
-    let stderr = child.stderr.take().ok_or_else(|| WorkerError {
-        file: Some(path_str.clone()),
-        message: "no stderr on worker".into(),
-        stack: None,
-    })?;
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => return fail(format!("spawn failed: {}", e)),
+    };
+    let (Some(mut stdin), Some(stdout), Some(stderr)) =
+        (child.stdin.take(), child.stdout.take(), child.stderr.take())
+    else {
+        let _ = child.kill().await;
+        return fail("worker spawned without its stdio pipes".into());
+    };
 
     // Drain stdout in a background task so the worker can freely
     // `console.log` without filling the 64 KiB pipe buffer.
@@ -169,68 +183,232 @@ async fn run_one_file(
         "timeoutMs": cfg.timeout.as_millis() as u64,
         "nonce": nonce,
     });
-    let mut line = serde_json::to_string(&instr).map_err(|e| WorkerError {
-        file: Some(path_str.clone()),
-        message: format!("serialize instruction: {}", e),
-        stack: None,
-    })?;
+    let mut line = match serde_json::to_string(&instr) {
+        Ok(line) => line,
+        Err(e) => {
+            let _ = child.kill().await;
+            return fail(format!("serialize instruction: {}", e));
+        }
+    };
     line.push('\n');
     if let Err(e) = stdin.write_all(line.as_bytes()).await {
-        return Err(WorkerError {
-            file: Some(path_str.clone()),
-            message: format!("stdin write failed: {}", e),
-            stack: None,
-        });
+        let _ = child.kill().await;
+        return fail(format!("stdin write failed: {}", e));
     }
     drop(stdin);
 
-    let reader = BufReader::new(stderr);
-    let outcome = tokio::time::timeout(
-        cfg.timeout + Duration::from_secs(5),
-        read_frame(reader, &nonce),
-    )
-    .await
-    .map_err(|_| WorkerError {
-        file: Some(path_str.clone()),
-        message: format!("worker timed out after {}ms", cfg.timeout.as_millis()),
-        stack: None,
-    })?;
+    // Frames are read by their own task so the loop below can wait on them, on
+    // the worker's exit and on a deadline at once.
+    let (tx, mut frames) = tokio::sync::mpsc::unbounded_channel();
+    let _reader = AbortOnDrop(tokio::spawn(read_frames(BufReader::new(stderr), nonce, tx)));
 
-    // Bound that wait, but only when there is a result to protect. The worker
-    // has already reported by then; we are only giving
-    // `atExit` hooks time to flush. A test that left a server, a timer or a
-    // connection running means the exit never comes, and the run then hangs
-    // after its last file with nothing printed — a passing suite that reads as
-    // a crash, and in CI a timeout scored as a failure.
-    //
-    // Separate from the per-file watchdog above on purpose: that one is sized
-    // for a test to RUN (tens of seconds), this one for a flush (milliseconds).
-    // Wording is the TS pool's, verbatim, so the two paths are indistinguishable.
-    if outcome.is_err() {
-        // No readable result came back. There is nothing to flush and nothing
-        // to protect, and the frame error is already the diagnosis — waiting
-        // the grace out here would only delay it and print a second, wrong
-        // message saying the file "finished".
-        let _ = child.kill().await;
-    } else if tokio::time::timeout(EXIT_GRACE, child.wait())
-        .await
-        .is_err()
-    {
-        eprint!(
-            "helix: {} finished but its worker did not exit within {}ms — \
-something it started is still running (a server, a timer, a connection).\n\
-helix: killing it and keeping the result. Close it in a teardown hook to silence this.\n",
-            path_str,
-            EXIT_GRACE.as_millis()
-        );
-        let _ = child.kill().await;
+    let mut result: Option<FileResult> = None;
+    let mut errors: Vec<WorkerError> = Vec::new();
+    let mut frames_open = true;
+    let mut exit: Option<std::process::ExitStatus> = None;
+    let mut killed = false;
+    // Until the worker reports, the per-file watchdog; then the exit grace;
+    // once it has exited, a short window for the frames still in the pipe.
+    let mut reported = false;
+    let mut deadline = tokio::time::Instant::now() + cfg.timeout + Duration::from_secs(5);
+
+    while frames_open || exit.is_none() {
+        tokio::select! {
+            frame = frames.recv(), if frames_open => match frame {
+                None => frames_open = false,
+                Some(Frame::Result(r)) => {
+                    if result.is_none() {
+                        result = Some(r);
+                    }
+                    if !reported {
+                        reported = true;
+                        deadline = tokio::time::Instant::now() + EXIT_GRACE;
+                    }
+                }
+                Some(Frame::Fatal(e)) => {
+                    errors.push(e);
+                    // No result came back, so there is nothing to flush and
+                    // nothing to protect: waiting the grace out would only
+                    // delay the diagnosis the worker just gave.
+                    if result.is_none() {
+                        let _ = child.kill().await;
+                        killed = true;
+                        break;
+                    }
+                }
+                Some(Frame::Unhandled(e)) => errors.push(e),
+                Some(Frame::Broken(message)) => {
+                    errors.push(WorkerError { file: None, message, stack: None });
+                    let _ = child.kill().await;
+                    killed = true;
+                    break;
+                }
+            },
+            status = child.wait(), if exit.is_none() => {
+                exit = status.ok();
+                if exit.is_none() {
+                    // The status is unreadable; there is nothing left to wait on.
+                    break;
+                }
+                let drain = tokio::time::Instant::now() + EXIT_DRAIN;
+                if drain < deadline {
+                    deadline = drain;
+                }
+            },
+            _ = tokio::time::sleep_until(deadline) => {
+                if exit.is_some() {
+                    // Exited; whatever still holds the pipe is a grandchild.
+                    break;
+                }
+                if !reported {
+                    errors.push(WorkerError {
+                        file: None,
+                        message: format!("worker timed out after {}ms", cfg.timeout.as_millis()),
+                        stack: None,
+                    });
+                } else if result.is_some() {
+                    // Wording is the TS pool's, verbatim, so the two paths are
+                    // indistinguishable.
+                    eprint!(
+                        "helix: {} finished but its worker did not exit within {}ms — \
+        something it started is still running (a server, a timer, a connection).\n\
+        helix: killing it and keeping the result. Close it in a teardown hook to silence this.\n",
+                        path_str,
+                        EXIT_GRACE.as_millis()
+                    );
+                }
+                let _ = child.kill().await;
+                killed = true;
+                break;
+            }
+        }
     }
 
-    outcome.map_err(|e| WorkerError {
-        file: Some(path_str.clone()),
-        message: e,
-        stack: None,
-    })
+    // A worker that reported and then died of a signal nobody sent, or exited
+    // with a status other than the one its frames imply, had something go wrong
+    // after its result — and the result alone would have read as green.
+    if let (Some(r), Some(status), false) = (&result, exit, killed) {
+        let expected = if r.totals.fail > 0 || !errors.is_empty() {
+            1
+        } else {
+            0
+        };
+        match status.code() {
+            Some(code) if code != 0 && code != expected => errors.push(WorkerError {
+                file: None,
+                message: format!(
+                    "worker exited with code {} after the file reported its result",
+                    code
+                ),
+                stack: None,
+            }),
+            Some(_) => {}
+            None => errors.push(WorkerError {
+                file: None,
+                message: format!(
+                    "worker was killed by {} after the file reported its result",
+                    exit_signal(&status)
+                ),
+                stack: None,
+            }),
+        }
+    }
+
+    if result.is_none() && errors.is_empty() {
+        errors.push(WorkerError {
+            file: None,
+            message: "worker exited without emitting a framed result".into(),
+            stack: None,
+        });
+    }
+    for err in &mut errors {
+        if err.file.is_none() {
+            err.file = Some(path_str.clone());
+        }
+    }
+    FileOutcome { result, errors }
+}
+
+/// The signal that ended a worker, by name where it has a common one.
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> String {
+    use std::os::unix::process::ExitStatusExt as _;
+    match status.signal() {
+        Some(1) => "SIGHUP".into(),
+        Some(2) => "SIGINT".into(),
+        Some(6) => "SIGABRT".into(),
+        Some(9) => "SIGKILL".into(),
+        Some(11) => "SIGSEGV".into(),
+        Some(15) => "SIGTERM".into(),
+        Some(n) => format!("signal {}", n),
+        None => "an unknown signal".into(),
+    }
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> String {
+    "an unknown signal".into()
+}
+
+/// Read the worker's stderr line by line and forward every frame carrying our
+/// nonce. Ends at EOF, or on the first line the stream cannot be trusted past.
+async fn read_frames<R: tokio::io::AsyncRead + Unpin>(
+    mut reader: BufReader<R>,
+    expected_nonce: String,
+    tx: tokio::sync::mpsc::UnboundedSender<Frame>,
+) {
+    // `read_until(b'\n', Vec<u8>)` is lossy-UTF-8 tolerant — a single
+    // invalid byte on stderr from a native addon won't kill the task.
+    let mut raw = Vec::<u8>::new();
+    loop {
+        raw.clear();
+        // Bounded per line, like the TS pool: one endless line must not grow
+        // this buffer without limit.
+        let limit = MAX_STDERR_BUFFER_BYTES as u64 + 1;
+        let n = match (&mut reader).take(limit).read_until(b'\n', &mut raw).await {
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        if n == 0 {
+            return;
+        }
+        if raw.len() > MAX_STDERR_BUFFER_BYTES {
+            let _ = tx.send(Frame::Broken(format!(
+                "worker stderr exceeded {} bytes without emitting a frame",
+                MAX_STDERR_BUFFER_BYTES
+            )));
+            return;
+        }
+        let line = String::from_utf8_lossy(&raw);
+        let trimmed = line.trim_end();
+        let Some(payload) = trimmed.strip_prefix(FRAME_PREFIX) else {
+            continue;
+        };
+        let msg: serde_json::Value = match serde_json::from_str(payload) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        // Validate nonce. Accept the pre-handshake magic only for errors
+        // (fixtures still can't claim a fake success).
+        let nonce_ok = match msg.get("nonce").and_then(|v| v.as_str()) {
+            Some(n) if n == expected_nonce => true,
+            Some(PRE_HANDSHAKE_NONCE) => msg.get("type").and_then(|v| v.as_str()) == Some("error"),
+            _ => false,
+        };
+        if !nonce_ok {
+            continue;
+        }
+        let frame = match serde_json::from_value::<WorkerOutgoing>(msg) {
+            Ok(WorkerOutgoing::Result { result }) => Frame::Result(result),
+            Ok(WorkerOutgoing::Error(err)) => Frame::Fatal(err),
+            Ok(WorkerOutgoing::Unhandled(err)) => Frame::Unhandled(err),
+            Err(e) => Frame::Broken(format!("invalid worker message: {}", e)),
+        };
+        let broken = matches!(frame, Frame::Broken(_));
+        if tx.send(frame).is_err() || broken {
+            return;
+        }
+    }
 }
 
 /// Stops the stdout drain when `run_one_file` returns, on every path out.
@@ -254,65 +432,17 @@ impl Drop for AbortOnDrop {
 /// passing run into a silent hang. Mirrors the TS pool's `EXIT_GRACE_MS`.
 const EXIT_GRACE: Duration = Duration::from_millis(2000);
 
+/// How long to keep reading a worker's frames after it exited. Its last ones
+/// may still be in the pipe; a grandchild holding the pipe open would otherwise
+/// keep the file from settling at all.
+const EXIT_DRAIN: Duration = Duration::from_millis(250);
+
 const FRAME_PREFIX: &str = "__HELIX_RESULT__";
 
 const PRE_HANDSHAKE_NONCE: &str = "__helix_pre_handshake__";
-/// Hard cap on stderr we'll buffer before giving up — mirrors the TS pool.
+/// Hard cap on one stderr line we'll buffer before giving up — mirrors the TS
+/// pool.
 const MAX_STDERR_BUFFER_BYTES: usize = 4 * 1024 * 1024;
-
-async fn read_frame<R: tokio::io::AsyncRead + Unpin>(
-    mut reader: BufReader<R>,
-    expected_nonce: &str,
-) -> std::result::Result<FileResult, String> {
-    // `read_until(b'\n', Vec<u8>)` is lossy-UTF-8 tolerant — a single
-    // invalid byte on stderr from a native addon won't kill the task.
-    let mut raw = Vec::<u8>::new();
-    let mut total: usize = 0;
-    loop {
-        raw.clear();
-        let n = reader
-            .read_until(b'\n', &mut raw)
-            .await
-            .map_err(|e| format!("read failed: {}", e))?;
-        if n == 0 {
-            return Err("worker closed stderr before emitting a framed result".into());
-        }
-        total = total.saturating_add(n);
-        if total > MAX_STDERR_BUFFER_BYTES {
-            return Err(format!(
-                "worker stderr exceeded {} bytes without emitting a frame",
-                MAX_STDERR_BUFFER_BYTES
-            ));
-        }
-        let line = String::from_utf8_lossy(&raw);
-        let trimmed = line.trim_end();
-        let Some(payload) = trimmed.strip_prefix(FRAME_PREFIX) else {
-            continue;
-        };
-        let msg: serde_json::Value = match serde_json::from_str(payload) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        // Validate nonce. Accept the pre-handshake magic only for errors
-        // (fixtures still can't claim a fake success).
-        let nonce_ok = match msg.get("nonce").and_then(|v| v.as_str()) {
-            Some(n) if n == expected_nonce => true,
-            Some(PRE_HANDSHAKE_NONCE) => msg.get("type").and_then(|v| v.as_str()) == Some("error"),
-            _ => false,
-        };
-        if !nonce_ok {
-            continue;
-        }
-        let typed: WorkerOutgoing = match serde_json::from_value(msg) {
-            Ok(v) => v,
-            Err(e) => return Err(format!("invalid worker message: {}", e)),
-        };
-        match typed {
-            WorkerOutgoing::Result { result } => return Ok(result),
-            WorkerOutgoing::Error(err) => return Err(err.message),
-        }
-    }
-}
 
 /// Cryptographically-unpredictable nonce suffix. A fixture running under
 /// the worker cannot read `/dev/urandom` (or `BCryptGenRandom`) and guess
@@ -669,5 +799,82 @@ process.stdin.on("end", () => {
             elapsed < Duration::from_secs(15),
             "the pool waited {elapsed:?} on a worker that will never exit"
         );
+    }
+
+    /// A stand-in worker that reports a pass and then runs `after` — what a
+    /// test leaves behind once its file has reported.
+    fn reporting_worker(dir: &std::path::Path, name: &str, after: &str) -> String {
+        let entry = dir.join(name);
+        let body = format!(
+            r#"
+let raw = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (c) => {{ raw += c; }});
+process.stdin.on("end", () => {{
+  const instr = JSON.parse(raw.trim());
+  const result = {{
+    file: instr.file,
+    suites: [],
+    tests: [],
+    totals: {{ pass: 1, fail: 0, skip: 0, todo: 0 }},
+    durationMs: 1,
+  }};
+  const frame = (msg) => process.stderr.write(
+    "__HELIX_RESULT__" + JSON.stringify({{ ...msg, nonce: instr.nonce }}) + "\n",
+  );
+  frame({{ type: "result", result }});
+  {after}
+}});
+"#
+        );
+        std::fs::write(&entry, body).unwrap();
+        entry.to_string_lossy().into_owned()
+    }
+
+    async fn run_single(entry: String, tag: &str) -> (Vec<FileResult>, Vec<WorkerError>) {
+        let dir = temp_dir(tag);
+        let (reporter, _log) = recorder();
+        run_pool(vec![dir.join("a.test.ts")], config(entry, false), reporter)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_unhandled_frame_after_the_result_is_a_file_error_and_keeps_the_result() {
+        let dir = temp_dir("late-unhandled");
+        let entry = reporting_worker(
+            &dir,
+            "late-unhandled.mjs",
+            r#"setTimeout(() => { frame({ type: "unhandled", message: "uncaughtException: BOOM-late" }); process.exitCode = 1; }, 100);"#,
+        );
+        let (results, errors) = run_single(entry, "late-unhandled-run").await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].totals.pass, 1);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("BOOM-late"));
+        assert!(errors[0].file.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_worker_exiting_with_an_unannounced_status_is_a_file_error() {
+        let dir = temp_dir("exit3");
+        let entry = reporting_worker(&dir, "exit3.mjs", "setTimeout(() => process.exit(3), 100);");
+        let (results, errors) = run_single(entry, "exit3-run").await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].message.contains("code 3"),
+            "unexpected message: {}",
+            errors[0].message
+        );
+    }
+
+    #[tokio::test]
+    async fn a_worker_exiting_with_the_status_it_announced_is_clean() {
+        let dir = temp_dir("exit0");
+        let entry = reporting_worker(&dir, "exit0.mjs", "");
+        let (results, errors) = run_single(entry, "exit0-run").await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(errors.len(), 0);
     }
 }

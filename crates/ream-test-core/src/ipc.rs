@@ -99,6 +99,11 @@ pub enum WorkerOutgoing {
     Result { result: FileResult },
     #[serde(rename = "error")]
     Error(WorkerError),
+    /// An error nobody handled (a floating rejection, a timer that threw),
+    /// raised while the file ran or after it reported. Not the end of the
+    /// worker: the file carries on, and the parent counts it as a file error.
+    #[serde(rename = "unhandled")]
+    Unhandled(WorkerError),
 }
 
 /// A non-result error from the worker (load failure, uncaught, timeout

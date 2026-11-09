@@ -73,9 +73,15 @@ export interface WorkerErrorMessage {
 	stack?: string;
 }
 
-export type FileOutcome =
-	| { kind: "result"; result: FileResult }
-	| { kind: "error"; error: WorkerErrorMessage };
+/**
+ * What one file produced: its result when the worker reported one, and every
+ * error that belongs to it — a fatal one instead of the result, or ones raised
+ * beside it (an unhandled rejection, a late throw, an unexpected exit).
+ */
+export interface FileOutcome {
+	result?: FileResult;
+	errors: WorkerErrorMessage[];
+}
 
 /** Maximum stderr buffering before we give up and mark the file errored. */
 const MAX_STDERR_BUFFER_BYTES = 4 * 1024 * 1024; // 4 MiB
@@ -91,6 +97,13 @@ const MAX_STDERR_BUFFER_BYTES = 4 * 1024 * 1024; // 4 MiB
  * stops being true on a loaded CI runner writing a large coverage dump.
  */
 const DEFAULT_EXIT_GRACE_MS = 2000;
+
+/**
+ * How long to keep reading a worker's stderr after it exited. Its last frames
+ * may still be in the pipe; a grandchild holding the pipe open would otherwise
+ * keep the file from settling at all.
+ */
+const EXIT_DRAIN_MS = 250;
 
 interface ActiveChild {
 	kill(): void;
@@ -231,15 +244,17 @@ export async function runPool(
 				if (cfg.bail === true && gateClosed) return;
 				safeCall(() => reporter.onFileStart(absFile), "onFileStart");
 				const outcome = await runOne(absFile, cfg);
-				if (outcome.kind === "result") {
-					safeCall(() => reporter.onFileResult(outcome.result), "onFileResult");
-					results.push(outcome.result);
-					if (cfg.bail === true && outcome.result.totals.fail > 0) {
+				const { result } = outcome;
+				if (result !== undefined) {
+					safeCall(() => reporter.onFileResult(result), "onFileResult");
+					results.push(result);
+					if (cfg.bail === true && result.totals.fail > 0) {
 						gateClosed = true;
 					}
-				} else {
-					safeCall(() => reporter.onFileError(outcome.error), "onFileError");
-					errors.push(outcome.error);
+				}
+				for (const error of outcome.errors) {
+					safeCall(() => reporter.onFileError(error), "onFileError");
+					errors.push(error);
 					if (cfg.bail === true) gateClosed = true;
 				}
 			} finally {
@@ -275,88 +290,80 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 			env: cfg.extraEnv ? { ...process.env, ...cfg.extraEnv } : process.env,
 		});
 
-		const registration: ActiveChild = {
-			kill: () => killChild(child, killGraceMs),
+		let killedByPool = false;
+		const kill = (): void => {
+			killedByPool = true;
+			killChild(child, killGraceMs);
 		};
+		const registration: ActiveChild = { kill };
 		activeChildren.add(registration);
 
 		let settled = false;
-		let pendingOutcome: FileOutcome | undefined;
+		let result: FileResult | undefined;
+		const errors: WorkerErrorMessage[] = [];
+		// Set once the worker has said it is done (a result, or a fatal error).
+		let reported = false;
 		let exitGrace: ReturnType<typeof setTimeout> | undefined;
-		const settle = (outcome: FileOutcome): void => {
+		let exitDrain: ReturnType<typeof setTimeout> | undefined;
+		let exitStatus:
+			| { code: number | null; signal: NodeJS.Signals | null }
+			| undefined;
+
+		const settle = (): void => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(watchdog);
 			if (exitGrace) clearTimeout(exitGrace);
+			if (exitDrain) clearTimeout(exitDrain);
 			activeChildren.delete(registration);
-			resolve(outcome);
+			if (result === undefined && errors.length === 0) {
+				errors.push({
+					file,
+					message: "worker exited without emitting a framed result",
+				});
+			}
+			resolve(result === undefined ? { errors } : { result, errors });
 		};
-		/**
-		 * Schedule resolution. On a `result` or `error` frame from the
-		 * worker (`forceKill = false`) we wait for `child.on("exit")` so
-		 * `atExit` hooks (e.g. V8 coverage writer) finish flushing before
-		 * we let downstream code read the coverage dir. On a timeout or
-		 * spawn error (`forceKill = true`) we kill it now and resolve
-		 * immediately — there's no useful flush to wait for.
-		 */
-		const finish = (outcome: FileOutcome, forceKill = false): void => {
+		/** A failure the pool itself diagnosed: record it, kill, and stop. */
+		const abort = (message: string): void => {
 			if (settled) return;
-			if (forceKill) {
-				killChild(child, killGraceMs);
-				settle(outcome);
-				return;
-			}
-			// Defer resolution until exit — but if the child has already
-			// exited (race), settle now.
-			if (child.exitCode !== null || child.signalCode !== null) {
-				settle(outcome);
-				return;
-			}
-			pendingOutcome = outcome;
+			errors.push({ file, message });
+			kill();
+			settle();
+		};
 
-			// Bound that wait. The worker has already reported; we are only
-			// giving `atExit` hooks time to flush. A test that left a server or
-			// a timer running means the exit never comes, and the run then hangs
-			// after its last file with nothing printed — a passing suite that
-			// reads as a crash, and in CI a timeout scored as a failure.
-			//
-			// Separate from the per-file watchdog on purpose: that one is sized
-			// for a test to RUN (tens of seconds), this one for a flush
-			// (milliseconds). Reusing it made the hang outlive most CI budgets.
+		/**
+		 * The worker has reported. Keep reading its frames until it exits — an
+		 * error it raises from here on (a timer that throws, a late rejection)
+		 * still belongs to this file — but bound that wait: it is only flushing
+		 * `atExit` hooks (the V8 coverage writer), which is milliseconds. A test
+		 * that left a server or a timer running means the exit never comes, and
+		 * the run would hang after its last file with nothing printed.
+		 *
+		 * Separate from the per-file watchdog on purpose: that one is sized for a
+		 * file to RUN, this one for a flush.
+		 */
+		const awaitExit = (): void => {
+			if (reported) return;
+			reported = true;
+			clearTimeout(watchdog);
 			exitGrace = setTimeout(() => {
 				if (settled) return;
-				process.stderr.write(
-					`helix: ${file} finished but its worker did not exit within ${exitGraceMs}ms — ` +
-						"something it started is still running (a server, a timer, a connection).\n" +
-						"helix: killing it and keeping the result. Close it in a teardown hook to silence this.\n",
-				);
-				killChild(child, killGraceMs);
-				settle(pendingOutcome ?? outcome);
+				if (result !== undefined) {
+					process.stderr.write(
+						`helix: ${file} finished but its worker did not exit within ${exitGraceMs}ms — ` +
+							"something it started is still running (a server, a timer, a connection).\n" +
+							"helix: killing it and keeping the result. Close it in a teardown hook to silence this.\n",
+					);
+				}
+				kill();
+				settle();
 			}, exitGraceMs);
 			exitGrace.unref?.();
 		};
 
 		const watchdog = setTimeout(() => {
-			// The worker already emitted a valid result/error frame and we're
-			// only waiting on its (slow) exit to flush coverage — kill it to
-			// reclaim the slot but settle the REAL outcome. Without this guard
-			// the still-armed watchdog would overwrite a passing file with a
-			// spurious timeout failure.
-			if (pendingOutcome !== undefined) {
-				killChild(child, killGraceMs);
-				settle(pendingOutcome);
-				return;
-			}
-			finish(
-				{
-					kind: "error",
-					error: {
-						file,
-						message: `worker timed out after ${timeoutMs}ms`,
-					},
-				},
-				true,
-			);
+			abort(`worker timed out after ${timeoutMs}ms`);
 		}, timeoutMs + killGraceMs);
 		watchdog.unref?.();
 
@@ -371,22 +378,8 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 				}
 				return;
 			}
-			const payload = line.slice(FRAME_PREFIX.length);
-			let msg: unknown;
-			try {
-				msg = JSON.parse(payload);
-			} catch {
-				return;
-			}
-			if (!msg || typeof msg !== "object") return;
-			const m = msg as {
-				nonce?: unknown;
-				type?: unknown;
-				result?: FileResult;
-				file?: string;
-				message?: string;
-				stack?: string;
-			};
+			const frame = parseFrame(line.slice(FRAME_PREFIX.length));
+			if (frame === undefined) return;
 			// Reject frames without the matching nonce — prevents a fixture
 			// that writes `__HELIX_RESULT__...` on stderr from spoofing.
 			// Exception: pre-handshake error frames (worker couldn't parse
@@ -394,39 +387,27 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 			// accepted only for `type === "error"` so a fixture still can't
 			// claim a fake success.
 			const nonceOk =
-				m.nonce === nonce ||
-				(m.nonce === PRE_HANDSHAKE_NONCE && m.type === "error");
+				frame.nonce === nonce ||
+				(frame.nonce === PRE_HANDSHAKE_NONCE && frame.type === "error");
 			if (!nonceOk) return;
-			if (m.type === "result" && m.result) {
-				finish({ kind: "result", result: m.result });
-			} else if (m.type === "error") {
-				finish({
-					kind: "error",
-					error: {
-						file: m.file ?? file,
-						message: m.message ?? "unknown worker error",
-						stack: m.stack,
-					},
-				});
-			}
-		};
-
-		child.stderr?.on("data", (chunk: Buffer) => {
-			const text = decoder.write(chunk);
-			stderrBuffer += text;
-			if (stderrBuffer.length > MAX_STDERR_BUFFER_BYTES) {
-				finish(
-					{
-						kind: "error",
-						error: {
-							file,
-							message: `worker stderr exceeded ${MAX_STDERR_BUFFER_BYTES} bytes without emitting a frame`,
-						},
-					},
-					true,
-				);
+			if (frame.type === "result") {
+				if (result === undefined && frame.result !== undefined) {
+					result = frame.result;
+				}
+				awaitExit();
 				return;
 			}
+			errors.push({
+				file: frame.file ?? file,
+				message: frame.message ?? "unknown worker error",
+				stack: frame.stack,
+			});
+			// An `unhandled` frame is not the end: the worker carries on with the
+			// file. A fatal `error` frame is.
+			if (frame.type === "error") awaitExit();
+		};
+
+		const drainLines = (): void => {
 			let nl = stderrBuffer.indexOf("\n");
 			while (nl >= 0 && !settled) {
 				const line = stderrBuffer.slice(0, nl);
@@ -434,6 +415,18 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 				processLine(line);
 				nl = stderrBuffer.indexOf("\n");
 			}
+		};
+
+		child.stderr?.on("data", (chunk: Buffer) => {
+			if (settled) return;
+			stderrBuffer += decoder.write(chunk);
+			if (stderrBuffer.length > MAX_STDERR_BUFFER_BYTES) {
+				abort(
+					`worker stderr exceeded ${MAX_STDERR_BUFFER_BYTES} bytes without emitting a frame`,
+				);
+				return;
+			}
+			drainLines();
 		});
 
 		// Drain stdout so a chatty `console.log` can't fill the 64 KB pipe
@@ -442,43 +435,53 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		child.stdout?.on("data", () => {});
 
 		child.on("error", (err) => {
-			finish(
-				{
-					kind: "error",
-					error: { file, message: `spawn failed: ${err.message}` },
-				},
-				true,
-			);
+			abort(`spawn failed: ${err.message}`);
 		});
 
-		child.on("exit", () => {
-			// If we already have an outcome waiting on the natural exit,
-			// resolve it now — coverage hooks have flushed.
-			if (pendingOutcome) {
-				settle(pendingOutcome);
-				return;
-			}
-			if (settled) return;
-			// Flush any partial trailing line from the decoder before giving up.
+		/**
+		 * Every frame is in, and the worker is gone: settle, after checking that
+		 * the way it went matches what it said. A worker that reported and then
+		 * died of a signal nobody sent, or exited with a status other than the
+		 * one its frames imply, had something go wrong after its result — and the
+		 * result alone would have read as green.
+		 */
+		const finalize = (): void => {
+			if (settled || exitStatus === undefined) return;
 			const trailing = decoder.end();
-			if (trailing) {
-				stderrBuffer += trailing;
-				const nl = stderrBuffer.indexOf("\n");
-				if (nl >= 0) processLine(stderrBuffer.slice(0, nl));
+			if (trailing) stderrBuffer += trailing;
+			drainLines();
+			if (stderrBuffer.length > 0) {
+				processLine(stderrBuffer);
+				stderrBuffer = "";
 			}
-			if (pendingOutcome) {
-				settle(pendingOutcome);
-				return;
+			if (result !== undefined && !killedByPool) {
+				const { code, signal } = exitStatus;
+				const expected = result.totals.fail > 0 || errors.length > 0 ? 1 : 0;
+				if (signal !== null) {
+					errors.push({
+						file,
+						message: `worker was killed by ${signal} after the file reported its result`,
+					});
+				} else if (code !== null && code !== 0 && code !== expected) {
+					errors.push({
+						file,
+						message: `worker exited with code ${code} after the file reported its result`,
+					});
+				}
 			}
-			if (settled) return;
-			settle({
-				kind: "error",
-				error: {
-					file,
-					message: "worker exited without emitting a framed result",
-				},
-			});
+			settle();
+		};
+
+		child.on("exit", (code, signal) => {
+			exitStatus = { code, signal };
+			// `exit` can fire before the last stderr bytes are read. `close`
+			// waits for them, but never comes while a grandchild holds the pipe
+			// open — so it gets a short window, and then we settle with what we
+			// have.
+			exitDrain = setTimeout(finalize, EXIT_DRAIN_MS);
+			exitDrain.unref?.();
 		});
+		child.on("close", finalize);
 
 		// Instruction line.
 		const instr = JSON.stringify({
@@ -490,18 +493,65 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		// `child.stdin` may be closed by the time we get here (rare spawn race).
 		// Attach an error listener so an EPIPE doesn't crash the parent.
 		child.stdin?.on("error", (err) => {
-			finish(
-				{
-					kind: "error",
-					error: { file, message: `stdin write failed: ${err.message}` },
-				},
-				true,
-			);
+			abort(`stdin write failed: ${err.message}`);
 		});
 		child.stdin?.write(`${instr}\n`, () => {
 			child.stdin?.end();
 		});
 	});
+}
+
+/** What a frame line carries once its JSON is read and its fields checked. */
+interface Frame {
+	type: "result" | "error" | "unhandled";
+	nonce: unknown;
+	result?: FileResult;
+	file?: string;
+	message?: string;
+	stack?: string;
+}
+
+/** Read a frame payload, or `undefined` for anything that is not one. */
+function parseFrame(payload: string): Frame | undefined {
+	let msg: unknown;
+	try {
+		msg = JSON.parse(payload);
+	} catch {
+		return undefined;
+	}
+	if (msg === null || typeof msg !== "object") return undefined;
+	const type = Reflect.get(msg, "type");
+	if (type !== "result" && type !== "error" && type !== "unhandled") {
+		return undefined;
+	}
+	const result = Reflect.get(msg, "result");
+	const file = Reflect.get(msg, "file");
+	const message = Reflect.get(msg, "message");
+	const stack = Reflect.get(msg, "stack");
+	return {
+		type,
+		nonce: Reflect.get(msg, "nonce"),
+		result: isFileResult(result) ? result : undefined,
+		file: typeof file === "string" ? file : undefined,
+		message: typeof message === "string" ? message : undefined,
+		stack: typeof stack === "string" ? stack : undefined,
+	};
+}
+
+/** Enough of a `FileResult`'s shape to count it; the worker built the rest. */
+function isFileResult(value: unknown): value is FileResult {
+	if (value === null || typeof value !== "object") return false;
+	const totals = Reflect.get(value, "totals");
+	return (
+		typeof Reflect.get(value, "file") === "string" &&
+		Array.isArray(Reflect.get(value, "tests")) &&
+		Array.isArray(Reflect.get(value, "suites")) &&
+		totals !== null &&
+		typeof totals === "object" &&
+		["pass", "fail", "skip", "todo"].every(
+			(key) => typeof Reflect.get(totals, key) === "number",
+		)
+	);
 }
 
 /**
