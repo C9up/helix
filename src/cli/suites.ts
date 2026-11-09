@@ -78,6 +78,11 @@ export interface HelixConfig {
 	timeout?: number;
 	/** `process.exit()` once the run ends — AdonisJS `tests.forceExit`. */
 	forceExit?: boolean;
+	/**
+	 * Whether `.only` / `.pin()` may narrow the run. Defaults to "not under CI";
+	 * `--allow-only` overrides it.
+	 */
+	allowOnly?: boolean;
 }
 
 /**
@@ -151,7 +156,10 @@ function toConfig(imported: unknown): HelixConfig {
 	const timeout = typeof rawTimeout === "number" ? rawTimeout : undefined;
 	const forceExit =
 		Reflect.get(source, "forceExit") === true ? true : undefined;
-	const runner = { bootstrap, timeout, forceExit };
+	const rawAllowOnly = Reflect.get(source, "allowOnly");
+	const allowOnly =
+		typeof rawAllowOnly === "boolean" ? rawAllowOnly : undefined;
+	const runner = { bootstrap, timeout, forceExit, allowOnly };
 	const suites = Reflect.get(source, "suites");
 	if (!Array.isArray(suites)) return runner;
 	const parsed: SuiteDefinition[] = [];

@@ -17,7 +17,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadBootstrap } from "./bootstrap.js";
-import { cliArgs } from "./cli-args.js";
+import { cliArgs, runningInCI } from "./cli-args.js";
 import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
 import { FRAME_PREFIX } from "./ipc-protocol.js";
 import { type ExecuteOptions, executeRoot, type FileResult } from "./run.js";
@@ -190,6 +190,7 @@ export async function runTestFile(
 				suite: options.suite ?? flags.suite ?? defaults.suite ?? "default",
 				bail: options.bail ?? flags.bail ?? tappedBail() ?? false,
 				bailLayer: options.bailLayer ?? asBailLayer(flags.bailLayer),
+				allowOnly: options.allowOnly ?? flags.allowOnly ?? !runningInCI(),
 			});
 			return sanitize(raw);
 		} finally {

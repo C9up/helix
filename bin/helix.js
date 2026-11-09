@@ -90,6 +90,10 @@ const FLAG_SPEC = {
 		kind: "boolean",
 		help: "Print the tests marked .pin() and run nothing (--list-pinned)",
 	},
+	"allow-only": {
+		kind: "boolean",
+		help: "Let .only/.pin() narrow the run; off under CI unless set (--allow-only)",
+	},
 	"force-exit": {
 		kind: "boolean",
 		help: "process.exit() as soon as the run ends, without draining the event loop (--force-exit)",
@@ -580,6 +584,13 @@ async function main() {
 		// Positionals reach a plugin as `api.cliArgs._`, like helix's.
 		if (parsed.positional.length > 0) {
 			process.env.HELIX_POSITIONALS = parsed.positional.join(",");
+		}
+		// `.only` / `.pin()` narrow the run, except under CI where one left in a
+		// commit would skip the rest and pass. The flag wins over the config; with
+		// neither, the worker decides from `CI`.
+		const allowOnly = parsed.flags["allow-only"] ?? helixConfig.allowOnly;
+		if (allowOnly !== undefined) {
+			process.env.HELIX_ALLOW_ONLY = allowOnly ? "1" : "0";
 		}
 		if (parsed.flags["force-exit"] === true || helixConfig.forceExit === true) {
 			process.env.HELIX_FORCE_EXIT = "1";

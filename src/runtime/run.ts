@@ -137,6 +137,14 @@ export interface ExecuteOptions {
 	 * tests it never collected.
 	 */
 	bailLayer?: "group" | "suite" | "runner" | "";
+	/**
+	 * Whether `.only` / `.pin()` may narrow the run (`--allow-only`). When
+	 * `false`, every test they select fails with "Unexpected .only modifier"
+	 * instead of running, so one left in a commit cannot turn CI green while
+	 * skipping the rest. Default `true`; the CLI worker defaults it to "not
+	 * under CI".
+	 */
+	allowOnly?: boolean;
 }
 
 /**
@@ -450,6 +458,8 @@ interface RunCtx {
 	bailLayer: "group" | "suite" | "runner";
 	/** Set once a test has failed under `bail`; skips everything after it. */
 	bailed: boolean;
+	/** Whether `.only` / `.pin()` may narrow the run. */
+	allowOnly: boolean;
 }
 
 /**
@@ -648,6 +658,32 @@ async function runTest(
 			if (!filteredOut) emitTestResult(node, r, ctx);
 			return [r];
 		}
+	}
+
+	// A `.only` / `.pin()` where they are not allowed (CI): the test fails rather
+	// than runs, so the run cannot pass while the modifier skips the rest.
+	if (
+		!ctx.allowOnly &&
+		!filteredOut &&
+		node.mode !== "skip" &&
+		!deferredSkip &&
+		(node.mode === "only" || ancestorHasOnly(node))
+	) {
+		const modifier = node.pinned === true ? ".pin()" : ".only";
+		const r: TestResult = {
+			name: node.name,
+			fullName: baseFullName,
+			status: "fail",
+			durationMs: 0,
+			error: {
+				name: "Error",
+				message: `Unexpected ${modifier} modifier. Remove it or pass --allow-only to bypass this error`,
+			},
+			errorPhase: "setup",
+		};
+		ctx.flatTests.push(r);
+		emitTestResult(node, r, ctx);
+		return [r];
 	}
 
 	// Node-level gates that apply to the whole test (and every dataset row).
@@ -1389,6 +1425,7 @@ export async function executeRoot(
 				? "runner"
 				: options.bailLayer,
 		bailed: false,
+		allowOnly: options.allowOnly ?? true,
 	};
 	const suites: SuiteResult[] = [];
 

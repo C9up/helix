@@ -46,6 +46,12 @@ export interface CLIArgs {
 	bailLayer?: string;
 	/** `--failed` — this run replays the previous run's failures. */
 	failed?: boolean;
+	/**
+	 * `--allow-only` — whether `.only` / `.pin()` may narrow the run. Absent
+	 * when neither the flag nor the config set it; the runtime then allows it
+	 * everywhere but under CI.
+	 */
+	allowOnly?: boolean;
 	/** `--force-exit` — the CLI will `process.exit()` once the run ends. */
 	forceExit?: boolean;
 	/**
@@ -97,6 +103,28 @@ function envFlag(name: string): boolean | undefined {
 	return process.env[name] === "1" ? true : undefined;
 }
 
+/** A flag that can be set either way: `"1"` on, `"0"` off, anything else unset. */
+function envSwitch(name: string): boolean | undefined {
+	const value = process.env[name];
+	if (value === "1") return true;
+	if (value === "0") return false;
+	return undefined;
+}
+
+/**
+ * Whether this process runs under CI — `CI` set to anything but an empty or
+ * false-ish value, which is what every CI provider exports.
+ */
+export function runningInCI(): boolean {
+	const value = process.env.CI;
+	return (
+		value !== undefined &&
+		value !== "" &&
+		value !== "0" &&
+		value.toLowerCase() !== "false"
+	);
+}
+
 /**
  * The run's flags, as ONE object.
  *
@@ -135,6 +163,7 @@ export function readCLIArgs(): CLIArgs {
 		failed: envFlag("HELIX_FAILED"),
 		forceExit: envFlag("HELIX_FORCE_EXIT"),
 		listPinned: envFlag("HELIX_LIST_PINNED"),
+		allowOnly: envSwitch("HELIX_ALLOW_ONLY"),
 		_: envList("HELIX_POSITIONALS"),
 	};
 }
