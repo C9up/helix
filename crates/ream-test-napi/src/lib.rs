@@ -32,8 +32,16 @@ pub struct RunConfig {
     pub files: Option<Vec<String>>,
     /// Number of concurrent workers. Defaults to `num_cpus::get()`.
     pub threads: Option<u32>,
-    /// Per-file timeout in milliseconds. Default 60 000.
+    /// Per-test timeout in milliseconds that beats `configure({ timeout })` —
+    /// the `--timeout` flag or a suite's own. Unset, the worker decides.
     pub timeout_ms: Option<u32>,
+    /// Per-test timeout the worker falls back to when neither `timeoutMs` nor
+    /// `configure({ timeout })` set one — the config file's `timeout`.
+    pub default_timeout_ms: Option<u32>,
+    /// How long one file may run before its worker is killed, in milliseconds.
+    /// Default 600 000. Never taken from the per-test timeout: a file of many
+    /// fast tests legitimately takes far longer than any one of them may.
+    pub file_timeout_ms: Option<u32>,
     /// `"dot" | "spec" | "json"`. Default `"spec"`.
     pub reporter: Option<String>,
     /// Activate several reporters at once (helix `--reporters=spec,json`).
@@ -141,7 +149,12 @@ pub async fn run(config: RunConfig) -> Result<SummaryPayload> {
         .map(|n| n as usize)
         .unwrap_or_else(num_cpus::get)
         .min(files.len().max(1));
-    let timeout = Duration::from_millis(config.timeout_ms.unwrap_or(60_000) as u64);
+    let file_timeout = Duration::from_millis(
+        config
+            .file_timeout_ms
+            .filter(|ms| *ms > 0)
+            .map_or(pool::DEFAULT_FILE_TIMEOUT_MS, u64::from),
+    );
 
     let use_colors = config.use_colors.unwrap_or(true);
     // A list wins over the single name; either way an empty list falls back to
@@ -165,7 +178,9 @@ pub async fn run(config: RunConfig) -> Result<SummaryPayload> {
         node_args: config.node_args.unwrap_or_default(),
         worker_entry: config.worker_entry,
         threads,
-        timeout,
+        test_timeout_ms: config.timeout_ms.map(u64::from),
+        default_test_timeout_ms: config.default_timeout_ms.map(u64::from),
+        file_timeout,
         bail: config.bail.unwrap_or(false),
     };
 

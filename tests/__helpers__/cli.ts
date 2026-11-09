@@ -12,12 +12,16 @@ export const runtimeUrl = pathToFileURL(
 	path.resolve(here, "../../src/runtime/index.ts"),
 ).href;
 
-/** A temporary project directory holding `files` (paths relative to it). */
+/**
+ * A temporary project directory holding `files` (paths relative to it), an ES
+ * module package unless `files` brings its own `package.json`.
+ */
 export async function project(
 	files: Readonly<Record<string, string>>,
 ): Promise<string> {
 	const root = await mkdtemp(path.join(os.tmpdir(), "helix-cli-"));
-	for (const [name, body] of Object.entries(files)) {
+	const all = { "package.json": '{ "type": "module" }\n', ...files };
+	for (const [name, body] of Object.entries(all)) {
 		const target = path.join(root, name);
 		await mkdir(path.dirname(target), { recursive: true });
 		await writeFile(target, body, "utf8");

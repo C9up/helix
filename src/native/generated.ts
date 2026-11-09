@@ -11,8 +11,22 @@ export interface RunConfig {
 	files?: string[] | undefined;
 	/** Number of concurrent workers. Defaults to `num_cpus::get()`. */
 	threads?: number;
-	/** Per-file timeout in milliseconds. Default 60 000. */
+	/**
+	 * Per-test timeout in milliseconds that beats `configure({ timeout })` —
+	 * the `--timeout` flag or a suite's own. Unset, the worker decides.
+	 */
 	timeoutMs?: number;
+	/**
+	 * Per-test timeout the worker falls back to when neither `timeoutMs` nor
+	 * `configure({ timeout })` set one — the config file's `timeout`.
+	 */
+	defaultTimeoutMs?: number;
+	/**
+	 * How long one file may run before its worker is killed, in milliseconds.
+	 * Default 600 000. Never taken from the per-test timeout: a file of many
+	 * fast tests legitimately takes far longer than any one of them may.
+	 */
+	fileTimeoutMs?: number;
 	/** `"dot" | "spec" | "json"`. Default `"spec"`. */
 	reporter?: string;
 	/**

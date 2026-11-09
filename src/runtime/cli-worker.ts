@@ -2,8 +2,9 @@
  * CLI worker entry — what the orchestrator spawns as a child process.
  *
  * Protocol:
- *   1. Parent writes one `{ "type":"run", "file":"...", "timeoutMs":n, "nonce":"..." }`
- *      line to stdin, then closes stdin.
+ *   1. Parent writes one `{ "type":"run", "file":"...", "timeoutMs":n,
+ *      "defaultTimeoutMs":n, "nonce":"..." }` line to stdin (both timeouts
+ *      optional), then closes stdin.
  *   2. We run the file via `runTestFile`.
  *   3. We emit a single framed line on **stderr** prefixed with
  *      `__HELIX_RESULT__`, with the parent's `nonce` echoed back so a
@@ -35,8 +36,42 @@ import { runTestFile } from "./worker.js";
 interface RunMessage {
 	type: "run";
 	file: string;
+	/** Per-test timeout that beats `configure({ timeout })` (flag, suite). */
 	timeoutMs?: number;
+	/** Per-test timeout below `configure({ timeout })` (the config file's). */
+	defaultTimeoutMs?: number;
 	nonce: string;
+}
+
+/**
+ * Per-test timeout when nothing — flag, suite, `configure()`, config file —
+ * chose one.
+ */
+const DEFAULT_TEST_TIMEOUT_MS = 60_000;
+
+/** A finite, non-negative number of milliseconds, or `undefined`. */
+function millis(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0
+		? value
+		: undefined;
+}
+
+/** The `run` instruction, or `undefined` when `parsed` is not one. */
+function toRunMessage(parsed: unknown): RunMessage | undefined {
+	if (parsed === null || typeof parsed !== "object") return undefined;
+	const type = Reflect.get(parsed, "type");
+	const file = Reflect.get(parsed, "file");
+	const nonce = Reflect.get(parsed, "nonce");
+	if (type !== "run" || typeof file !== "string" || typeof nonce !== "string") {
+		return undefined;
+	}
+	return {
+		type,
+		file,
+		nonce,
+		timeoutMs: millis(Reflect.get(parsed, "timeoutMs")),
+		defaultTimeoutMs: millis(Reflect.get(parsed, "defaultTimeoutMs")),
+	};
 }
 
 async function emit(msg: unknown): Promise<void> {
@@ -77,18 +112,8 @@ async function readInstruction(): Promise<RunMessage> {
 				`malformed instruction JSON: ${err instanceof Error ? err.message : String(err)}`,
 			);
 		}
-		if (
-			parsed &&
-			typeof parsed === "object" &&
-			"type" in parsed &&
-			parsed.type === "run" &&
-			"file" in parsed &&
-			typeof parsed.file === "string" &&
-			"nonce" in parsed &&
-			typeof parsed.nonce === "string"
-		) {
-			return parsed as RunMessage;
-		}
+		const message = toRunMessage(parsed);
+		if (message !== undefined) return message;
 		throw new Error(`invalid instruction shape: ${trimmed}`);
 	}
 	throw new Error("stdin closed before instruction arrived");
@@ -142,6 +167,7 @@ async function main(): Promise<void> {
 	try {
 		const result = await runTestFile(instr.file, {
 			timeoutMs: instr.timeoutMs,
+			defaultTimeoutMs: instr.defaultTimeoutMs ?? DEFAULT_TEST_TIMEOUT_MS,
 		});
 		// A file that declared nothing checked nothing — often a typo, or tests
 		// registered on a second copy of helix. Under `--list-pinned` nothing

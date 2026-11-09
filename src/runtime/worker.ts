@@ -31,6 +31,11 @@ export interface RunFileOptions extends ExecuteOptions {
 	 * the file body and re-collect tests. Default: true.
 	 */
 	freshImport?: boolean;
+	/**
+	 * Per-test timeout (ms) used when neither {@link ExecuteOptions.timeoutMs}
+	 * nor `configure({ timeout })` — a plugin's edit included — set one.
+	 */
+	defaultTimeoutMs?: number;
 }
 
 function assertAbsolute(p: string): void {
@@ -180,7 +185,8 @@ export async function runTestFile(
 			// runtime ignored would be worse than not offering it at all.
 			const flags = cliArgs();
 			const raw = await executeRoot(root, absolutePath, {
-				timeoutMs: options.timeoutMs ?? defaults.timeout,
+				timeoutMs:
+					options.timeoutMs ?? defaults.timeout ?? options.defaultTimeoutMs,
 				retries: options.retries ?? flags.retries ?? defaults.retries,
 				grep: options.grep ?? flags.grep,
 				tags: options.tags ?? flags.tags ?? filters?.tags,

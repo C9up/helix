@@ -33,7 +33,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const FLAG_SPEC = {
 	reporter: { kind: "string", help: "Output format: spec|dot|json" },
 	threads: { kind: "number", help: "Concurrent workers" },
-	timeout: { kind: "number", help: "Per-file timeout in ms" },
+	timeout: { kind: "number", help: "Per-test timeout in ms" },
+	"file-timeout": {
+		kind: "number",
+		help: "How long one file may run before its worker is killed, in ms (default 600000)",
+	},
 	colors: { kind: "boolean", help: "Enable ANSI colours" },
 	tsx: { kind: "boolean", help: "Use tsx loader for workers (default: true)" },
 	include: { kind: "string[]", help: "Glob patterns to include" },
@@ -517,7 +521,11 @@ async function main() {
 			root: process.cwd(),
 			files: expanded,
 			threads: parsed.flags.threads,
-			timeoutMs: parsed.flags.timeout ?? helixConfig.timeout,
+			// `--timeout` beats `configure({ timeout })` and a plugin's edit; the
+			// config file's `timeout` sits below them, as the run-wide default.
+			timeoutMs: parsed.flags.timeout,
+			defaultTimeoutMs: helixConfig.timeout,
+			fileTimeoutMs: parsed.flags["file-timeout"] ?? helixConfig.fileTimeout,
 			reporter: parsed.flags.reporter,
 			reporters: parsed.flags.reporters
 				? String(parsed.flags.reporters)
@@ -690,7 +698,9 @@ async function main() {
 				config: {
 					...cfg,
 					files: suiteFiles,
-					timeoutMs: cfg.timeoutMs ?? suite.timeout,
+					// A suite's own timeout beats the config file's run-wide one;
+					// `--timeout` beats both.
+					timeoutMs: parsed.flags.timeout ?? suite.timeout,
 				},
 			});
 		}

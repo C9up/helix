@@ -77,8 +77,24 @@ export interface RunConfig {
 	discovery?: DiscoveryOptions;
 	/** Number of concurrent workers. Default: os.cpus().length. */
 	threads?: number;
-	/** Per-file timeout (ms). Default 60 000. */
+	/**
+	 * Per-test timeout (ms) that beats `configure({ timeout })` — the `--timeout`
+	 * flag, or a suite's own `timeout`. Unset, the worker uses what
+	 * `configure()` (or a plugin) set, then {@link RunConfig.defaultTimeoutMs},
+	 * then its own default.
+	 */
 	timeoutMs?: number;
+	/**
+	 * Per-test timeout (ms) used when neither {@link RunConfig.timeoutMs} nor
+	 * `configure({ timeout })` set one — the config file's `timeout`.
+	 */
+	defaultTimeoutMs?: number;
+	/**
+	 * How long one file may run before its worker is killed (ms). Default ten
+	 * minutes. Separate from the per-test timeout: a file of many fast tests
+	 * legitimately takes far longer than any one of them may.
+	 */
+	fileTimeoutMs?: number;
 	/**
 	 * How long a worker may take to exit after reporting its result, in ms.
 	 * Default 2 000 — raise it when a large coverage dump on a slow runner is
@@ -202,6 +218,8 @@ async function runNative(
 		files,
 		threads: config.threads,
 		timeoutMs: config.timeoutMs,
+		defaultTimeoutMs: config.defaultTimeoutMs,
+		fileTimeoutMs: config.fileTimeoutMs,
 		reporter: config.reporter,
 		reporters: config.reporters,
 		bail: config.bail,
@@ -635,6 +653,8 @@ async function runOnce(
 				nodeArgs: config.nodeArgs,
 				threads,
 				timeoutMs: config.timeoutMs,
+				defaultTimeoutMs: config.defaultTimeoutMs,
+				fileTimeoutMs: config.fileTimeoutMs,
 				exitGraceMs: config.exitGraceMs,
 				extraEnv: session?.env,
 				bail: config.bail,

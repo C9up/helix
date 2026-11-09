@@ -29,7 +29,13 @@ pub struct PoolConfig {
     pub node_args: Vec<String>,
     pub worker_entry: String,
     pub threads: usize,
-    pub timeout: Duration,
+    /// Per-test timeout handed to the worker, above `configure({ timeout })`.
+    /// Sent only when set, so the worker can tell "nobody chose" from a choice.
+    pub test_timeout_ms: Option<u64>,
+    /// Per-test timeout below `configure({ timeout })` (the config file's).
+    pub default_test_timeout_ms: Option<u64>,
+    /// How long one file may run before its worker is killed.
+    pub file_timeout: Duration,
     /// Stop the run once a file reports a failure (helix `--bail`). Files
     /// already spawned finish; files still queued are never started.
     pub bail: bool,
@@ -177,12 +183,17 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
     // lines in a fixture cannot spoof the frame.
     let nonce = format!("{}-{}", std::process::id(), rand_suffix());
 
-    let instr = serde_json::json!({
+    let mut instr = serde_json::json!({
         "type": "run",
         "file": path_str,
-        "timeoutMs": cfg.timeout.as_millis() as u64,
         "nonce": nonce,
     });
+    if let Some(ms) = cfg.test_timeout_ms {
+        instr["timeoutMs"] = ms.into();
+    }
+    if let Some(ms) = cfg.default_test_timeout_ms {
+        instr["defaultTimeoutMs"] = ms.into();
+    }
     let mut line = match serde_json::to_string(&instr) {
         Ok(line) => line,
         Err(e) => {
@@ -210,7 +221,7 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
     // Until the worker reports, the per-file watchdog; then the exit grace;
     // once it has exited, a short window for the frames still in the pipe.
     let mut reported = false;
-    let mut deadline = tokio::time::Instant::now() + cfg.timeout + Duration::from_secs(5);
+    let mut deadline = tokio::time::Instant::now() + cfg.file_timeout;
 
     while frames_open || exit.is_none() {
         tokio::select! {
@@ -263,7 +274,10 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
                 if !reported {
                     errors.push(WorkerError {
                         file: None,
-                        message: format!("worker timed out after {}ms", cfg.timeout.as_millis()),
+                        message: format!(
+                            "worker timed out after {}ms — the file did not finish within its deadline (fileTimeoutMs)",
+                            cfg.file_timeout.as_millis()
+                        ),
                         stack: None,
                     });
                 } else if result.is_some() {
@@ -432,6 +446,9 @@ impl Drop for AbortOnDrop {
 /// passing run into a silent hang. Mirrors the TS pool's `EXIT_GRACE_MS`.
 const EXIT_GRACE: Duration = Duration::from_millis(2000);
 
+/// Default per-file deadline: ten minutes. Mirrors the TS pool.
+pub const DEFAULT_FILE_TIMEOUT_MS: u64 = 600_000;
+
 /// How long to keep reading a worker's frames after it exited. Its last ones
 /// may still be in the pipe; a grandchild holding the pipe open would otherwise
 /// keep the file from settling at all.
@@ -568,7 +585,9 @@ process.stdin.on("end", () => {
             // One at a time, so "queued behind a failure" is deterministic
             // rather than a race with the thread count.
             threads: 1,
-            timeout: Duration::from_secs(20),
+            test_timeout_ms: None,
+            default_test_timeout_ms: None,
+            file_timeout: Duration::from_secs(20),
             bail,
         }
     }

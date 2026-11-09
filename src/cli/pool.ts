@@ -31,8 +31,24 @@ export interface PoolConfig {
 	nodeArgs?: string[];
 	/** Concurrent workers. Default: `os.cpus().length`. */
 	threads?: number;
-	/** Per-file timeout (ms). Default 60 000. */
+	/**
+	 * Per-test timeout (ms) handed to the worker, above `configure({ timeout })`
+	 * — the `--timeout` flag or a suite's own. Unset, the worker decides.
+	 */
 	timeoutMs?: number;
+	/**
+	 * Per-test timeout (ms) the worker falls back to when neither
+	 * {@link PoolConfig.timeoutMs} nor `configure({ timeout })` set one — the
+	 * config file's `timeout`.
+	 */
+	defaultTimeoutMs?: number;
+	/**
+	 * How long one file may run before its worker is killed (ms). Default
+	 * {@link DEFAULT_FILE_TIMEOUT_MS}. A safety net for a worker stuck where no
+	 * test or hook timeout reaches it — a synchronous loop — so it is sized for
+	 * a whole file, never taken from the per-test timeout.
+	 */
+	fileTimeoutMs?: number;
 	/**
 	 * Grace period (ms) between SIGTERM and SIGKILL when killing a hanging
 	 * worker. Default 2 000.
@@ -97,6 +113,9 @@ const MAX_STDERR_BUFFER_BYTES = 4 * 1024 * 1024; // 4 MiB
  * stops being true on a loaded CI runner writing a large coverage dump.
  */
 const DEFAULT_EXIT_GRACE_MS = 2000;
+
+/** Default per-file deadline: ten minutes. */
+export const DEFAULT_FILE_TIMEOUT_MS = 600_000;
 
 /**
  * How long to keep reading a worker's stderr after it exited. Its last frames
@@ -275,7 +294,10 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		// (@swc-node/register, tsx, ts-node/esm, …). Callers that want the
 		// child to run with a clean argv pass `nodeArgs: []` explicitly.
 		const nodeArgs = cfg.nodeArgs ?? inheritedLoaderArgs();
-		const timeoutMs = positiveMs(cfg.timeoutMs, 60_000);
+		const fileTimeoutMs = positiveMs(
+			cfg.fileTimeoutMs,
+			DEFAULT_FILE_TIMEOUT_MS,
+		);
 		const killGraceMs = positiveMs(cfg.killGraceMs, 2_000);
 		const exitGraceMs = positiveMs(cfg.exitGraceMs, DEFAULT_EXIT_GRACE_MS);
 		// Per-invocation nonce — the worker echoes it inside every frame so
@@ -363,8 +385,10 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		};
 
 		const watchdog = setTimeout(() => {
-			abort(`worker timed out after ${timeoutMs}ms`);
-		}, timeoutMs + killGraceMs);
+			abort(
+				`worker timed out after ${fileTimeoutMs}ms — the file did not finish within its deadline (fileTimeoutMs)`,
+			);
+		}, fileTimeoutMs);
 		watchdog.unref?.();
 
 		// UTF-8-safe accumulator for stderr frame parsing.
@@ -483,11 +507,13 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		});
 		child.on("close", finalize);
 
-		// Instruction line.
+		// Instruction line. The timeouts travel only when set, so the worker can
+		// tell "nobody chose" from a choice and apply `configure({ timeout })`.
 		const instr = JSON.stringify({
 			type: "run",
 			file,
-			timeoutMs,
+			timeoutMs: cfg.timeoutMs,
+			defaultTimeoutMs: cfg.defaultTimeoutMs,
 			nonce,
 		});
 		// `child.stdin` may be closed by the time we get here (rare spawn race).

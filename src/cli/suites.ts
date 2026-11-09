@@ -74,8 +74,16 @@ export interface HelixConfig {
 	 * the project root. Defaults to the conventional `tests/bootstrap.*`.
 	 */
 	bootstrap?: string;
-	/** Default per-test timeout in ms — AdonisJS `tests.timeout`. */
+	/**
+	 * Default per-test timeout in ms — AdonisJS `tests.timeout`. A suite's own
+	 * `timeout`, `configure({ timeout })` and `--timeout` all beat it.
+	 */
 	timeout?: number;
+	/**
+	 * How long one file may run before its worker is killed, in ms. Default
+	 * ten minutes; `--file-timeout` overrides it.
+	 */
+	fileTimeout?: number;
 	/** `process.exit()` once the run ends — AdonisJS `tests.forceExit`. */
 	forceExit?: boolean;
 	/**
@@ -164,7 +172,17 @@ function toConfig(imported: unknown): HelixConfig {
 	const rawPassWithNoTests = Reflect.get(source, "passWithNoTests");
 	const passWithNoTests =
 		typeof rawPassWithNoTests === "boolean" ? rawPassWithNoTests : undefined;
-	const runner = { bootstrap, timeout, forceExit, allowOnly, passWithNoTests };
+	const rawFileTimeout = Reflect.get(source, "fileTimeout");
+	const fileTimeout =
+		typeof rawFileTimeout === "number" ? rawFileTimeout : undefined;
+	const runner = {
+		bootstrap,
+		timeout,
+		fileTimeout,
+		forceExit,
+		allowOnly,
+		passWithNoTests,
+	};
 	const suites = Reflect.get(source, "suites");
 	if (!Array.isArray(suites)) return runner;
 	const parsed: SuiteDefinition[] = [];
