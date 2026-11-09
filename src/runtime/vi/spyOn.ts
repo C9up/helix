@@ -18,7 +18,7 @@
  * incremented by pass-through from the outer one.
  */
 
-import { type AnyFn, createSpy, isSpy, type Spy } from "./spy.js";
+import { createSpy, isSpy, type Spy } from "./spy.js";
 
 type AccessorKind = "get" | "set";
 
@@ -134,14 +134,14 @@ export function spyOn<Obj extends object, Key extends keyof Obj>(
 			`vi.spyOn: "${label}" is not a function (got ${typeof originalValue}). Pass { accessor } for accessors.`,
 		);
 	}
-	const originalFn = originalValue as AnyFn;
+	const originalFn = originalValue;
 	const spy = createSpy({
 		name: label,
 		defaultImplementation: function (this: unknown, ...args: unknown[]) {
 			// `this` is the call-site receiver (e.g. the class instance); the
 			// original method is forwarded its real receiver. Fixes the bug
 			// where `spyOn(Proto, 'method')` used to hard-bind `this = Proto`.
-			return originalFn.apply(this, args);
+			return Reflect.apply(originalFn, this, args);
 		},
 	});
 	Object.defineProperty(obj, key, {

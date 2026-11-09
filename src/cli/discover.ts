@@ -133,7 +133,7 @@ export async function discover(
 		try {
 			entries = await readdir(dir);
 		} catch (err) {
-			warn(`skipping ${dir}: ${(err as NodeJS.ErrnoException).code ?? err}`);
+			warn(`skipping ${dir}: ${errnoCode(err) ?? err}`);
 			return;
 		}
 		const local = honourGitignore
@@ -148,9 +148,7 @@ export async function discover(
 			try {
 				st = await lstat(fullPath);
 			} catch (err) {
-				warn(
-					`skipping ${fullPath}: ${(err as NodeJS.ErrnoException).code ?? err}`,
-				);
+				warn(`skipping ${fullPath}: ${errnoCode(err) ?? err}`);
 				continue;
 			}
 			// Symlinks are NOT followed. Users who need symlink-following can
@@ -171,4 +169,10 @@ export async function discover(
 	await walk(absRoot, "", []);
 	results.sort();
 	return results;
+}
+
+/** The `code` of a filesystem error (`ENOENT`, `EACCES`, …), if it has one. */
+function errnoCode(err: unknown): string | undefined {
+	const code = err instanceof Error ? Reflect.get(err, "code") : undefined;
+	return typeof code === "string" ? code : undefined;
 }

@@ -162,7 +162,7 @@ function inputToMs(input: TimeInput): number {
 		"toMillis" in input &&
 		typeof input.toMillis === "function"
 	) {
-		const result = (input as MillisLike).toMillis();
+		const result: unknown = input.toMillis();
 		if (typeof result !== "number") {
 			throw new Error(
 				`helix.time: input.toMillis() must return a number, got ${typeof result}.`,
@@ -223,7 +223,7 @@ function applyDelta(base: number, amount: number, unit: TimeUnit): number {
 			// runtime cast (`unit as TimeUnit`) could land here.
 			const exhaustive: never = unit;
 			throw new Error(
-				`helix.time.travel: unknown unit '${exhaustive as string}'.`,
+				`helix.time.travel: unknown unit '${String(exhaustive)}'.`,
 			);
 		}
 	}

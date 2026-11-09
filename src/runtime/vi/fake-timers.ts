@@ -38,10 +38,17 @@ interface OriginalTimerBag {
 	performanceNow: unknown;
 }
 
-function getPerformance(): { now?: () => number } | undefined {
-	const p = Reflect.get(globalThis, "performance");
-	if (p && typeof p === "object") return p as { now?: () => number };
+function getPerformance(): object | undefined {
+	const p: unknown = Reflect.get(globalThis, "performance");
+	if (p && typeof p === "object") return p;
 	return undefined;
+}
+
+/** `performance.now`, bound to its object, when the host has one. */
+function boundPerformanceNow(perf: object | undefined): unknown {
+	if (perf === undefined) return undefined;
+	const now: unknown = Reflect.get(perf, "now");
+	return typeof now === "function" ? now.bind(perf) : undefined;
 }
 
 function captureGlobals(): OriginalTimerBag {
@@ -53,7 +60,7 @@ function captureGlobals(): OriginalTimerBag {
 		clearInterval: Reflect.get(globalThis, "clearInterval"),
 		setImmediate: Reflect.get(globalThis, "setImmediate"),
 		clearImmediate: Reflect.get(globalThis, "clearImmediate"),
-		performanceNow: perf?.now?.bind(perf),
+		performanceNow: boundPerformanceNow(perf),
 	};
 }
 
@@ -64,7 +71,7 @@ function installHandler(state: FakeTimerState): OriginalTimerBag {
 	// when a user passes a real `Timeout` handle that predates the install.
 	const realClearTimeout =
 		typeof originals.clearTimeout === "function"
-			? (originals.clearTimeout as (id: unknown) => void)
+			? originals.clearTimeout
 			: undefined;
 
 	function scheduleTimeout(
@@ -121,7 +128,7 @@ function installHandler(state: FakeTimerState): OriginalTimerBag {
 		let id: number | undefined;
 		if (typeof idOrTimer === "number") id = idOrTimer;
 		else if (typeof idOrTimer === "object") {
-			const maybe = (idOrTimer as { id?: unknown }).id;
+			const maybe: unknown = Reflect.get(idOrTimer, "id");
 			if (typeof maybe === "number") id = maybe;
 		}
 		if (id === undefined) {
@@ -146,7 +153,7 @@ function installHandler(state: FakeTimerState): OriginalTimerBag {
 
 	// `performance.now()` tracks the fake clock when available.
 	const perf = getPerformance();
-	if (perf && typeof perf.now === "function") {
+	if (perf && typeof Reflect.get(perf, "now") === "function") {
 		Reflect.set(perf, "now", () => state.now);
 	}
 
@@ -220,7 +227,7 @@ function promisifyImmediate<T>(value?: T): Promise<T | undefined> {
 	return new Promise((resolve) => {
 		const setI = Reflect.get(globalThis, "setImmediate");
 		if (typeof setI === "function") {
-			(setI as (cb: () => void) => unknown)(() => resolve(value));
+			Reflect.apply(setI, globalThis, [() => resolve(value)]);
 		} else {
 			// Browsers: fall back to setTimeout(0).
 			globalThis.setTimeout(() => resolve(value), 0);

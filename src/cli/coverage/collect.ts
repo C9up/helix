@@ -12,7 +12,12 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RawFileCoverage, V8CoverageFile } from "./types.js";
+import type {
+	RawFileCoverage,
+	V8Function,
+	V8Range,
+	V8Script,
+} from "./types.js";
 
 export async function collect(dir: string): Promise<RawFileCoverage[]> {
 	let entries: string[];
@@ -25,14 +30,14 @@ export async function collect(dir: string): Promise<RawFileCoverage[]> {
 	const all: RawFileCoverage[] = [];
 	for (const name of jsonFiles) {
 		const p = path.join(dir, name);
-		let parsed: V8CoverageFile;
+		let scripts: V8Script[];
 		try {
 			const raw = await readFile(p, "utf8");
-			parsed = JSON.parse(raw) as V8CoverageFile;
+			scripts = scriptsOf(JSON.parse(raw));
 		} catch {
 			continue;
 		}
-		for (const script of parsed.result ?? []) {
+		for (const script of scripts) {
 			if (!script.url?.startsWith("file://")) continue;
 			// V8 sometimes appends `?query` params (our worker uses them as
 			// cache-busters) — strip them so the same file from two workers
@@ -60,4 +65,42 @@ export async function collect(dir: string): Promise<RawFileCoverage[]> {
 		}
 	}
 	return all;
+}
+
+/** The scripts of a V8 coverage dump, keeping only entries of the right shape. */
+function scriptsOf(parsed: unknown): V8Script[] {
+	if (parsed === null || typeof parsed !== "object") return [];
+	const result: unknown = Reflect.get(parsed, "result");
+	return Array.isArray(result) ? result.filter(isScript) : [];
+}
+
+function isScript(value: unknown): value is V8Script {
+	if (value === null || typeof value !== "object") return false;
+	const functions: unknown = Reflect.get(value, "functions");
+	return (
+		typeof Reflect.get(value, "scriptId") === "string" &&
+		typeof Reflect.get(value, "url") === "string" &&
+		Array.isArray(functions) &&
+		functions.every(isFunction)
+	);
+}
+
+function isFunction(value: unknown): value is V8Function {
+	if (value === null || typeof value !== "object") return false;
+	const ranges: unknown = Reflect.get(value, "ranges");
+	return (
+		typeof Reflect.get(value, "functionName") === "string" &&
+		typeof Reflect.get(value, "isBlockCoverage") === "boolean" &&
+		Array.isArray(ranges) &&
+		ranges.every(isRange)
+	);
+}
+
+function isRange(value: unknown): value is V8Range {
+	if (value === null || typeof value !== "object") return false;
+	return (
+		typeof Reflect.get(value, "startOffset") === "number" &&
+		typeof Reflect.get(value, "endOffset") === "number" &&
+		typeof Reflect.get(value, "count") === "number"
+	);
 }

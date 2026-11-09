@@ -27,8 +27,9 @@ function runGit(cwd: string, args: string[]): { ok: boolean } {
 		cwd,
 		stdio: ["ignore", "pipe", "pipe"],
 	});
-	const err = result.error as NodeJS.ErrnoException | undefined;
-	if (err?.code === "ENOENT") throw new GitMissingError();
+	const code =
+		result.error === undefined ? undefined : Reflect.get(result.error, "code");
+	if (code === "ENOENT") throw new GitMissingError();
 	return { ok: result.status === 0 };
 }
 

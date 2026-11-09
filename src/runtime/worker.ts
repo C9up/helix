@@ -273,8 +273,10 @@ function send(msg: WorkerMessage): void {
 
 function isWorkerIncoming(v: unknown): v is WorkerIncoming {
 	if (!v || typeof v !== "object") return false;
-	const r = v as { type?: unknown; file?: unknown };
-	return r.type === "run" && typeof r.file === "string";
+	return (
+		Reflect.get(v, "type") === "run" &&
+		typeof Reflect.get(v, "file") === "string"
+	);
 }
 
 let mainStarted = false;

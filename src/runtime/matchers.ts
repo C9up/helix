@@ -28,11 +28,10 @@ function isSpy(value: unknown): value is SpyLike {
 	if (!value || (typeof value !== "object" && typeof value !== "function")) {
 		return false;
 	}
-	const v = value as Partial<SpyLike>;
 	return (
-		v.__helixIsSpy === true &&
-		Array.isArray(v.calls) &&
-		typeof v.callCount === "number"
+		Reflect.get(value, "__helixIsSpy") === true &&
+		Array.isArray(Reflect.get(value, "calls")) &&
+		typeof Reflect.get(value, "callCount") === "number"
 	);
 }
 
@@ -183,24 +182,23 @@ export const matchers = {
 		// Arrow functions and bound functions without `prototype` are not
 		// constructible; `x instanceof arrowFn` throws TypeError. Reject
 		// upfront with a clean AssertionError instead of leaking the raw error.
-		const ctorFn = ctor as { prototype?: unknown; name?: string };
-		if (ctorFn.prototype === undefined) {
+		if (Reflect.get(ctor, "prototype") === undefined) {
 			return {
 				pass: false,
 				message: () =>
-					`expected a constructor (function with a prototype), got ${ctorFn.name ?? "anonymous"} (arrow / bound fn?)`,
+					`expected a constructor (function with a prototype), got ${ctor.name || "anonymous"} (arrow / bound fn?)`,
 			};
 		}
 		let pass = false;
 		try {
-			pass = received instanceof (ctor as new (...a: unknown[]) => object);
+			pass = received instanceof ctor;
 		} catch {
 			pass = false;
 		}
 		return {
 			pass,
 			message: () =>
-				`expected ${repr(received)} to be instance of ${ctorFn.name ?? "anonymous"}`,
+				`expected ${repr(received)} to be instance of ${ctor.name || "anonymous"}`,
 		};
 	},
 
@@ -365,7 +363,7 @@ export const matchers = {
 		}
 		if (error === undefined && returned && isThenable(returned)) {
 			// Swallow the rejection so it doesn't become an unhandledRejection.
-			(returned as Promise<unknown>).catch(() => {});
+			returned.then(undefined, () => {});
 			return {
 				pass: false,
 				message: () =>
@@ -532,8 +530,8 @@ function resolvePath(
 			return { exists: false, value: undefined };
 		}
 		const k = String(key);
-		if (!(k in (cursor as object))) return { exists: false, value: undefined };
-		cursor = Reflect.get(cursor as object, k);
+		if (!Reflect.has(cursor, k)) return { exists: false, value: undefined };
+		cursor = Reflect.get(cursor, k);
 	}
 	return { exists: true, value: cursor };
 }
@@ -586,7 +584,7 @@ function matchThrownError(
 		);
 	}
 	// Ctor.
-	return error instanceof (expected as new (...args: never[]) => Error);
+	return error instanceof expected;
 }
 
 function reprExpected(
@@ -596,7 +594,7 @@ function reprExpected(
 	if (expected instanceof RegExp) return String(expected);
 	if (expected instanceof Error)
 		return `${expected.constructor.name}("${expected.message}")`;
-	return (expected as { name?: string }).name ?? "anonymous";
+	return expected.name || "anonymous";
 }
 
 export type MatcherName = keyof typeof matchers;

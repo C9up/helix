@@ -815,7 +815,7 @@ async function runOneTest(
 	// Retry loop: each attempt runs the FULL cycle (beforeEach + body +
 	// afterEach) inside its own per-test frame so cleanups / outcome hooks /
 	// assertion counters reset between attempts. Passes on the first success.
-	let last!: TestResult;
+	let last: TestResult | undefined;
 	// 1-based number of the attempt that produced `last` (helix counts the first
 	// run as attempt 1), and only reported when the test opted into retries.
 	let attemptNumber = 1;
@@ -837,6 +837,10 @@ async function runOneTest(
 			),
 		);
 		if (last.status === "pass") break;
+	}
+	// `attempts` is at least 1, so the loop ran.
+	if (last === undefined) {
+		throw new Error(`internal: test "${fullName}" ran no attempt`);
 	}
 	ctx.flatTests.push(last);
 	if (ctx.bail && last.status === "fail") ctx.bailed = true;

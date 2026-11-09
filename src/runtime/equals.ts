@@ -256,10 +256,10 @@ function eq(a: unknown, b: unknown, opts: EqualsOptions, seen: Seen): boolean {
 	if (!opts.strict && a === b) return true;
 	if (a === null || b === null) return false;
 	if (typeof a !== typeof b) return false;
-	if (typeof a !== "object") return false;
+	if (typeof a !== "object" || typeof b !== "object") return false;
 
-	const objA = a as object;
-	const objB = b as object;
+	const objA = a;
+	const objB = b;
 
 	if (seenPair(seen, objA, objB)) return true;
 	markSeen(seen, objA, objB);

@@ -54,11 +54,12 @@ export function parseDiff(opts: ParseOptions): DiffMap {
 		},
 	);
 	if (result.error) {
-		const err = result.error as NodeJS.ErrnoException;
-		if (err.code === "ENOENT") {
+		const err = result.error;
+		const code = Reflect.get(err, "code");
+		if (code === "ENOENT") {
 			throw new Error("git binary not found on PATH");
 		}
-		if (err.code === "ENOBUFS") {
+		if (code === "ENOBUFS") {
 			throw new Error(
 				"diff output exceeded 64 MB — branch is too divergent to overlay",
 			);

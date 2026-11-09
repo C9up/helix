@@ -39,15 +39,15 @@ export type Constructor = new (...args: never[]) => unknown;
 
 /** `expect.any(Ctor)` — matches by type/constructor (primitive-aware). */
 export function any(ctor: Constructor): AsymmetricMatcher {
-	const name = (ctor as { name?: string }).name ?? "anonymous";
+	const name = ctor.name || "anonymous";
 	return make(`any(${name})`, (actual) => {
-		if (ctor === (String as unknown)) return typeof actual === "string";
-		if (ctor === (Number as unknown)) return typeof actual === "number";
-		if (ctor === (Boolean as unknown)) return typeof actual === "boolean";
-		if (ctor === (BigInt as unknown)) return typeof actual === "bigint";
-		if (ctor === (Symbol as unknown)) return typeof actual === "symbol";
-		if (ctor === (Function as unknown)) return typeof actual === "function";
-		if (ctor === (Object as unknown)) {
+		if (Object.is(ctor, String)) return typeof actual === "string";
+		if (Object.is(ctor, Number)) return typeof actual === "number";
+		if (Object.is(ctor, Boolean)) return typeof actual === "boolean";
+		if (Object.is(ctor, BigInt)) return typeof actual === "bigint";
+		if (Object.is(ctor, Symbol)) return typeof actual === "symbol";
+		if (Object.is(ctor, Function)) return typeof actual === "function";
+		if (Object.is(ctor, Object)) {
 			return typeof actual === "object" && actual !== null;
 		}
 		try {

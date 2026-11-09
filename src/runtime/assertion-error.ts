@@ -24,11 +24,8 @@ export class AssertionError extends Error {
 		this.operator = init.operator;
 		this.showDiff = init.showDiff ?? true;
 		// V8 only: strip framework frames so the stack points at user code.
-		const capture = (
-			Error as { captureStackTrace?: (target: object, ctor: object) => void }
-		).captureStackTrace;
-		if (typeof capture === "function") {
-			capture(this, AssertionError);
+		if (typeof Error.captureStackTrace === "function") {
+			Error.captureStackTrace(this, AssertionError);
 		}
 	}
 }

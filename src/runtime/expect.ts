@@ -76,21 +76,33 @@ function labelled(label: string | undefined, message: string): string {
 	return `${label}: ${message}`;
 }
 
-type MatcherInvoker = (
-	received: unknown,
-	...rest: unknown[]
-) => {
-	pass: boolean;
-	message(): string;
-};
+/** What every matcher returns — checked, since matchers are called by name. */
+function isMatcherResult(
+	value: unknown,
+): value is { pass: boolean; message(): string } {
+	return (
+		value !== null &&
+		typeof value === "object" &&
+		typeof Reflect.get(value, "pass") === "boolean" &&
+		typeof Reflect.get(value, "message") === "function"
+	);
+}
 
 function evaluate(ctx: EvalContext, name: MatcherName, args: unknown[]): void {
 	// Every matcher invocation is one assertion (drives `expect.assertions`).
 	recordAssertion();
-	const matcher = matchers[name] as MatcherInvoker;
 	let result: { pass: boolean; message(): string };
 	try {
-		result = matcher(ctx.received, ...args);
+		// Called by name with the caller's arguments, which the chain's types
+		// have already checked against this matcher's signature.
+		const returned: unknown = Reflect.apply(matchers[name], matchers, [
+			ctx.received,
+			...args,
+		]);
+		if (!isMatcherResult(returned)) {
+			throw new TypeError(`matcher ${name} returned no { pass, message }`);
+		}
+		result = returned;
 	} catch (err) {
 		// A matcher threw unexpectedly (e.g. a user-supplied constructor with
 		// a throwing `Symbol.hasInstance`). Surface it as a normal assertion
@@ -114,20 +126,43 @@ function evaluate(ctx: EvalContext, name: MatcherName, args: unknown[]): void {
 	});
 }
 
-const matcherNames = Object.keys(matchers) as MatcherName[];
+function isMatcherName(key: string): key is MatcherName {
+	return Object.hasOwn(matchers, key);
+}
+
+const matcherNames: readonly MatcherName[] =
+	Object.keys(matchers).filter(isMatcherName);
+
+/**
+ * Whether `api` carries every matcher as a function — true once a build loop
+ * has run. Checked rather than asserted, so a matcher the loop missed fails
+ * loudly instead of as `undefined is not a function` inside a test.
+ */
+function hasEveryMatcher<Chain extends object>(api: object): api is Chain {
+	return matcherNames.every(
+		(name) => typeof Reflect.get(api, name) === "function",
+	);
+}
+
+function complete<Chain extends object>(api: object): Chain {
+	if (!hasEveryMatcher<Chain>(api)) {
+		throw new Error("helix: an expect() chain is missing a matcher");
+	}
+	return api;
+}
 
 function buildSync(
 	received: unknown,
 	negate: boolean,
 	label?: string,
 ): SyncChain {
-	const api = {} as SyncChain;
+	const api = {};
 	for (const name of matcherNames) {
 		const fn = (...args: unknown[]) =>
 			evaluate({ received, negate, label }, name, args);
 		Reflect.set(api, name, fn);
 	}
-	return api;
+	return complete<SyncChain>(api);
 }
 
 type PromiseMode = "resolves" | "rejects";
@@ -138,7 +173,7 @@ function buildAsync(
 	negate: boolean,
 	label?: string,
 ): AsyncChain {
-	const api = {} as AsyncChain;
+	const api = {};
 	for (const name of matcherNames) {
 		const settle = async (args: unknown[]): Promise<void> => {
 			if (!isThenable(received)) {
@@ -154,7 +189,7 @@ function buildAsync(
 			let rejected: unknown;
 			let didReject = false;
 			try {
-				resolved = await (received as PromiseLike<unknown>);
+				resolved = await received;
 			} catch (err) {
 				rejected = err;
 				didReject = true;
@@ -196,7 +231,7 @@ function buildAsync(
 		const fn = (...args: unknown[]) => trackAsyncAssertion(settle(args));
 		Reflect.set(api, name, fn);
 	}
-	return api;
+	return complete<AsyncChain>(api);
 }
 
 /** The callable `expect(...)` plus its static asymmetric matchers + assertion controls. */

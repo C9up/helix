@@ -842,29 +842,38 @@ export function interpolateDatasetTitle(
 	});
 }
 
-const describeFn = ((name: string, fn: SuiteFn) =>
-	registerSuite(name, "run", fn)) as SuiteApi;
-describeFn.skip = (name, fn) => registerSuite(name, "skip", fn);
-describeFn.only = (name, fn) => registerSuite(name, "only", fn);
-describeFn.todo = (name) => registerSuite(name, "todo", () => {});
+const describeFn: SuiteApi = Object.assign(
+	(name: string, fn: SuiteFn) => registerSuite(name, "run", fn),
+	{
+		skip: (name: string, fn: SuiteFn) => registerSuite(name, "skip", fn),
+		only: (name: string, fn: SuiteFn) => registerSuite(name, "only", fn),
+		todo: (name: string) => registerSuite(name, "todo", () => {}),
+	},
+);
 
-const testFn = ((name: string, fn?: TestFn, options?: TestOptions | number) => {
+const testCall = (
+	name: string,
+	fn?: TestFn,
+	options?: TestOptions | number,
+) => {
 	// No body → `todo`. A dataset body added later via
 	// `.with(...).run(fn)` promotes it back to a runnable test.
 	const mode: RunMode = fn === undefined ? "todo" : "run";
 	return makeHandle(
 		registerTest(name, mode, fn, normaliseTestOptions(options)),
 	);
-}) as TestApi;
-testFn.skip = (name, fn) => {
+};
+const testSkip: TestApi["skip"] = (name, fn) => {
 	registerTest(name, "skip", fn);
 };
-testFn.only = (name, fn, options?: TestOptions | number) =>
+const testOnly: TestApi["only"] = (name, fn, options?: TestOptions | number) =>
 	makeHandle(registerTest(name, "only", fn, normaliseTestOptions(options)));
-testFn.todo = (name) => {
+const testTodo: TestApi["todo"] = (name) => {
 	registerTest(name, "todo", undefined);
 };
-testFn.each = <Row extends EachRow>(rows: EachRows<Row>) => {
+const testEach: TestApi["each"] = <Row extends EachRow>(
+	rows: EachRows<Row>,
+) => {
 	return (name: string, fn: (row: Row) => unknown) => {
 		// A function source (`test.each(() => rows)`) is resolved eagerly at
 		// collection time — per-row nodes need concrete rows to register.
@@ -875,7 +884,10 @@ testFn.each = <Row extends EachRow>(rows: EachRows<Row>) => {
 		});
 	};
 };
-testFn.group = (name: string, fn: (group: Group) => void): Group => {
+const testGroup: TestApi["group"] = (
+	name: string,
+	fn: (group: Group) => void,
+): Group => {
 	// helix forbids nested groups (grouping-tests docs) — a group inside a group
 	// is a structural error, not a supported nesting.
 	for (
@@ -944,7 +956,7 @@ testFn.group = (name: string, fn: (group: Group) => void): Group => {
 	return instance;
 };
 
-testFn.macro = <Args extends unknown[], R>(
+const testMacro: TestApi["macro"] = <Args extends unknown[], R>(
 	callback: (test: TestInstance, ...args: Args) => R,
 ): ((...args: Args) => R) => {
 	return (...args: Args): R => {
@@ -957,6 +969,15 @@ testFn.macro = <Args extends unknown[], R>(
 		return callback(t, ...args);
 	};
 };
+
+const testFn: TestApi = Object.assign(testCall, {
+	skip: testSkip,
+	only: testOnly,
+	todo: testTodo,
+	each: testEach,
+	group: testGroup,
+	macro: testMacro,
+});
 
 /**
  * Class-level extension surface (`Test.macro`). Registers a named method
