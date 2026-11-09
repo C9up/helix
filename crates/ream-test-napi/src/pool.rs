@@ -39,6 +39,11 @@ pub struct PoolConfig {
     /// Stop the run once a file reports a failure (helix `--bail`). Files
     /// already spawned finish; files still queued are never started.
     pub bail: bool,
+    /// Drop what the tests print instead of forwarding it (`--silent`).
+    pub silent: bool,
+    /// Forward the tests' stdout to stderr, so a reporter writing
+    /// machine-readable output on stdout (`json`) stays parseable.
+    pub output_to_stderr: bool,
 }
 
 pub async fn run_pool(
@@ -83,6 +88,9 @@ pub async fn run_pool(
             }
             let outcome = run_one_file(&file, &cfg).await;
             let mut r = reporter.lock().await;
+            if !cfg.silent {
+                forward_output(&file, &outcome, cfg.output_to_stderr);
+            }
             if let Some(result) = &outcome.result {
                 r.on_file_result(result);
                 if cfg.bail && result.totals.fail > 0 {
@@ -123,6 +131,78 @@ pub async fn run_pool(
 pub struct FileOutcome {
     pub result: Option<FileResult>,
     pub errors: Vec<WorkerError>,
+    /// What the worker printed on stdout.
+    pub stdout: String,
+    /// What the worker printed on stderr, outside the frames.
+    pub stderr: String,
+}
+
+/// How much of what one file prints is kept, per stream. Past it the rest is
+/// counted, not kept: a test logging in a loop must not grow the CLI's memory
+/// without bound. Mirrors the TS pool.
+const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+
+/// Bounded accumulator for one stream of a worker's output.
+#[derive(Default)]
+struct OutputBuffer {
+    data: Vec<u8>,
+    dropped: usize,
+}
+
+impl OutputBuffer {
+    fn append(&mut self, chunk: &[u8]) {
+        let room = MAX_OUTPUT_BYTES.saturating_sub(self.data.len());
+        let kept = room.min(chunk.len());
+        self.data.extend_from_slice(&chunk[..kept]);
+        self.dropped += chunk.len() - kept;
+    }
+
+    fn text(&self) -> String {
+        let mut text = String::from_utf8_lossy(&self.data).into_owned();
+        if self.dropped > 0 {
+            text.push_str(&format!(
+                "\n… {} more bytes of output dropped\n",
+                self.dropped
+            ));
+        }
+        text
+    }
+}
+
+type SharedOutput = Arc<std::sync::Mutex<OutputBuffer>>;
+
+fn take_output(buffer: &SharedOutput) -> String {
+    buffer.lock().map(|b| b.text()).unwrap_or_default()
+}
+
+/// Write what a file printed, under a header naming it. Buffered per file and
+/// written in one go, so files running in parallel do not interleave.
+fn forward_output(file: &std::path::Path, outcome: &FileOutcome, stdout_to_stderr: bool) {
+    use std::io::Write as _;
+    let name = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| file.strip_prefix(cwd).ok().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| file.to_path_buf());
+    let name = name.to_string_lossy();
+    let block = |label: &str, text: &str| -> Option<String> {
+        if text.is_empty() {
+            return None;
+        }
+        let newline = if text.ends_with('\n') { "" } else { "\n" };
+        Some(format!("{} | {}\n{}{}", label, name, text, newline))
+    };
+    if let Some(out) = block("stdout", &outcome.stdout) {
+        if stdout_to_stderr {
+            let _ = std::io::stderr().lock().write_all(out.as_bytes());
+        } else {
+            let mut sink = std::io::stdout().lock();
+            let _ = sink.write_all(out.as_bytes());
+            let _ = sink.flush();
+        }
+    }
+    if let Some(err) = block("stderr", &outcome.stderr) {
+        let _ = std::io::stderr().lock().write_all(err.as_bytes());
+    }
 }
 
 /// One frame the worker wrote on stderr, already checked against the nonce.
@@ -144,6 +224,8 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
             message,
             stack: None,
         }],
+        stdout: String::new(),
+        stderr: String::new(),
     };
     let mut cmd = Command::new(&cfg.node_bin);
     for a in &cfg.node_args {
@@ -166,15 +248,25 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
         return fail("worker spawned without its stdio pipes".into());
     };
 
-    // Drain stdout in a background task so the worker can freely
-    // `console.log` without filling the 64 KiB pipe buffer.
-    let _drain = AbortOnDrop(tokio::spawn(async move {
-        let mut reader = stdout;
-        let mut buf = [0u8; 8192];
-        loop {
-            match reader.read(&mut buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(_) => continue,
+    // Read stdout in a background task so the worker can freely
+    // `console.log` without filling the 64 KiB pipe buffer; it is forwarded
+    // once the file settles.
+    let stdout_buffer: SharedOutput = Arc::default();
+    let stderr_buffer: SharedOutput = Arc::default();
+    let mut drain = AbortOnDrop(tokio::spawn({
+        let sink = stdout_buffer.clone();
+        async move {
+            let mut reader = stdout;
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if let Ok(mut out) = sink.lock() {
+                            out.append(&buf[..n]);
+                        }
+                    }
+                }
             }
         }
     }));
@@ -211,7 +303,12 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
     // Frames are read by their own task so the loop below can wait on them, on
     // the worker's exit and on a deadline at once.
     let (tx, mut frames) = tokio::sync::mpsc::unbounded_channel();
-    let _reader = AbortOnDrop(tokio::spawn(read_frames(BufReader::new(stderr), nonce, tx)));
+    let _reader = AbortOnDrop(tokio::spawn(read_frames(
+        BufReader::new(stderr),
+        nonce,
+        tx,
+        stderr_buffer.clone(),
+    )));
 
     let mut result: Option<FileResult> = None;
     let mut errors: Vec<WorkerError> = Vec::new();
@@ -340,7 +437,15 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
             err.file = Some(path_str.clone());
         }
     }
-    FileOutcome { result, errors }
+    // The last stdout bytes may still be in the pipe; a grandchild holding it
+    // open must not keep the file from settling.
+    let _ = tokio::time::timeout(EXIT_DRAIN, &mut drain.0).await;
+    FileOutcome {
+        result,
+        errors,
+        stdout: take_output(&stdout_buffer),
+        stderr: take_output(&stderr_buffer),
+    }
 }
 
 /// The signal that ended a worker, by name where it has a common one.
@@ -370,6 +475,7 @@ async fn read_frames<R: tokio::io::AsyncRead + Unpin>(
     mut reader: BufReader<R>,
     expected_nonce: String,
     tx: tokio::sync::mpsc::UnboundedSender<Frame>,
+    output: SharedOutput,
 ) {
     // `read_until(b'\n', Vec<u8>)` is lossy-UTF-8 tolerant — a single
     // invalid byte on stderr from a native addon won't kill the task.
@@ -396,6 +502,9 @@ async fn read_frames<R: tokio::io::AsyncRead + Unpin>(
         let line = String::from_utf8_lossy(&raw);
         let trimmed = line.trim_end();
         let Some(payload) = trimmed.strip_prefix(FRAME_PREFIX) else {
+            if let Ok(mut out) = output.lock() {
+                out.append(&raw);
+            }
             continue;
         };
         let msg: serde_json::Value = match serde_json::from_str(payload) {
@@ -425,7 +534,7 @@ async fn read_frames<R: tokio::io::AsyncRead + Unpin>(
     }
 }
 
-/// Stops the stdout drain when `run_one_file` returns, on every path out.
+/// Stops the stdout reader when `run_one_file` returns, on every path out.
 ///
 /// The task reads until EOF, and EOF only arrives once every holder of the
 /// write end is gone. A worker we had to kill may have spawned something that
@@ -589,6 +698,8 @@ process.stdin.on("end", () => {
             default_test_timeout_ms: None,
             file_timeout: Duration::from_secs(20),
             bail,
+            silent: true,
+            output_to_stderr: false,
         }
     }
 
@@ -895,5 +1006,29 @@ process.stdin.on("end", () => {{
         let (results, errors) = run_single(entry, "exit0-run").await;
         assert_eq!(results.len(), 1);
         assert_eq!(errors.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn what_the_worker_prints_is_kept_for_the_file() {
+        let dir = temp_dir("output");
+        let entry = reporting_worker(
+            &dir,
+            "printing.mjs",
+            r#"process.stdout.write("OUT-LINE\n"); process.stderr.write("ERR-LINE\n");"#,
+        );
+        let outcome = run_one_file(&dir.join("a.test.ts"), &config(entry, false)).await;
+        assert!(outcome.result.is_some());
+        assert!(outcome.stdout.contains("OUT-LINE"), "{:?}", outcome.stdout);
+        assert!(outcome.stderr.contains("ERR-LINE"), "{:?}", outcome.stderr);
+        // The frames themselves are protocol, not output.
+        assert!(!outcome.stderr.contains("__HELIX_RESULT__"));
+    }
+
+    #[test]
+    fn output_past_the_cap_is_counted_not_kept() {
+        let mut buffer = OutputBuffer::default();
+        buffer.append(&vec![b'x'; MAX_OUTPUT_BYTES + 10]);
+        assert_eq!(buffer.data.len(), MAX_OUTPUT_BYTES);
+        assert!(buffer.text().ends_with("10 more bytes of output dropped\n"));
     }
 }

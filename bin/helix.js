@@ -94,6 +94,10 @@ const FLAG_SPEC = {
 		kind: "boolean",
 		help: "Print the tests marked .pin() and run nothing (--list-pinned)",
 	},
+	silent: {
+		kind: "boolean",
+		help: "Drop what the tests print instead of showing it (--silent)",
+	},
 	"pass-with-no-tests": {
 		kind: "boolean",
 		help: "Exit 0 when no test file or no test is found (--pass-with-no-tests)",
@@ -545,6 +549,7 @@ async function main() {
 			useColors: parsed.flags.colors,
 			discovery,
 			passWithNoTests,
+			silent: parsed.flags.silent === true,
 			nodeArgs:
 				parsed.flags.tsx === false || !tsxLoader
 					? []

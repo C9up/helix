@@ -51,6 +51,8 @@ export interface RunConfig {
 	nodeArgs?: Array<string>;
 	/** ANSI colours in the Spec reporter. Default true when stdout is TTY. */
 	useColors?: boolean;
+	/** Drop what the tests print instead of forwarding it (`--silent`). */
+	silent?: boolean;
 }
 
 export interface SummaryPayload {

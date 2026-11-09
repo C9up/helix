@@ -148,6 +148,11 @@ export interface RunConfig {
 	 * not read as green.
 	 */
 	passWithNoTests?: boolean;
+	/**
+	 * Drop what the tests print (`--silent`). Otherwise a worker's stdout and
+	 * stderr are forwarded once its file settles, under a header naming it.
+	 */
+	silent?: boolean;
 }
 
 export interface RunOutcome {
@@ -227,6 +232,7 @@ async function runNative(
 		nodeBin: config.nodeBin ?? process.execPath,
 		nodeArgs: config.nodeArgs,
 		useColors: config.useColors ?? process.stdout.isTTY === true,
+		silent: config.silent,
 	});
 	const totals: Totals = {
 		pass: payload.pass,
@@ -658,6 +664,12 @@ async function runOnce(
 				exitGraceMs: config.exitGraceMs,
 				extraEnv: session?.env,
 				bail: config.bail,
+				silent: config.silent,
+				// The json reporter owns stdout; what the tests print goes to
+				// stderr so its output stays parseable.
+				outputToStderr: (
+					config.reporters ?? (config.reporter ? [config.reporter] : [])
+				).includes("json"),
 			},
 			reporter,
 		);

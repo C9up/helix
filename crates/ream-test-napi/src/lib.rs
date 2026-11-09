@@ -61,6 +61,8 @@ pub struct RunConfig {
     pub node_args: Option<Vec<String>>,
     /// ANSI colours in the Spec reporter. Default true when stdout is TTY.
     pub use_colors: Option<bool>,
+    /// Drop what the tests print instead of forwarding it (`--silent`).
+    pub silent: Option<bool>,
 }
 
 #[napi(object)]
@@ -163,6 +165,9 @@ pub async fn run(config: RunConfig) -> Result<SummaryPayload> {
         Some(list) if !list.is_empty() => list,
         _ => vec![config.reporter.unwrap_or_else(|| "spec".to_string())],
     };
+    // The json reporter owns stdout: what the tests print goes to stderr so its
+    // output stays parseable.
+    let output_to_stderr = kinds.iter().any(|kind| kind == "json");
     let built: Vec<Box<dyn Reporter + Send>> = kinds
         .iter()
         .map(|kind| make_reporter(kind, use_colors))
@@ -182,6 +187,8 @@ pub async fn run(config: RunConfig) -> Result<SummaryPayload> {
         default_test_timeout_ms: config.default_timeout_ms.map(u64::from),
         file_timeout,
         bail: config.bail.unwrap_or(false),
+        silent: config.silent.unwrap_or(false),
+        output_to_stderr,
     };
 
     let (files_ok, errors) = pool::run_pool(files, pool_cfg, reporter.clone()).await?;

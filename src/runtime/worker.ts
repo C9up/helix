@@ -20,7 +20,12 @@ import { loadBootstrap } from "./bootstrap.js";
 import { cliArgs, runningInCI } from "./cli-args.js";
 import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
 import { FRAME_PREFIX } from "./ipc-protocol.js";
-import { type ExecuteOptions, executeRoot, type FileResult } from "./run.js";
+import {
+	type ExecuteOptions,
+	executeRoot,
+	type FileResult,
+	serializeError,
+} from "./run.js";
 import { type SuiteNode, withCollection } from "./suite.js";
 import { applyTaps, tappedBail } from "./suite-taps.js";
 import { withViContext } from "./vi/index.js";
@@ -168,6 +173,8 @@ export async function runTestFile(
 				pinned: pinnedNames(root, []),
 			};
 		}
+		let result: FileResult;
+		let teardownFailures: unknown[] = [];
 		try {
 			// Retries / grep / tags are per-test runtime filters. The CLI carries
 			// them in env vars so they reach the worker through ANY orchestrator —
@@ -198,12 +205,17 @@ export async function runTestFile(
 				bailLayer: options.bailLayer ?? asBailLayer(flags.bailLayer),
 				allowOnly: options.allowOnly ?? flags.allowOnly ?? !runningInCI(),
 			});
-			return sanitize(raw);
+			result = sanitize(raw);
 		} finally {
 			// Runner teardowns (plugin `api.cleanup` + `configure({ teardown })`)
 			// run once the file's tests finish — close servers, DB pools, etc.
-			await drainRunnerTeardowns();
+			teardownFailures = await drainRunnerTeardowns();
 		}
+		if (teardownFailures.length === 0) return result;
+		return {
+			...result,
+			teardownErrors: teardownFailures.map(serializeError),
+		};
 	});
 }
 

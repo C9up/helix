@@ -86,6 +86,13 @@ export interface FileResult {
 	 * runs nothing.
 	 */
 	pinned?: string[];
+	/**
+	 * Runner teardowns (`api.cleanup`, `configure({ teardown })`, a setup's
+	 * undo) that threw once the file's tests finished. The CLI reports each as a
+	 * file error: a pool that would not close or a rollback that broke must not
+	 * pass unseen.
+	 */
+	teardownErrors?: SerializedError[];
 }
 
 export interface ExecuteOptions {
@@ -247,7 +254,7 @@ function withThrown(
 /** The reason helix attaches to a test skipped because the run bailed. */
 const BAIL_SKIP_REASON = "Skipped due to bail mode";
 
-function serializeError(err: unknown): SerializedError {
+export function serializeError(err: unknown): SerializedError {
 	if (err instanceof AssertionError) {
 		return withThrown(
 			{

@@ -81,6 +81,13 @@ export interface PoolConfig {
 	 * no tests to skip.
 	 */
 	bail?: boolean;
+	/** Drop what the tests print instead of forwarding it (`--silent`). */
+	silent?: boolean;
+	/**
+	 * Forward what the tests print on stdout to stderr instead — so a reporter
+	 * writing machine-readable output on stdout (`json`) stays parseable.
+	 */
+	outputToStderr?: boolean;
 }
 
 export interface WorkerErrorMessage {
@@ -97,6 +104,56 @@ export interface WorkerErrorMessage {
 export interface FileOutcome {
 	result?: FileResult;
 	errors: WorkerErrorMessage[];
+	/** What the worker printed, outside the frames, on each stream. */
+	output: { stdout: string; stderr: string };
+}
+
+/**
+ * How much of what one file prints is kept, per stream. Past it the rest is
+ * counted, not kept: a test logging in a loop must not grow the CLI's memory
+ * without bound.
+ */
+const MAX_OUTPUT_BYTES = 1024 * 1024;
+
+/** Bounded accumulator for one stream of a worker's output. */
+class OutputBuffer {
+	#text = "";
+	#dropped = 0;
+	append(chunk: string): void {
+		const room = MAX_OUTPUT_BYTES - this.#text.length;
+		if (room >= chunk.length) {
+			this.#text += chunk;
+			return;
+		}
+		if (room > 0) this.#text += chunk.slice(0, room);
+		this.#dropped += chunk.length - Math.max(room, 0);
+	}
+	toString(): string {
+		if (this.#dropped === 0) return this.#text;
+		return `${this.#text}\n… ${this.#dropped} more characters of output dropped\n`;
+	}
+}
+
+/**
+ * Write what a file printed, under a header naming it. Buffered per file and
+ * written in one go, so files running in parallel do not interleave.
+ */
+function forwardOutput(
+	file: string,
+	output: FileOutcome["output"],
+	cfg: PoolConfig,
+): void {
+	if (cfg.silent === true) return;
+	const name = path.relative(process.cwd(), file) || file;
+	const write = (label: string, text: string, toStderr: boolean): void => {
+		if (text.length === 0) return;
+		const body = text.endsWith("\n") ? text : `${text}\n`;
+		(toStderr ? process.stderr : process.stdout).write(
+			`${label} | ${name}\n${body}`,
+		);
+	};
+	write("stdout", output.stdout, cfg.outputToStderr === true);
+	write("stderr", output.stderr, true);
 }
 
 /** Maximum stderr buffering before we give up and mark the file errored. */
@@ -263,6 +320,7 @@ export async function runPool(
 				if (cfg.bail === true && gateClosed) return;
 				safeCall(() => reporter.onFileStart(absFile), "onFileStart");
 				const outcome = await runOne(absFile, cfg);
+				forwardOutput(absFile, outcome.output, cfg);
 				const { result } = outcome;
 				if (result !== undefined) {
 					safeCall(() => reporter.onFileResult(result), "onFileResult");
@@ -323,6 +381,8 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		let settled = false;
 		let result: FileResult | undefined;
 		const errors: WorkerErrorMessage[] = [];
+		const stdout = new OutputBuffer();
+		const stderr = new OutputBuffer();
 		// Set once the worker has said it is done (a result, or a fatal error).
 		let reported = false;
 		let exitGrace: ReturnType<typeof setTimeout> | undefined;
@@ -344,7 +404,10 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 					message: "worker exited without emitting a framed result",
 				});
 			}
-			resolve(result === undefined ? { errors } : { result, errors });
+			const output = { stdout: stdout.toString(), stderr: stderr.toString() };
+			resolve(
+				result === undefined ? { errors, output } : { result, errors, output },
+			);
 		};
 		/** A failure the pool itself diagnosed: record it, kill, and stop. */
 		const abort = (message: string): void => {
@@ -397,9 +460,7 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 
 		const processLine = (line: string): void => {
 			if (!line.startsWith(FRAME_PREFIX)) {
-				if (process.env.HELIX_DEBUG_POOL) {
-					process.stderr.write(`[helix-debug] worker stderr: ${line}\n`);
-				}
+				stderr.append(`${line}\n`);
 				return;
 			}
 			const frame = parseFrame(line.slice(FRAME_PREFIX.length));
@@ -453,10 +514,13 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 			drainLines();
 		});
 
-		// Drain stdout so a chatty `console.log` can't fill the 64 KB pipe
-		// buffer and deadlock the worker. We don't currently surface it to
-		// the reporter (Phase 2 feature).
-		child.stdout?.on("data", () => {});
+		// Read stdout as it comes, so a chatty `console.log` can't fill the 64 KB
+		// pipe buffer and deadlock the worker; it is forwarded once the file
+		// settles.
+		const stdoutDecoder = new StringDecoder("utf8");
+		child.stdout?.on("data", (chunk: Buffer) => {
+			stdout.append(stdoutDecoder.write(chunk));
+		});
 
 		child.on("error", (err) => {
 			abort(`spawn failed: ${err.message}`);

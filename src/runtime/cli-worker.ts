@@ -182,6 +182,18 @@ async function main(): Promise<void> {
 		}
 		await emit({ type: "result", result, nonce: instr.nonce });
 		reported = true;
+		// A runner teardown that threw is an error of this file, beside its
+		// results: the parent counts each one.
+		for (const error of result.teardownErrors ?? []) {
+			unhandled += 1;
+			await emit({
+				type: "unhandled",
+				file: instr.file,
+				message: `runner teardown failed: ${error.message}`,
+				stack: error.stack,
+				nonce: instr.nonce,
+			});
+		}
 		// The status the parent checks the exit against: anything else means
 		// something happened after this line that the frames did not explain.
 		process.exitCode = result.totals.fail > 0 || unhandled > 0 ? 1 : 0;

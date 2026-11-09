@@ -330,10 +330,12 @@ export async function configure(options: ConfigureOptions): Promise<void> {
 
 /**
  * Run every registered runner teardown (reverse order), then clear them — called
- * by the runtime after a file's tests finish. Failures are logged, not thrown,
- * so one bad teardown can't hide the test results.
+ * by the runtime after a file's tests finish. Failures are collected and
+ * returned, not thrown, so one bad teardown can't hide the test results or stop
+ * the others; the worker reports each one as a file error.
  */
-export async function drainRunnerTeardowns(): Promise<void> {
+export async function drainRunnerTeardowns(): Promise<unknown[]> {
+	const failures: unknown[] = [];
 	// Cleanups returned by `setup` unwind first — they are the innermost thing
 	// that was opened. `null` for the error: the drain only happens once the run
 	// itself has finished, so there is no setup failure left to report.
@@ -344,7 +346,7 @@ export async function drainRunnerTeardowns(): Promise<void> {
 		try {
 			await cleanup(null, runner);
 		} catch (err) {
-			console.error("[helix] runner cleanup failed:", err);
+			failures.push(err);
 		}
 	}
 	runnerCleanups.length = 0;
@@ -352,8 +354,9 @@ export async function drainRunnerTeardowns(): Promise<void> {
 		try {
 			await teardown(runner);
 		} catch (err) {
-			console.error("[helix] runner teardown failed:", err);
+			failures.push(err);
 		}
 	}
 	runnerTeardowns.length = 0;
+	return failures;
 }
