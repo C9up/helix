@@ -663,20 +663,10 @@ async function main() {
 			}
 		}
 
-		// `runnerHooks` run ONCE around the whole run, here, and the workers are
-		// told to skip them — the difference between
-		// migrating once and migrating once per test file.
-		const dropGlobalHooks = await runGlobalHooks(process.env.HELIX_BOOTSTRAP);
-
-		if (!selectedSuites) {
-			try {
-				const outcome = await run(cfg);
-				return outcome.exitCode;
-			} finally {
-				await dropGlobalHooks();
-			}
-		}
-
+		// Suites resolve BEFORE the global setup: a `files` callback that throws,
+		// or a glob that cannot be walked, must fail the run while nothing has
+		// been set up yet, instead of leaving a migrated database behind.
+		//
 		// Suites run one after another (they run in sequence), each
 		// with its own files, timeout, retries and `meta.suite` name. The
 		// sequence is handed to the orchestrator as a whole so watch mode
@@ -686,7 +676,7 @@ async function main() {
 		// A suite named on the command line that resolves to nothing is a
 		// configuration error, even when the others have files.
 		let namedSuiteEmpty = false;
-		for (const suite of selectedSuites) {
+		for (const suite of selectedSuites ?? []) {
 			const suiteFiles = filterByFileFilters(
 				await resolveSuiteFiles(suite, process.cwd(), cfg.discovery),
 				parsed.flags.files,
@@ -715,10 +705,25 @@ async function main() {
 				},
 			});
 		}
-		try {
-			if (steps.length === 0) {
-				return noTestFiles(passWithNoTests).exitCode;
+		if (selectedSuites && steps.length === 0) {
+			return noTestFiles(passWithNoTests).exitCode;
+		}
+
+		// `runnerHooks` run ONCE around the whole run, here, and the workers are
+		// told to skip them — the difference between
+		// migrating once and migrating once per test file.
+		const dropGlobalHooks = await runGlobalHooks(process.env.HELIX_BOOTSTRAP);
+
+		if (!selectedSuites) {
+			try {
+				const outcome = await run(cfg);
+				return outcome.exitCode;
+			} finally {
+				await dropGlobalHooks();
 			}
+		}
+
+		try {
 			const outcome = await runSuites(steps, cfg);
 			return namedSuiteEmpty && !passWithNoTests
 				? Math.max(outcome.exitCode, 1)
