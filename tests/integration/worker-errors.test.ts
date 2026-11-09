@@ -79,6 +79,14 @@ describe.each(pools)("worker errors — %s", (_label, pool) => {
 		expect(outcome.summary.fileErrors[0]?.message).toMatch(/code 3/);
 	}, 30_000);
 
+	it("fails the test that forgot to await a failing assertion, not the file", async () => {
+		const outcome = await runFixture("unawaited-assertion.test.ts", pool);
+		expect(outcome.exitCode).toBe(1);
+		expect(outcome.summary.totals.fileErrors).toBe(0);
+		expect(outcome.summary.totals.fail).toBe(1);
+		expect(outcome.summary.totals.pass).toBe(1);
+	}, 30_000);
+
 	it("still passes a clean file with no file error", async () => {
 		const outcome = await runFixture("pass.test.ts", pool);
 		expect(outcome.exitCode).toBe(0);

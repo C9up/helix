@@ -24,6 +24,7 @@ import {
 	recordAssertion,
 	setExpectedAssertions,
 	setHasAssertions,
+	trackAsyncAssertion,
 } from "./test-context.js";
 import { isThenable } from "./thenable.js";
 
@@ -139,7 +140,7 @@ function buildAsync(
 ): AsyncChain {
 	const api = {} as AsyncChain;
 	for (const name of matcherNames) {
-		const fn = async (...args: unknown[]) => {
+		const settle = async (args: unknown[]): Promise<void> => {
 			if (!isThenable(received)) {
 				throw new AssertionError({
 					message: labelled(
@@ -190,6 +191,9 @@ function buildAsync(
 					: rejected;
 			evaluate({ received: target, negate, label }, name, args);
 		};
+		// Tracked on the running test, so one the body forgets to await still
+		// fails it.
+		const fn = (...args: unknown[]) => trackAsyncAssertion(settle(args));
 		Reflect.set(api, name, fn);
 	}
 	return api;

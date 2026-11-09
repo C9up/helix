@@ -50,6 +50,16 @@ interface TestFrame {
 	context: unknown;
 	/** Whether the test body/hooks errored — passed to cleanups as `hasError`. */
 	hadError: boolean;
+	/** `.resolves` / `.rejects` assertions started during the test. */
+	asyncAssertions: AsyncAssertion[];
+}
+
+/** One `.resolves` / `.rejects` assertion, and whether the test awaited it. */
+interface AsyncAssertion {
+	/** Set once the test attached a handler (`await`, `.then`, `.catch`, `.finally`). */
+	observed: boolean;
+	/** Settles with the failure, or `undefined` when the assertion held. */
+	outcome: Promise<{ error: unknown } | undefined>;
 }
 
 const storage = new AsyncLocalStorage<TestFrame>();
@@ -63,6 +73,7 @@ export async function withTestContext<T>(body: () => Promise<T>): Promise<T> {
 		test: undefined,
 		context: undefined,
 		hadError: false,
+		asyncAssertions: [],
 	};
 	try {
 		return await storage.run(frame, body);
@@ -272,4 +283,63 @@ export function setHasAssertions(): void {
 /** Read the assertion state of the active frame, if any. */
 export function getAssertionState(): AssertionState | undefined {
 	return storage.getStore()?.assertions;
+}
+
+/**
+ * Tie a `.resolves` / `.rejects` assertion to the running test, so one the body
+ * forgets to `await` still fails it instead of settling after the test passed.
+ *
+ * The returned promise behaves exactly like `assertion`; awaiting it (or any
+ * `then` / `catch` / `finally`) marks it observed, and the body then owns the
+ * outcome. Outside a test it is `assertion` itself.
+ */
+export function trackAsyncAssertion(assertion: Promise<void>): Promise<void> {
+	const frame = storage.getStore();
+	if (!frame) return assertion;
+	const entry: AsyncAssertion = {
+		observed: false,
+		// Handling it here also keeps an un-awaited failure from becoming an
+		// unhandled rejection: it is reported on its test instead.
+		outcome: assertion.then(
+			() => undefined,
+			(error: unknown) => ({ error }),
+		),
+	};
+	frame.asyncAssertions.push(entry);
+	return {
+		// biome-ignore lint/suspicious/noThenProperty: a deliberate thenable — intercepting `then` is the only way to know the test awaited the assertion, which decides who reports its failure.
+		then(onFulfilled, onRejected) {
+			entry.observed = true;
+			return assertion.then(onFulfilled, onRejected);
+		},
+		catch(onRejected) {
+			entry.observed = true;
+			return assertion.catch(onRejected);
+		},
+		finally(onFinally) {
+			entry.observed = true;
+			return assertion.finally(onFinally);
+		},
+		[Symbol.toStringTag]: "Promise",
+	};
+}
+
+/**
+ * Wait for the assertions the test started but never awaited, and throw the
+ * first one that failed. Called once the body has returned; the caller bounds
+ * the wait by the test's timeout.
+ */
+export async function settleAsyncAssertions(): Promise<void> {
+	const frame = storage.getStore();
+	if (!frame) return;
+	// An assertion may start another while it settles, so drain until empty.
+	while (frame.asyncAssertions.length > 0) {
+		const pending = frame.asyncAssertions.splice(0);
+		const outcomes = await Promise.all(
+			pending.map(async (entry) => ({ entry, outcome: await entry.outcome })),
+		);
+		for (const { entry, outcome } of outcomes) {
+			if (!entry.observed && outcome !== undefined) throw outcome.error;
+		}
+	}
 }

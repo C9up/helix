@@ -35,6 +35,7 @@ import {
 	setFrameContext,
 	setFrameOutcome,
 	setFrameTest,
+	settleAsyncAssertions,
 	type TestCleanup,
 	withTestContext,
 } from "./test-context.js";
@@ -952,6 +953,9 @@ async function runAttempt(
 			} else if (isThenable(result)) {
 				await timeoutCtl.race(result);
 			}
+			// A `.resolves` / `.rejects` the body started but never awaited
+			// still belongs to this test, under the same deadline.
+			await timeoutCtl.race(settleAsyncAssertions());
 		} catch (err) {
 			testErr = serializeError(err);
 			errorPhase = "test";
