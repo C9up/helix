@@ -19,5 +19,9 @@ tokio = { version = "1", features = ["process", "io-util", "sync", "time", "macr
 futures = "0.3"
 num_cpus = "1"
 
+# Signalling a worker's whole process group without `unsafe`.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["process"] }
+
 [build-dependencies]
 napi-build = "2"

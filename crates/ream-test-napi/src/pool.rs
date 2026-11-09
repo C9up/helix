@@ -236,6 +236,11 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // Its own process group, so killing the worker takes down what its tests
+    // spawned — a server, a browser, a database container — as the TS pool
+    // does.
+    #[cfg(unix)]
+    cmd.process_group(0);
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
@@ -244,7 +249,7 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
     let (Some(mut stdin), Some(stdout), Some(stderr)) =
         (child.stdin.take(), child.stdout.take(), child.stderr.take())
     else {
-        let _ = child.kill().await;
+        kill_worker(&mut child).await;
         return fail("worker spawned without its stdio pipes".into());
     };
 
@@ -289,13 +294,13 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
     let mut line = match serde_json::to_string(&instr) {
         Ok(line) => line,
         Err(e) => {
-            let _ = child.kill().await;
+            kill_worker(&mut child).await;
             return fail(format!("serialize instruction: {}", e));
         }
     };
     line.push('\n');
     if let Err(e) = stdin.write_all(line.as_bytes()).await {
-        let _ = child.kill().await;
+        kill_worker(&mut child).await;
         return fail(format!("stdin write failed: {}", e));
     }
     drop(stdin);
@@ -339,7 +344,7 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
                     // nothing to protect: waiting the grace out would only
                     // delay the diagnosis the worker just gave.
                     if result.is_none() {
-                        let _ = child.kill().await;
+                        kill_worker(&mut child).await;
                         killed = true;
                         break;
                     }
@@ -347,7 +352,7 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
                 Some(Frame::Unhandled(e)) => errors.push(e),
                 Some(Frame::Broken(message)) => {
                     errors.push(WorkerError { file: None, message, stack: None });
-                    let _ = child.kill().await;
+                    kill_worker(&mut child).await;
                     killed = true;
                     break;
                 }
@@ -388,7 +393,7 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
                         EXIT_GRACE.as_millis()
                     );
                 }
-                let _ = child.kill().await;
+                kill_worker(&mut child).await;
                 killed = true;
                 break;
             }
@@ -446,6 +451,36 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
         stdout: take_output(&stdout_buffer),
         stderr: take_output(&stderr_buffer),
     }
+}
+
+/// How long a worker's process group gets between SIGTERM and SIGKILL. Mirrors
+/// the TS pool's `killGraceMs`.
+const KILL_GRACE: Duration = Duration::from_millis(2000);
+
+/// Kill a worker and its process group: SIGTERM, then SIGKILL after
+/// [`KILL_GRACE`] if the worker is still there. Elsewhere than unix, the worker
+/// alone.
+async fn kill_worker(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(group) = child
+        .id()
+        .and_then(|id| i32::try_from(id).ok())
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        use rustix::process::{kill_process_group, Signal};
+        // Only while the worker is alive: once it is reaped its pid — the
+        // group's id — may be reused by an unrelated process.
+        if matches!(child.try_wait(), Ok(None)) {
+            let _ = kill_process_group(group, Signal::TERM);
+            if tokio::time::timeout(KILL_GRACE, child.wait()).await.is_ok() {
+                return;
+            }
+            let _ = kill_process_group(group, Signal::KILL);
+        }
+        let _ = child.wait().await;
+        return;
+    }
+    let _ = child.kill().await;
 }
 
 /// The signal that ended a worker, by name where it has a common one.
@@ -940,7 +975,7 @@ process.stdin.on("end", () => {
 let raw = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (c) => {{ raw += c; }});
-process.stdin.on("end", () => {{
+process.stdin.on("end", async () => {{
   const instr = JSON.parse(raw.trim());
   const result = {{
     file: instr.file,
@@ -1030,5 +1065,38 @@ process.stdin.on("end", () => {{
         buffer.append(&vec![b'x'; MAX_OUTPUT_BYTES + 10]);
         assert_eq!(buffer.data.len(), MAX_OUTPUT_BYTES);
         assert!(buffer.text().ends_with("10 more bytes of output dropped\n"));
+    }
+
+    /// Killing a worker takes down what its tests spawned: a server, a browser,
+    /// a database container. The TS pool signals the process group; this one
+    /// used to kill the worker alone and leave the rest running as orphans.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn killing_a_worker_kills_what_it_spawned() {
+        let dir = temp_dir("orphans");
+        let pid_file = dir.join("grandchild.pid");
+        let after = format!(
+            r#"const {{ spawn }} = await import("node:child_process");
+  const {{ writeFileSync }} = await import("node:fs");
+  const child = spawn("sleep", ["7731.5"], {{ stdio: "ignore" }});
+  writeFileSync({:?}, String(child.pid));"#,
+            pid_file.to_string_lossy()
+        );
+        let entry = reporting_worker(&dir, "spawning.mjs", &after);
+        let (results, errors) = run_single(entry, "orphans-run").await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(errors.len(), 0);
+
+        let pid = std::fs::read_to_string(&pid_file).unwrap();
+        let proc_dir = std::path::PathBuf::from(format!("/proc/{}", pid.trim()));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while proc_dir.exists() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            !proc_dir.exists(),
+            "the process the worker spawned ({}) outlived it",
+            pid.trim()
+        );
     }
 }
