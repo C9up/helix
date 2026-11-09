@@ -22,6 +22,8 @@ helix test --coverage            # V8 coverage + LCOV + thresholds
 helix test --diff-cov            # diff coverage vs main branch
 helix test --bail                # stop at the first failure
 helix test --failed              # re-run what failed last time
+helix test --timeout=5000        # per-test timeout, in ms
+helix test --silent              # drop what the tests print
 helix test --list-pinned         # print the .pin()ed tests, run nothing
 ```
 
@@ -110,6 +112,38 @@ All of these work on BOTH orchestrators: the native (Rust) engine
 serializes the full per-test summary and implements bail and the
 reporter chain itself. Only coverage, diff coverage and a pluggable
 reporter instance keep a run on the TypeScript pool.
+
+## What fails a run
+
+A run that executes nothing is not a pass: `helix test` exits 1 when
+discovery finds no test file, when a path, a `--files` filter or a named
+suite matches nothing (a selection narrows, it never widens to the whole
+tree), and when a file declares no test. `--pass-with-no-tests` (or
+`passWithNoTests` in the config) accepts an empty run.
+
+Under CI (`CI` set) a `.only` or `.pin()` fails the tests it selects instead
+of narrowing the run; `--allow-only` (or `allowOnly`) lets it narrow anyway,
+`--allow-only=false` forbids it everywhere.
+
+An error nobody handled — a floating rejection, a timer that throws, even
+after the file reported — is a file error beside the file's results, on both
+pools. So is a worker exiting with a status its results do not explain, and a
+runner teardown (`api.cleanup`) that throws. An un-awaited `.resolves` /
+`.rejects` fails the test that started it.
+
+What a test prints is forwarded once its file finishes, under a
+`stdout | <file>` / `stderr | <file>` header; `--silent` drops it, and with
+`--reporter=json` it goes to stderr.
+
+## Timeouts
+
+`--timeout` is per test. Highest first: the test's own timeout, `--timeout`,
+the suite's `timeout`, `configure({ timeout })` or a plugin editing
+`api.config.timeout`, the config file's `timeout`, then 60 s. Per-test hooks
+(`beforeEach`, `afterEach`, `test.setup`, `test.teardown`) run under their
+test's deadline. A separate per-file deadline (`--file-timeout`,
+`fileTimeout`, default 10 minutes) kills a worker stuck where no test timeout
+reaches, with its whole process group.
 
 ## Bootstrap
 
