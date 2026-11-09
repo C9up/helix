@@ -125,6 +125,13 @@ export interface RunConfig {
 	 * than executing anything, so the native engine's fast path buys nothing.
 	 */
 	listPinned?: boolean;
+	/**
+	 * Exit 0 when the run finds no test file, or a file declares no test
+	 * (`--pass-with-no-tests`). Off by default: a run that checked nothing — a
+	 * glob with a typo, a second copy of helix the tests registered on — must
+	 * not read as green.
+	 */
+	passWithNoTests?: boolean;
 }
 
 export interface RunOutcome {
@@ -225,6 +232,7 @@ export async function run(config: RunConfig): Promise<RunOutcome> {
 	// shell or CI must not leak a non-test env into the suite (the whole point of
 	// letting app code gate on `NODE_ENV === 'test'`).
 	process.env.NODE_ENV = "test";
+	forwardPassWithNoTests(config);
 
 	const watch = config.watch;
 	if (!watch?.enabled) return runOnce(config);
@@ -292,6 +300,7 @@ export async function runSuites(
 	base: RunConfig,
 ): Promise<RunOutcome> {
 	process.env.NODE_ENV = "test";
+	forwardPassWithNoTests(base);
 	const root = path.isAbsolute(base.root) ? base.root : path.resolve(base.root);
 
 	const pass = async (): Promise<RunOutcome> => {
@@ -394,22 +403,38 @@ interface CoverageOutcome {
 	diffCoverageFailed: boolean;
 }
 
-/** Resolve the explicit file list, or discover, warning when nothing matches. */
+/**
+ * The workers decide whether a file that declares no test is an error, so the
+ * setting travels to them through the environment, like the filters.
+ */
+function forwardPassWithNoTests(config: RunConfig): void {
+	process.env.HELIX_PASS_WITH_NO_TESTS =
+		config.passWithNoTests === true ? "1" : "";
+}
+
+/** Resolve the explicit file list, or discover. */
 async function resolveRunFiles(
 	config: RunConfig,
 	root: string,
 ): Promise<string[]> {
-	const files =
-		config.files && config.files.length > 0
-			? config.files.map((f) => (path.isAbsolute(f) ? f : path.resolve(f)))
-			: await discover(root, config.discovery);
+	return config.files && config.files.length > 0
+		? config.files.map((f) => (path.isAbsolute(f) ? f : path.resolve(f)))
+		: await discover(root, config.discovery);
+}
 
-	if (files.length === 0) {
-		process.stderr.write(
-			`helix: no test files found under ${root} — check your include/exclude patterns.\n`,
-		);
-	}
-	return files;
+/**
+ * The outcome of a run that found nothing to run: a failure, unless the caller
+ * said an empty run is fine.
+ */
+export function noTestFiles(
+	passWithNoTests: boolean,
+	detail?: string,
+): RunOutcome {
+	const code = passWithNoTests ? 0 : 1;
+	const stream = passWithNoTests ? process.stdout : process.stderr;
+	stream.write(`helix: No test files found, exiting with code ${code}\n`);
+	if (detail !== undefined) stream.write(`helix: ${detail}\n`);
+	return { summary: buildSummary([], [], 0), exitCode: code };
 }
 
 /**
@@ -554,7 +579,17 @@ async function runOnce(
 		? config.root
 		: path.resolve(config.root);
 
+	// A mis-configured diff coverage is refused before anything else, so the
+	// user fixes the config rather than reading a different error first.
+	assertDiffCoverageConfig(config, root);
+
 	const files = await resolveRunFiles(config, root);
+	if (files.length === 0) {
+		return noTestFiles(
+			config.passWithNoTests === true,
+			`nothing matched under ${root} — check your include/exclude patterns`,
+		);
+	}
 
 	// Cutover: the Rust NAPI engine owns the plain discovery + worker-pool +
 	// reporter + summary path (42-N-orchestrator). Delegate unless a TS-only
@@ -585,8 +620,6 @@ async function runOnce(
 				));
 
 	const threads = config.threads ?? os.cpus().length;
-
-	assertDiffCoverageConfig(config, root);
 
 	// Open a coverage session BEFORE spawning workers so `NODE_V8_COVERAGE`
 	// is set in their env. The pool forwards `extraEnv` to every spawn.

@@ -52,6 +52,11 @@ export interface CLIArgs {
 	 * everywhere but under CI.
 	 */
 	allowOnly?: boolean;
+	/**
+	 * `--pass-with-no-tests` — a file that declares no test is not an error. The
+	 * orchestrator sets it from its own config, so it reaches every worker.
+	 */
+	passWithNoTests?: boolean;
 	/** `--force-exit` — the CLI will `process.exit()` once the run ends. */
 	forceExit?: boolean;
 	/**
@@ -164,6 +169,7 @@ export function readCLIArgs(): CLIArgs {
 		forceExit: envFlag("HELIX_FORCE_EXIT"),
 		listPinned: envFlag("HELIX_LIST_PINNED"),
 		allowOnly: envSwitch("HELIX_ALLOW_ONLY"),
+		passWithNoTests: envFlag("HELIX_PASS_WITH_NO_TESTS"),
 		_: envList("HELIX_POSITIONALS"),
 	};
 }

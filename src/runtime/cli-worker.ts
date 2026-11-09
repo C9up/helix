@@ -28,6 +28,7 @@
 
 import { writeSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { cliArgs } from "./cli-args.js";
 import { FRAME_PREFIX, PRE_HANDSHAKE_NONCE } from "./ipc-protocol.js";
 import { runTestFile } from "./worker.js";
 
@@ -142,6 +143,17 @@ async function main(): Promise<void> {
 		const result = await runTestFile(instr.file, {
 			timeoutMs: instr.timeoutMs,
 		});
+		// A file that declared nothing checked nothing — often a typo, or tests
+		// registered on a second copy of helix. Under `--list-pinned` nothing
+		// runs by design.
+		const flags = cliArgs();
+		if (
+			result.tests.length === 0 &&
+			flags.passWithNoTests !== true &&
+			flags.listPinned !== true
+		) {
+			throw new Error(`No test suite found in file ${instr.file}`);
+		}
 		await emit({ type: "result", result, nonce: instr.nonce });
 		reported = true;
 		// The status the parent checks the exit against: anything else means

@@ -90,6 +90,10 @@ const FLAG_SPEC = {
 		kind: "boolean",
 		help: "Print the tests marked .pin() and run nothing (--list-pinned)",
 	},
+	"pass-with-no-tests": {
+		kind: "boolean",
+		help: "Exit 0 when no test file or no test is found (--pass-with-no-tests)",
+	},
 	"allow-only": {
 		kind: "boolean",
 		help: "Let .only/.pin() narrow the run; off under CI unless set (--allow-only)",
@@ -301,13 +305,13 @@ function printHelp() {
 	process.stdout.write(`${lines.join("\n")}\n`);
 }
 
-async function expandPositionals(positional, discover) {
+async function expandPositionals(positional, discover, discovery) {
 	const out = [];
 	for (const p of positional) {
 		const abs = path.isAbsolute(p) ? p : path.resolve(p);
 		if (existsSync(abs)) {
 			if (statSync(abs).isDirectory()) {
-				const found = await discover(abs);
+				const found = await discover(abs, discovery);
 				out.push(...found);
 				continue;
 			}
@@ -387,7 +391,7 @@ async function main() {
 	).href;
 	try {
 		// Probe by resolving through dynamic import; Node throws synchronously.
-		const { run, runSuites } = await import(runModule);
+		const { noTestFiles, run, runSuites } = await import(runModule);
 		const discoverModule = pathToFileURL(
 			useDist
 				? path.resolve(here, "../dist/cli/discover.js")
@@ -441,12 +445,37 @@ async function main() {
 			? (resolveHelixConfig(process.cwd()) ?? "")
 			: "";
 
-		const expanded = selectedSuites
-			? []
-			: filterByFileFilters(
-					await expandPositionals(parsed.positional, discover),
-					parsed.flags.files,
-				);
+		const passWithNoTests =
+			parsed.flags["pass-with-no-tests"] ?? helixConfig.passWithNoTests ?? false;
+		const discovery = {
+			suffixes: parsed.flags.include,
+			hardExcludes: parsed.flags.exclude,
+		};
+		// A selection narrows the run; one that matches nothing is reported as
+		// such, never widened to everything discovery would find. `--files` with
+		// no path filters the discovered files.
+		let expanded = [];
+		if (!selectedSuites) {
+			const selected =
+				parsed.positional.length > 0
+					? await expandPositionals(parsed.positional, discover, discovery)
+					: parsed.flags.files !== undefined
+						? await discover(process.cwd(), discovery)
+						: undefined;
+			if (selected !== undefined) {
+				expanded = filterByFileFilters(selected, parsed.flags.files);
+				if (expanded.length === 0) {
+					const selection = [
+						...parsed.positional,
+						...(parsed.flags.files === undefined
+							? []
+							: [`--files=${parsed.flags.files}`]),
+					].join(" ");
+					return noTestFiles(passWithNoTests, `filter: ${selection}`)
+						.exitCode;
+				}
+			}
+		}
 		const tsxLoader = findTsxLoader();
 		if (parsed.flags.tsx !== false && !tsxLoader) {
 			process.stderr.write(
@@ -500,10 +529,8 @@ async function main() {
 			listPinned: parsed.flags["list-pinned"] === true,
 			failed: parsed.flags.failed === true,
 			useColors: parsed.flags.colors,
-			discovery: {
-				suffixes: parsed.flags.include,
-				hardExcludes: parsed.flags.exclude,
-			},
+			discovery,
+			passWithNoTests,
 			nodeArgs:
 				parsed.flags.tsx === false || !tsxLoader
 					? []
@@ -637,6 +664,9 @@ async function main() {
 		// wraps ALL of it in one watcher and the `--failed` cache holds every
 		// suite's failures.
 		const steps = [];
+		// A suite named on the command line that resolves to nothing is a
+		// configuration error, even when the others have files.
+		let namedSuiteEmpty = false;
 		for (const suite of selectedSuites) {
 			const suiteFiles = filterByFileFilters(
 				await resolveSuiteFiles(suite, process.cwd(), cfg.discovery),
@@ -644,6 +674,7 @@ async function main() {
 			);
 			if (suiteFiles.length === 0) {
 				process.stderr.write(`helix: suite "${suite.name}": no test files\n`);
+				if (parsed.positional.length > 0) namedSuiteEmpty = true;
 				continue;
 			}
 			// A suite's `retries` overrides `--retries` for that suite only. Set
@@ -664,8 +695,13 @@ async function main() {
 			});
 		}
 		try {
+			if (steps.length === 0) {
+				return noTestFiles(passWithNoTests).exitCode;
+			}
 			const outcome = await runSuites(steps, cfg);
-			return outcome.exitCode;
+			return namedSuiteEmpty && !passWithNoTests
+				? Math.max(outcome.exitCode, 1)
+				: outcome.exitCode;
 		} finally {
 			await dropGlobalHooks();
 		}

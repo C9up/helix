@@ -83,6 +83,8 @@ export interface HelixConfig {
 	 * `--allow-only` overrides it.
 	 */
 	allowOnly?: boolean;
+	/** Exit 0 when nothing is found to run. `--pass-with-no-tests` overrides it. */
+	passWithNoTests?: boolean;
 }
 
 /**
@@ -159,7 +161,10 @@ function toConfig(imported: unknown): HelixConfig {
 	const rawAllowOnly = Reflect.get(source, "allowOnly");
 	const allowOnly =
 		typeof rawAllowOnly === "boolean" ? rawAllowOnly : undefined;
-	const runner = { bootstrap, timeout, forceExit, allowOnly };
+	const rawPassWithNoTests = Reflect.get(source, "passWithNoTests");
+	const passWithNoTests =
+		typeof rawPassWithNoTests === "boolean" ? rawPassWithNoTests : undefined;
+	const runner = { bootstrap, timeout, forceExit, allowOnly, passWithNoTests };
 	const suites = Reflect.get(source, "suites");
 	if (!Array.isArray(suites)) return runner;
 	const parsed: SuiteDefinition[] = [];
