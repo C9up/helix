@@ -12,23 +12,11 @@
  * fields automatically (`timeout_ms` → `timeoutMs`, etc.).
  */
 
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import {
-	nativeBinarySuffix,
+	hasFunctions,
+	loadNativeBinary,
 	supportedTargets,
 } from "../vendor/nativeBinary.js";
-
-function platformSuffix(): string {
-	// The table is shared; the refusal below stays this package's own.
-	const suffix = nativeBinarySuffix();
-	if (suffix === undefined) {
-		throw new Error(
-			`No native binary for this platform for @c9up/helix native binary. Supported: ${supportedTargets().join(", ")}.`,
-		);
-	}
-	return suffix;
-}
 
 /**
  * The Rust `RunConfig` and `SummaryPayload`, and the surface that carries
@@ -45,11 +33,15 @@ export type NativeRunConfig = import("../native/generated.js").RunConfig;
 export type NativeSummaryPayload =
 	import("../native/generated.js").SummaryPayload;
 
-type NativeExports = typeof import("../native/generated.js");
+const NATIVE_CALLS = ["run"] as const;
+
+type NativeExports = Pick<
+	typeof import("../native/generated.js"),
+	(typeof NATIVE_CALLS)[number]
+>;
 
 function isNativeExports(value: unknown): value is NativeExports {
-	if (value === null || typeof value !== "object") return false;
-	return typeof Reflect.get(value, "run") === "function";
+	return hasFunctions(value, NATIVE_CALLS);
 }
 
 let cachedNative: NativeExports | undefined;
@@ -57,30 +49,25 @@ let cachedNative: NativeExports | undefined;
 export function getNative(): NativeExports {
 	if (cachedNative !== undefined) return cachedNative;
 
-	const require = createRequire(import.meta.url);
-	const here = fileURLToPath(import.meta.url);
-	// `here` is `…/packages/helix/{src,dist}/cli/native.ts|js`. The `.node` lives
-	// two levels up at `…/packages/helix/index.<suffix>.node`.
-	const suffix = platformSuffix();
-	const candidate = `../../index.${suffix}.node`;
-	let loaded: unknown;
-	try {
-		loaded = require(candidate);
-	} catch (err) {
-		const cause = err instanceof Error ? err.message : String(err);
-		const muslHint = suffix.endsWith("-gnu")
-			? " If you are on Alpine/musl, note the prebuilt binaries target glibc (musl is not a supported target)."
-			: "";
+	// The resolution and the export check are shared; the refusals below stay
+	// this package's own.
+	const attempt = loadNativeBinary(isNativeExports);
+	if (attempt.loaded) {
+		cachedNative = attempt.binary;
+		return cachedNative;
+	}
+	const { suffix, cause } = attempt;
+	if (suffix === undefined) {
 		throw new Error(
-			`@c9up/helix native binary 'index.${suffix}.node' not found or failed to load near ${here} — run 'pnpm --filter @c9up/helix build:napi' to build it.${muslHint} Cause: ${cause}`,
-			{ cause: err },
+			`No native binary for this platform for @c9up/helix native binary. Supported: ${supportedTargets().join(", ")}.`,
 		);
 	}
-	if (!isNativeExports(loaded)) {
-		throw new Error(
-			"@c9up/helix native binary loaded but missing the expected 'run' export. Rebuild with 'pnpm --filter @c9up/helix build:napi'.",
-		);
-	}
-	cachedNative = loaded;
-	return cachedNative;
+	const causeMessage = cause instanceof Error ? cause.message : String(cause);
+	const muslHint = suffix.endsWith("-gnu")
+		? " If you are on Alpine/musl, note the prebuilt binaries target glibc (musl is not a supported target)."
+		: "";
+	throw new Error(
+		`@c9up/helix native binary 'index.${suffix}.node' not found, failed to load, or is stale — run 'pnpm --filter @c9up/helix build:napi' to build it.${muslHint} Cause: ${causeMessage}`,
+		{ cause },
+	);
 }
