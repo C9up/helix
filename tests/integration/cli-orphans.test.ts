@@ -6,7 +6,7 @@
  * and takes its own process group down with it.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -38,14 +38,26 @@ afterEach(async () => {
 
 /** Alive, and not a zombie waiting for a reaper. */
 function alive(pid: number): boolean {
+	return !["", "Z"].includes(processState(pid));
+}
+
+/** The process's state letter, or "" when there is no such process. */
+function processState(pid: number): string {
 	try {
-		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-		// The state follows the parenthesised command name.
-		return (
-			stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3) !== "Z"
-		);
+		if (process.platform === "linux") {
+			const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+			// The state follows the parenthesised command name.
+			return stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3);
+		}
+		// No procfs (macOS): `ps` exits non-zero for a pid that is gone.
+		return execFileSync("ps", ["-o", "stat=", "-p", String(pid)], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		})
+			.trim()
+			.slice(0, 1);
 	} catch {
-		return false;
+		return "";
 	}
 }
 
@@ -76,9 +88,14 @@ const pools: ReadonlyArray<[string, (root: string) => string[]]> = [
 	["TypeScript pool", (root) => ["--coverage", `--coverage-dir=${root}/cov`]],
 ];
 
-describe.skipIf(process.platform !== "linux").each(pools)(
-	"a worker whose CLI died — %s",
-	(_label, extra) => {
+// POSIX only: Windows has no process groups and never reparents an orphan,
+// so there is nothing for the worker to notice. Not declared there rather than
+// skipped: CI fails any skipped test, since a skip usually means the native
+// binary did not load.
+const posix = process.platform !== "win32";
+
+if (posix)
+	describe.each(pools)("a worker whose CLI died — %s", (_label, extra) => {
 		it("exits with its process group within two seconds", async () => {
 			const root = await project({ "tests/hang.test.ts": hanging });
 			roots.push(root);
@@ -123,5 +140,4 @@ describe.skipIf(process.platform !== "linux").each(pools)(
 			expect(await waitFor(() => !alive(worker), 2_000)).toBe(true);
 			expect(await waitFor(() => !alive(sleeper), 2_000)).toBe(true);
 		}, 60_000);
-	},
-);
+	});
