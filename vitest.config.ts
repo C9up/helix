@@ -24,10 +24,13 @@ export default defineConfig({
 				// Pure re-export barrels (no executable code).
 				"src/**/index.ts",
 				"src/runtime/lifecycle.ts",
-				// Worker IPC + CLI entry path — only reachable via a real
-				// child process. Will be covered by 42-N-orchestrator's
-				// integration tests when the Rust runner spawns it.
-				"src/runtime/worker.ts", "src/vendor/**"],
+				// Worker entry points — they only run in a real child process
+				// (the integration tests spawn them: worker-errors, timeouts,
+				// orchestrator), which this in-process v8 coverage cannot see.
+				"src/runtime/worker.ts",
+				"src/runtime/cli-worker.ts",
+				"src/vendor/**",
+			],
 			reporter: ["text-summary", "json-summary"],
 			thresholds: {
 				lines: 86,
