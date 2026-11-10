@@ -459,7 +459,8 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
 }
 
 /// How long a worker's process group gets between SIGTERM and SIGKILL. Mirrors
-/// the TS pool's `killGraceMs`.
+/// the TS pool's `killGraceMs`. Unix only: elsewhere the worker is killed at once.
+#[cfg(unix)]
 const KILL_GRACE: Duration = Duration::from_millis(2000);
 
 /// Kill a worker and its process group: SIGTERM, then SIGKILL after
