@@ -398,6 +398,9 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 			if (exitGrace) clearTimeout(exitGrace);
 			if (exitDrain) clearTimeout(exitDrain);
 			activeChildren.delete(registration);
+			// The worker's lifeline: kept open for the whole file so a worker can
+			// tell this process died (see cli-worker `watchParent`), closed now.
+			child.stdin?.end();
 			if (result === undefined && errors.length === 0) {
 				errors.push({
 					file,
@@ -585,9 +588,9 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		child.stdin?.on("error", (err) => {
 			abort(`stdin write failed: ${err.message}`);
 		});
-		child.stdin?.write(`${instr}\n`, () => {
-			child.stdin?.end();
-		});
+		// Not ended after the instruction: the open pipe is how the worker
+		// notices this process is gone and exits instead of lingering.
+		child.stdin?.write(`${instr}\n`);
 	});
 }
 

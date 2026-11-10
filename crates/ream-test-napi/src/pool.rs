@@ -303,7 +303,12 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
         kill_worker(&mut child).await;
         return fail(format!("stdin write failed: {}", e));
     }
-    drop(stdin);
+    // `stdin` stays open until this function returns: the open pipe is the
+    // worker's lifeline, how it notices this process died (SIGKILL, OOM) and
+    // exits with its process group instead of lingering. PR_SET_PDEATHSIG is
+    // not used: it needs `unsafe` pre_exec, and it fires when the spawning
+    // THREAD exits, which a tokio worker thread does on its own schedule.
+    let _lifeline = stdin;
 
     // Frames are read by their own task so the loop below can wait on them, on
     // the worker's exit and on a deadline at once.
@@ -665,8 +670,11 @@ mod tests {
             br#"
 let raw = "";
 process.stdin.setEncoding("utf8");
-process.stdin.on("data", (c) => { raw += c; });
-process.stdin.on("end", () => {
+process.stdin.on("data", (c) => { raw += c; if (raw.includes("\n")) process.stdin.emit("instruction"); });
+// The parent keeps stdin open as the worker's lifeline: act on the first
+// line, and do not let the open pipe keep the process alive.
+process.stdin.once("instruction", () => {
+  process.stdin.unref();
   const instr = JSON.parse(raw.trim());
   const fails = instr.file.includes("red");
   const result = {
@@ -854,8 +862,11 @@ process.stdin.on("end", () => {
             br#"
 let raw = "";
 process.stdin.setEncoding("utf8");
-process.stdin.on("data", (c) => { raw += c; });
-process.stdin.on("end", () => {
+process.stdin.on("data", (c) => { raw += c; if (raw.includes("\n")) process.stdin.emit("instruction"); });
+// The parent keeps stdin open as the worker's lifeline: act on the first
+// line, and do not let the open pipe keep the process alive.
+process.stdin.once("instruction", () => {
+  process.stdin.unref();
   const instr = JSON.parse(raw.trim());
   process.stderr.write(
     "__HELIX_RESULT__" +
@@ -919,8 +930,11 @@ process.stdin.on("end", () => {
             br#"
 let raw = "";
 process.stdin.setEncoding("utf8");
-process.stdin.on("data", (c) => { raw += c; });
-process.stdin.on("end", () => {
+process.stdin.on("data", (c) => { raw += c; if (raw.includes("\n")) process.stdin.emit("instruction"); });
+// The parent keeps stdin open as the worker's lifeline: act on the first
+// line, and do not let the open pipe keep the process alive.
+process.stdin.once("instruction", () => {
+  process.stdin.unref();
   const instr = JSON.parse(raw.trim());
   const result = {
     file: instr.file,
@@ -974,8 +988,9 @@ process.stdin.on("end", () => {
             r#"
 let raw = "";
 process.stdin.setEncoding("utf8");
-process.stdin.on("data", (c) => {{ raw += c; }});
-process.stdin.on("end", async () => {{
+process.stdin.on("data", (c) => {{ raw += c; if (raw.includes("\n")) process.stdin.emit("instruction"); }});
+process.stdin.once("instruction", async () => {{
+  process.stdin.unref();
   const instr = JSON.parse(raw.trim());
   const result = {{
     file: instr.file,

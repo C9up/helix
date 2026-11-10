@@ -4,7 +4,8 @@
  * Protocol:
  *   1. Parent writes one `{ "type":"run", "file":"...", "timeoutMs":n,
  *      "defaultTimeoutMs":n, "nonce":"..." }` line to stdin (both timeouts
- *      optional), then closes stdin.
+ *      optional), and keeps stdin open until the file is settled: its
+ *      closing is how the worker learns the parent died.
  *   2. We run the file via `runTestFile`.
  *   3. We emit a single framed line on **stderr** prefixed with
  *      `__HELIX_RESULT__`, with the parent's `nonce` echoed back so a
@@ -28,7 +29,6 @@
  */
 
 import { writeSync } from "node:fs";
-import { createInterface } from "node:readline";
 import { cliArgs } from "./cli-args.js";
 import { FRAME_PREFIX, PRE_HANDSHAKE_NONCE } from "./ipc-protocol.js";
 import { runTestFile } from "./worker.js";
@@ -97,27 +97,100 @@ function emitSync(msg: unknown): void {
 	}
 }
 
-async function readInstruction(): Promise<RunMessage> {
-	const rl = createInterface({ input: process.stdin });
-	for await (const line of rl) {
-		const trimmed = line.trim();
-		if (!trimmed) continue;
-		// Parse inside try so a bad JSON line propagates as a typed error
-		// rather than leaking a SyntaxError that escapes `for await`.
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(trimmed);
-		} catch (err) {
-			throw new Error(
-				`malformed instruction JSON: ${err instanceof Error ? err.message : String(err)}`,
-			);
-		}
-		const message = toRunMessage(parsed);
-		if (message !== undefined) return message;
-		throw new Error(`invalid instruction shape: ${trimmed}`);
+/** One instruction line, or the error that explains why it is not one. */
+function parseInstruction(line: string): RunMessage {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(line);
+	} catch (err) {
+		throw new Error(
+			`malformed instruction JSON: ${err instanceof Error ? err.message : String(err)}`,
+		);
 	}
-	throw new Error("stdin closed before instruction arrived");
+	const message = toRunMessage(parsed);
+	if (message !== undefined) return message;
+	throw new Error(`invalid instruction shape: ${line}`);
 }
+
+/**
+ * Read the first non-empty line of stdin. The stream stays open and flowing
+ * afterwards: the parent keeps its end open for the whole run, which is how
+ * the worker learns the parent is gone (see {@link watchParent}).
+ */
+function readInstruction(): Promise<RunMessage> {
+	return new Promise((resolve, reject) => {
+		const stdin = process.stdin;
+		let buffered = "";
+		let settled = false;
+		const take = (line: string): void => {
+			settled = true;
+			try {
+				resolve(parseInstruction(line));
+			} catch (err) {
+				reject(err);
+			}
+		};
+		stdin.setEncoding("utf8");
+		stdin.on("data", (chunk: string) => {
+			if (settled) return;
+			buffered += chunk;
+			let nl = buffered.indexOf("\n");
+			while (nl >= 0) {
+				const line = buffered.slice(0, nl).trim();
+				buffered = buffered.slice(nl + 1);
+				if (line !== "") {
+					take(line);
+					return;
+				}
+				nl = buffered.indexOf("\n");
+			}
+		});
+		stdin.once("end", () => {
+			if (settled) return;
+			const line = buffered.trim();
+			if (line !== "") {
+				take(line);
+				return;
+			}
+			settled = true;
+			reject(new Error("stdin closed before instruction arrived"));
+		});
+	});
+}
+
+/**
+ * Exit — taking this worker's process group along — once the parent is gone.
+ *
+ * The parent's watchdog and its SIGINT teardown cannot run when it is
+ * SIGKILLed or OOM-killed, and a worker stuck in a hanging test would then
+ * live on, reparented to init. Two signals, either is enough: the parent's end
+ * of stdin closing (immediate, everywhere), and our parent pid changing
+ * (reparenting — a fallback for a host that keeps the pipe open). The worker
+ * leads its own group (the pools spawn it detached), so signalling `-pid`
+ * reaches what its tests spawned too.
+ */
+function watchParent(): void {
+	const parent = process.ppid;
+	const orphaned = (): void => {
+		try {
+			process.kill(-process.pid, "SIGKILL");
+		} catch {
+			// Not a group leader (spawned by hand): only this process to end.
+		}
+		process.exit(1);
+	};
+	const stdin = process.stdin;
+	stdin.once("end", orphaned);
+	// Unreferenced: a lifeline, not a reason to stay alive once the file is done.
+	if (typeof stdin.unref === "function") stdin.unref();
+	const poll = setInterval(() => {
+		if (process.ppid !== parent) orphaned();
+	}, PARENT_POLL_MS);
+	poll.unref();
+}
+
+/** How often the fallback parent check runs. */
+const PARENT_POLL_MS = 500;
 
 async function main(): Promise<void> {
 	let instr: RunMessage;
@@ -136,6 +209,8 @@ async function main(): Promise<void> {
 		process.exitCode = 1;
 		return;
 	}
+
+	watchParent();
 
 	// Installed AFTER the instruction is read so we can echo the right nonce.
 	// An error nobody handled is recorded, not fatal: the file keeps running so
