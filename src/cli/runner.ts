@@ -12,12 +12,16 @@ export {
 	BOOTSTRAP_FILENAMES,
 	resolveBootstrap,
 } from "../runtime/bootstrap.js";
+export { encodeEnvList } from "../runtime/cli-args.js";
 export { armDrainGuard, DRAIN_GRACE_MS } from "../runtime/drain-guard.js";
 export { runGlobalHooks } from "../runtime/global-hooks.js";
+export { discover } from "./discover.js";
+export { readFailedCache } from "./failed-cache.js";
+export { filterByFileFilters } from "./file-filter.js";
 export type { Reporter } from "./reporter.js";
 export { makeReporters, makeReportersFrom } from "./reporter.js";
 export type { RunConfig, RunOutcome, SuiteRun, WatchOptions } from "./run.js";
-export { run, runSuites } from "./run.js";
+export { noTestFiles, run, runSuites } from "./run.js";
 export type { HelixConfig, SuiteDefinition, SuiteFiles } from "./suites.js";
 export { loadHelixConfig, resolveSuiteFiles, selectSuites } from "./suites.js";
 export type { Summary } from "./summary.js";

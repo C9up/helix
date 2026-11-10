@@ -111,6 +111,10 @@ const FLAG_SPEC = {
 		help: "process.exit() as soon as the run ends, without draining the event loop (--force-exit)",
 	},
 	watch: { kind: "boolean", help: "Watch mode — re-run on file changes" },
+	poll: {
+		kind: "boolean",
+		help: "Detect changes by polling instead of file-system events (with --watch)",
+	},
 	"watch-debounce": {
 		kind: "number",
 		help: "Debounce window in ms for watch mode (default 200, max 5000)",
@@ -259,37 +263,13 @@ function findTsxLoader() {
 	return undefined;
 }
 
-/** Trailing `.test.ts` / `.spec.js` / … stripped, so `--files=user` matches `user.test.ts`. */
-const TEST_SUFFIX = /(\.(test|spec))?\.[cm]?[jt]sx?$/;
-
-/**
- * helix's `--files` rule: keep a file when its path ENDS WITH the filter, or
- * when every segment of the filter (read right-to-left, `*` matching anything)
- * matches the corresponding path segment of the file minus its test suffix.
- * `--files=user` keeps `tests/unit/user.test.ts`; `--files=unit/*` keeps
- * everything under a `unit` directory.
- */
-function filterByFileFilters(files, raw) {
-	if (raw === undefined) return files;
-	const filters = String(raw)
+/** `--files=a,b` as the list the shared filter takes. */
+function fileFilterList(raw) {
+	if (raw === undefined) return undefined;
+	return String(raw)
 		.split(",")
 		.map((f) => f.trim())
 		.filter((f) => f.length > 0);
-	if (filters.length === 0) return files;
-	return files.filter((file) => {
-		const unix = file.split(path.sep).join("/");
-		const withoutSuffix = unix.replace(TEST_SUFFIX, "");
-		return filters.some((filter) => {
-			if (unix.endsWith(filter)) return true;
-			const filterSegments = filter.split("/").reverse();
-			const fileSegments = withoutSuffix.split("/").reverse();
-			return filterSegments.every(
-				(segment, i) =>
-					fileSegments[i] !== undefined &&
-					(segment === "*" || fileSegments[i].endsWith(segment)),
-			);
-		});
-	});
 }
 
 function printHelp() {
@@ -406,6 +386,20 @@ async function main() {
 	try {
 		// Probe by resolving through dynamic import; Node throws synchronously.
 		const { noTestFiles, run, runSuites } = await import(runModule);
+		const { filterByFileFilters } = await import(
+			pathToFileURL(
+				useDist
+					? path.resolve(here, "../dist/cli/file-filter.js")
+					: path.resolve(here, "../src/cli/file-filter.ts"),
+			).href
+		);
+		const { encodeEnvList } = await import(
+			pathToFileURL(
+				useDist
+					? path.resolve(here, "../dist/runtime/cli-args.js")
+					: path.resolve(here, "../src/runtime/cli-args.ts"),
+			).href
+		);
 		const discoverModule = pathToFileURL(
 			useDist
 				? path.resolve(here, "../dist/cli/discover.js")
@@ -477,7 +471,10 @@ async function main() {
 						? await discover(process.cwd(), discovery)
 						: undefined;
 			if (selected !== undefined) {
-				expanded = filterByFileFilters(selected, parsed.flags.files);
+				expanded = filterByFileFilters(
+					selected,
+					fileFilterList(parsed.flags.files),
+				);
 				if (expanded.length === 0) {
 					const selection = [
 						...parsed.positional,
@@ -573,6 +570,7 @@ async function main() {
 				? {
 						enabled: true,
 						debounceMs: parsed.flags["watch-debounce"],
+						poll: parsed.flags.poll === true,
 					}
 				: undefined,
 		};
@@ -659,7 +657,8 @@ async function main() {
 					"helix: no failing tests cached — running all of them\n",
 				);
 			} else {
-				process.env.HELIX_TESTS = failedTests.join(",");
+				// Encoded, not comma-joined: a failed test's title may hold a comma.
+				process.env.HELIX_TESTS = encodeEnvList(failedTests);
 			}
 		}
 
@@ -679,7 +678,7 @@ async function main() {
 		for (const suite of selectedSuites ?? []) {
 			const suiteFiles = filterByFileFilters(
 				await resolveSuiteFiles(suite, process.cwd(), cfg.discovery),
-				parsed.flags.files,
+				fileFilterList(parsed.flags.files),
 			);
 			if (suiteFiles.length === 0) {
 				process.stderr.write(`helix: suite "${suite.name}": no test files\n`);

@@ -24,6 +24,10 @@ export interface RunWatchOptions {
 	 *  Lets tests drive shutdown without `process.emit("SIGINT")` (which
 	 *  collides with vitest's own signal handlers). */
 	signal?: AbortSignal;
+	/** Poll for changes instead of relying on `fs.watch` events (`--poll`). */
+	poll?: boolean;
+	/** Clear the terminal before each re-run, so its output stands alone. */
+	clearScreen?: boolean;
 }
 
 const BANNER_WAITING = "[helix] watching for changes… (Ctrl-C to exit)";
@@ -85,6 +89,7 @@ export async function runWatch(
 			queued = true;
 			return;
 		}
+		if (opts.clearScreen === true) process.stdout.write("\x1Bc");
 		process.stdout.write(`${BANNER_RERUN}\n`);
 		inFlight = (async () => {
 			try {
@@ -137,6 +142,7 @@ export async function runWatch(
 		include: opts.include,
 		exclude: opts.exclude,
 		debounceMs: opts.debounceMs,
+		poll: opts.poll,
 		onChange: () => trigger(),
 		onError: (err) => {
 			watcherFatalError = err;

@@ -74,15 +74,42 @@ export interface CLIArgs {
 	[flag: string]: string | string[] | number | boolean | undefined;
 }
 
-/** Comma-separated env list → trimmed non-empty entries, or undefined. */
+/**
+ * An env list → its non-empty entries, or undefined. Two forms: a JSON array
+ * of strings (what {@link encodeEnvList} writes — a test title may contain a
+ * comma), or the comma-separated form a CLI flag is typed in.
+ */
 export function envList(name: string): string[] | undefined {
 	const raw = process.env[name];
 	if (raw === undefined || raw === "") return undefined;
-	const items = raw
-		.split(",")
-		.map((t) => t.trim())
-		.filter((t) => t.length > 0);
-	return items.length > 0 ? items : undefined;
+	const items = decodeJsonList(raw) ?? raw.split(",").map((t) => t.trim());
+	const kept = items.filter((t) => t.length > 0);
+	return kept.length > 0 ? kept : undefined;
+}
+
+/** A JSON array of strings, or `undefined` when `raw` is not one. */
+function decodeJsonList(raw: string): string[] | undefined {
+	if (!raw.startsWith("[")) return undefined;
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (Array.isArray(parsed)) {
+			const strings = parsed.filter(
+				(item): item is string => typeof item === "string",
+			);
+			if (strings.length === parsed.length) return strings;
+		}
+	} catch {
+		// Not JSON after all: read it as the comma-separated form.
+	}
+	return undefined;
+}
+
+/**
+ * Write a list for {@link envList} without splitting any entry on its commas —
+ * how the CLI and a host hand titles, tags and file filters to the workers.
+ */
+export function encodeEnvList(values: readonly string[]): string {
+	return JSON.stringify(values);
 }
 
 /** A non-negative integer env var, or undefined when unset/invalid. */

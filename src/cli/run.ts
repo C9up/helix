@@ -295,6 +295,8 @@ async function watching(
 			exclude,
 			debounceMs,
 			signal: config.watch.signal,
+			poll: config.watch.poll,
+			clearScreen: config.watch.clearScreen,
 		},
 		pass,
 	);

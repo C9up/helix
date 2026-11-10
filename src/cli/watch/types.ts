@@ -19,4 +19,11 @@ export interface WatchOptions {
 	/** Optional `AbortSignal` to drive shutdown without a real SIGINT —
 	 *  primarily a test seam. */
 	signal?: AbortSignal;
+	/**
+	 * Detect changes by polling instead of `fs.watch` — for a network share or
+	 * a container bind mount, where native events never arrive.
+	 */
+	poll?: boolean;
+	/** Clear the terminal before each re-run. Default false. */
+	clearScreen?: boolean;
 }

@@ -288,3 +288,54 @@ describe("watch — runWatch loop", () => {
 		expect(outcome.summary).toBeDefined();
 	}, 5000);
 });
+
+describe("watch — runWatch screen clearing and polling", () => {
+	async function rerunOutput(clearScreen: boolean): Promise<string> {
+		const tmp = mkTmp();
+		mkdirSync(path.join(tmp, "src"));
+		writeFileSync(path.join(tmp, "src/a.ts"), "v1\n");
+		const controller = new AbortController();
+		let runs = 0;
+		const written: string[] = [];
+		const write = process.stdout.write.bind(process.stdout);
+		process.stdout.write = (chunk: string | Uint8Array): boolean => {
+			written.push(String(chunk));
+			return true;
+		};
+		try {
+			const done = runWatch(
+				{
+					root: tmp,
+					include: ["src/**/*.ts"],
+					exclude: [],
+					debounceMs: 20,
+					signal: controller.signal,
+					poll: true,
+					clearScreen,
+				},
+				async () => {
+					runs += 1;
+					return makeOutcome();
+				},
+			);
+			await nextTick(150);
+			writeFileSync(path.join(tmp, "src/a.ts"), "v2, changed\n");
+			const deadline = Date.now() + 3000;
+			while (runs < 2 && Date.now() < deadline) await nextTick(20);
+			controller.abort();
+			await done;
+		} finally {
+			process.stdout.write = write;
+		}
+		expect(runs).toBe(2);
+		return written.join("");
+	}
+
+	it("re-runs on a polled change and clears the screen first when asked", async () => {
+		expect(await rerunOutput(true)).toContain("\x1Bc");
+	}, 10_000);
+
+	it("leaves the screen alone by default", async () => {
+		expect(await rerunOutput(false)).not.toContain("\x1Bc");
+	}, 10_000);
+});

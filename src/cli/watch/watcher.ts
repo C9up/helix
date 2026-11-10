@@ -9,7 +9,14 @@
  * without touching the loop.
  */
 
-import { type FSWatcher, watch as fsWatch, realpathSync } from "node:fs";
+import {
+	type Dirent,
+	type FSWatcher,
+	watch as fsWatch,
+	readdirSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
 import path from "node:path";
 import { compileGlobs, matchesAnyGlob } from "../coverage/glob.js";
 
@@ -22,7 +29,17 @@ export interface CreateWatcherOptions {
 	/** Surfaces `FSWatcher` errors (recursive unsupported, EMFILE, etc.)
 	 *  so the loop can stop instead of waiting forever on a dead handle. */
 	onError?: (err: Error) => void;
+	/**
+	 * Detect changes by polling the files' size and mtime instead of `fs.watch`
+	 * (`--poll`) — for the file systems where native events never arrive: a
+	 * network share, a container bind mount, some VMs.
+	 */
+	poll?: boolean;
+	/** How often a polling watcher looks, in ms. Default 250. */
+	pollIntervalMs?: number;
 }
+
+const DEFAULT_POLL_INTERVAL_MS = 250;
 
 export interface WatcherHandle {
 	close(): Promise<void>;
@@ -93,6 +110,26 @@ export function createWatcher(opts: CreateWatcherOptions): WatcherHandle {
 		return abs;
 	}
 
+	if (opts.poll === true) {
+		return pollingWatcher(
+			root,
+			opts,
+			(abs) => {
+				if (closed) return;
+				pending.add(abs);
+				arm();
+			},
+			() => {
+				closed = true;
+				if (timer) {
+					clearTimeout(timer);
+					timer = undefined;
+				}
+				pending.clear();
+			},
+		);
+	}
+
 	let watcher: FSWatcher;
 	try {
 		watcher = fsWatch(root, { recursive: true }, (_event, filename) => {
@@ -139,6 +176,78 @@ export function createWatcher(opts: CreateWatcherOptions): WatcherHandle {
 			}
 			pending.clear();
 			watcher.close();
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		},
+	};
+}
+
+/**
+ * The polling form: snapshot every watched file's size and mtime, compare at
+ * each interval, and report what changed, appeared or disappeared. Directories
+ * an exclude pattern covers are not walked at all, so `node_modules` costs
+ * nothing.
+ */
+function pollingWatcher(
+	root: string,
+	opts: CreateWatcherOptions,
+	report: (abs: string) => void,
+	stop: () => void,
+): WatcherHandle {
+	const include = compileGlobs(opts.include);
+	const exclude = compileGlobs(opts.exclude);
+	const snapshot = (): Map<string, string> => {
+		const seen = new Map<string, string>();
+		const walk = (dir: string, rel: string): void => {
+			let entries: Dirent[];
+			try {
+				entries = readdirSync(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const entry of entries) {
+				const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
+				const abs = path.join(dir, entry.name);
+				if (entry.isDirectory()) {
+					// A probe path under the directory: `node_modules/**` covers
+					// it exactly when it covers everything inside.
+					if (matchesAnyGlob(exclude, `${childRel}/.helix-probe`)) continue;
+					walk(abs, childRel);
+					continue;
+				}
+				if (!entry.isFile()) continue;
+				if (matchesAnyGlob(exclude, childRel)) continue;
+				if (!matchesAnyGlob(include, childRel)) continue;
+				try {
+					const st = statSync(abs);
+					seen.set(abs, `${st.size}:${st.mtimeMs}`);
+				} catch {
+					// Gone between the listing and the stat: the next pass says so.
+				}
+			}
+		};
+		walk(root, "");
+		return seen;
+	};
+
+	let previous = snapshot();
+	const interval = setInterval(() => {
+		const current = snapshot();
+		for (const [file, stamp] of current) {
+			if (previous.get(file) !== stamp) report(file);
+		}
+		for (const file of previous.keys()) {
+			if (!current.has(file)) report(file);
+		}
+		previous = current;
+	}, opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+
+	let closed = false;
+	return {
+		async close(): Promise<void> {
+			if (closed) return;
+			closed = true;
+			clearInterval(interval);
+			stop();
 			await new Promise<void>((resolve) => setImmediate(resolve));
 		},
 	};
