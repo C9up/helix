@@ -108,7 +108,9 @@ describe("--list-pinned", () => {
 	it("runs everything normally when the flag is absent", async () => {
 		const file = await writeSpec();
 
-		const result = await runTestFile(file);
+		// `allowOnly` pinned on: under CI helix fails `.pin()` unless
+		// `--allow-only` is given, and this test must not depend on `CI`.
+		const result = await runTestFile(file, { allowOnly: true });
 
 		expect(result.pinned).toBeUndefined();
 		// `.pin()` behaves like `.only` during a real run: the pinned two run,
