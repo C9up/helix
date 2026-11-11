@@ -1,15 +1,15 @@
 # `@c9up/helix`
 
-Framework-agnostic testing toolkit for the Ream ecosystem — a
-Vitest-compatible test runner CLI with fluent assertions, container
-overrides, and time-travel. Host-specific fakes (bus / HTTP / DB) live in
+Framework-agnostic testing toolkit for the Ream ecosystem — a test runner
+CLI with a `describe` / `test` / `expect` / `vi` DSL, fluent assertions,
+container overrides, and time-travel. Host-specific fakes (bus / HTTP / DB) live in
 their own integration packages, not here — helix stays dependency-light.
 
 ## Sub-barrels
 
 - `@c9up/helix` — assertions + `expect`, the test entry point
-- `@c9up/helix/runtime` — Vitest-compatible DSL (`test`, `describe`, `expect`, `vi`, lifecycle hooks)
-- `@c9up/helix/runtime/worker` — worker entry for the parallel runner
+- `@c9up/helix/runtime` — the DSL (`test`, `describe`, `expect`, `vi`, lifecycle hooks)
+- `@c9up/helix/runtime/worker` — `runTestFile`, which collects and runs one test file in-process
 - `@c9up/helix/container` — `useContainer` / `override` / `overrideOn` / `spy`
 - `@c9up/helix/time` — time-travel helpers
 
@@ -29,14 +29,14 @@ helix test --list-pinned         # print the .pin()ed tests, run nothing
 
 ## Suites
 
-Declare named suites and `helix test unit` runs one, the AdonisJS way.
+Declare named suites and `helix test unit` runs one by its name.
 With no positional, every suite runs, in order:
 
 ```ts
 // helix.config.ts
 export default {
-  timeout: 2_000,          // AdonisJS `tests.timeout`
-  forceExit: false,        // AdonisJS `tests.forceExit`
+  timeout: 2_000,          // default per-test timeout, in ms
+  forceExit: false,        // exit once the run ends, even with open handles
   suites: [
     { name: "unit", files: ["tests/unit/**/*.spec.(js|ts)"] },
     { name: "functional", files: ["tests/functional/**/*.spec.ts"], timeout: 30_000 },
@@ -54,8 +54,8 @@ A suite may carry `configure(suite)`, which
 gets the same handle as the bootstrap's `configureSuite` and runs after it.
 It costs an import of the config module in EVERY worker, because a function
 cannot cross the process boundary: `configureSuite` in `tests/bootstrap.ts`
-does the same job for free, and is what AdonisJS itself uses. Nothing is
-imported when no suite declares one.
+does the same job for free. Nothing is imported when no suite declares
+one.
 
 Suites run one after another, and the sequence is what the run-wide
 flags act on: `--watch` re-runs every selected suite on each change (one
@@ -70,7 +70,7 @@ discovery would find.
 Pattern entries are plain paths (a directory is walked with helix's
 suffix discovery) or globs — `*`, `**`, `?`, `{a,b}`, `(a|b)`, `[abc]`
 and the extglob quantifiers `@(a|b)`, `?(a|b)`, `*(a|b)`, `+(a|b)`,
-which covers AdonisJS's own defaults verbatim
+which covers the usual suite patterns verbatim
 (`tests/unit/**/*.spec.(js|ts)`). An entry starting with `!` subtracts
 from what the others selected (`"!tests/unit/slow/**"`).
 
@@ -150,8 +150,8 @@ reaches, with its whole process group.
 
 ## Bootstrap
 
-`tests/bootstrap.ts` is the AdonisJS bootstrap module, with the same three
-exports — an Adonis one ports over unchanged:
+`tests/bootstrap.ts` configures the run through three exports — the
+plugins, the runner hooks, and a per-suite callback:
 
 ```ts
 // tests/bootstrap.ts
@@ -171,9 +171,9 @@ It is picked up automatically (`helix.config`'s `bootstrap` overrides the
 path) and imported by each worker before its test file, so a plugin's
 context macros exist by the time the first test declares itself.
 
-A `setup` hook receives the `runner` and may RESOLVE TO ITS OWN UNDO —
-the AdonisJS idiom (`setup: [() => testUtils.db().migrate()]`, where
-`migrate()` resolves to the rollback). Returned undos unwind first, then
+A `setup` hook receives the `runner` and may RESOLVE TO ITS OWN UNDO
+(`setup: [() => testUtils.db().migrate()]`, where `migrate()` resolves to
+the rollback). Returned undos unwind first, then
 the declared teardowns, both in reverse order.
 
 `configureSuite` receives the `Suite` surface: `name`, `setup`,
@@ -258,35 +258,34 @@ In `package.json`, call the `helix` bin directly — in npm scripts it resolves 
 
 ## Self-testing (Stage 2a — coexistence)
 
-Helix is currently tested by **two runners in parallel**:
+Helix is currently tested by **two suites in parallel**:
 
-- `pnpm test` — vitest runs `tests/integration/**`. This is the
-  established safety net: every commit must verdict pass here.
+- `pnpm test` — the package's `test` script runs `tests/integration/**`
+  and `tests/unit/**` on an external runner. This is the established
+  safety net: every commit must pass here.
 - `pnpm test:self` — helix runs `tests/selftest/**`. This is helix
   testing itself: the runtime DSL, lifecycle hooks, spies, fake
-  timers, and a small set of parity proofs. Vitest is excluded from
-  `tests/selftest/**` so it doesn't touch helix-DSL imports.
+  timers, and a small set of parity proofs. The external runner is kept
+  away from `tests/selftest/**` so it doesn't touch helix-DSL imports.
 
-Both commands run independently in CI. Stage 2b will retire vitest
-once the helix self-test corpus reaches parity coverage with the
-vitest suite.
+Both commands run independently in CI. Stage 2b will retire the external
+runner once the helix self-test corpus covers as much as its suite does.
 
-### Vitest parity proofs
+### Matcher parity proofs
 
 A handful of identical test bodies live in BOTH directories
 (`tests/selftest/parity-*.test.ts` and
-`tests/integration/parity-*-mirror.test.ts`). When both runners pass
-the same assertions, helix's **matcher semantics** are compatible
-with vitest's for the asserted surface area. The mirror pairs
-currently cover:
+`tests/integration/parity-*-mirror.test.ts`). When both suites pass
+the same assertions, helix's **matcher semantics** hold for the asserted
+surface area under either runner. The mirror pairs currently cover:
 
 - equality matchers (`toBe`, `toEqual`, `not.toBe`)
 - string / array `toContain`
 - assertion failure shapes (`AssertionError` thrown, message contains
   both received and expected values)
 
-What the VITEST parity proofs do **NOT** cover today (the runner semantics are covered by the
-self-test suite):
+What the parity proofs do **NOT** cover today (the runner semantics are
+covered by the self-test suite):
 
 - Spy / fake-timer parity (`vi.fn`, `vi.spyOn`, `vi.useFakeTimers`).
 - Failure-pipeline parity (i.e. that both runners REPORT a failed
@@ -296,12 +295,12 @@ self-test suite):
 
 A divergence guard in `tests/integration/parity-mirror-divergence.test.ts`
 asserts the mirror bodies stay byte-identical (modulo the runner
-import line). Stage 2b's vitest retirement plan must include deleting
+import line). Stage 2b's retirement plan must include deleting
 `tests/integration/parity-*-mirror.test.ts` and the divergence guard
 itself, since they exist solely to bridge the two runners.
 
 The Stage 2b cutover criterion is "every runtime DSL surface
 (`describe`, `test`, `expect.*`, lifecycle hooks, `vi.*`) has at
 least one selftest, and the runner-level failure pipeline is proven
-via a fixture + child-process pattern". When that bar is met,
-vitest can be removed; until then it stays as the safety net.
+via a fixture + child-process pattern". When that bar is met, the
+external runner can be removed; until then it stays as the safety net.
