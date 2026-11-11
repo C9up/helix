@@ -29,6 +29,7 @@ import type {
 } from "./suite.js";
 import { interpolateDatasetTitle } from "./suite.js";
 import {
+	drainTestCleanups,
 	drainTestOutcomeHooks,
 	getAssertionState,
 	registerTestCleanup,
@@ -938,14 +939,18 @@ async function runAttempt(
 	const beforeErr = await runHooks(before, true, testInstance, timeoutMs);
 	if (beforeErr) {
 		const afterErrBE = await runHooks(after, false, testInstance, timeoutMs);
-		await drainTestOutcomeHooks(true);
+		setFrameOutcome(true);
+		const settled = await settleLateErrors(
+			combineErrors(beforeErr, afterErrBE),
+			"setup",
+		);
 		return {
 			name: title,
 			fullName,
 			status: "fail",
 			durationMs: Date.now() - start,
-			error: combineErrors(beforeErr, afterErrBE),
-			errorPhase: "setup",
+			error: settled.error,
+			errorPhase: settled.phase,
 		};
 	}
 
@@ -1041,27 +1046,56 @@ async function runAttempt(
 	);
 	const afterErr = await runHooks(after, false, testInstance, timeoutMs);
 	const finalErr = combineErrors(combineErrors(testErr, teardownErr), afterErr);
-	// Record the outcome BEFORE the frame's cleanup drain (finally) fires, so
+	// Record the outcome BEFORE the cleanups run, so
 	// `ctx.cleanup((hasError, test) => …)` sees the right `hasError`.
 	setFrameOutcome(finalErr !== undefined);
-	// A `Test.executed` hook is a verdict, not a teardown: `helix's assert`
-	// validates `assert.plan(n)` there. Its throw has to reach the result, or a
-	// plugin's whole reason for existing passes green.
-	const executedErr = await drainTestOutcomeHooks(finalErr !== undefined);
-	const outcome =
-		executedErr === undefined
-			? finalErr
-			: combineErrors(finalErr, serializeError(executedErr));
+	// A failure with no recorded phase came from the teardown chain.
+	const settled = await settleLateErrors(
+		finalErr,
+		finalErr === undefined ? undefined : (errorPhase ?? "teardown"),
+	);
 	return {
 		name: title,
 		fullName,
-		status: outcome ? "fail" : "pass",
+		status: settled.error ? "fail" : "pass",
 		durationMs: Date.now() - start,
-		error: outcome,
-		// A failure with no recorded phase came from the teardown chain, or from a
-		// `Test.executed` hook, which runs at the same point.
-		errorPhase: outcome === undefined ? undefined : (errorPhase ?? "teardown"),
+		error: settled.error,
+		errorPhase: settled.phase,
 	};
+}
+
+/**
+ * Run what follows a test once its own outcome is known — the
+ * `onTestFailed` / `onTestFinished` callbacks, the run-wide `Test.executed`
+ * hooks, then the test's cleanups — and fold what they threw into its result.
+ *
+ * Every one of them is a verdict on the test, not a log line. A
+ * `Test.executed` hook is where a plugin checks an invariant (`helix's assert`
+ * validates `assert.plan(n)` there), and a callback or cleanup that throws is a
+ * teardown that did not happen: a rollback that broke, an override left in
+ * place for the next test. The test's own failure stays the primary error and
+ * keeps its phase; a test that passed takes the phase of what failed it.
+ */
+async function settleLateErrors(
+	error: SerializedError | undefined,
+	phase: ErrorPhase | undefined,
+): Promise<{
+	error: SerializedError | undefined;
+	phase: ErrorPhase | undefined;
+}> {
+	let outcome = error;
+	let outcomePhase = phase;
+	const fold = (thrown: unknown, at: ErrorPhase): void => {
+		outcome = combineErrors(outcome, serializeError(thrown));
+		outcomePhase ??= at;
+	};
+	const hooks = await drainTestOutcomeHooks(error !== undefined);
+	for (const thrown of hooks.callbacks) fold(thrown, "test:cleanup");
+	// `Test.executed` runs where the teardown chain ends.
+	if (hooks.verdict !== undefined) fold(hooks.verdict, "teardown");
+	setFrameOutcome(outcome !== undefined);
+	for (const thrown of await drainTestCleanups()) fold(thrown, "test:cleanup");
+	return { error: outcome, phase: outcomePhase };
 }
 
 /** Verify `expect.assertions(n)` / `hasAssertions()` for the active frame. */

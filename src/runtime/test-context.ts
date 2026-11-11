@@ -8,9 +8,13 @@
  * registered through `helix.override()` — get torn down between tests
  * without needing the user to wire `afterEach(restore)` by hand.
  *
- * Cleanup semantics mirror `withViContext`'s finally:
+ * Cleanup semantics:
  *   - reverse insertion order
  *   - one cleanup throwing must not block the others
+ *   - a cleanup that throws fails its test (phase `test:cleanup`): the
+ *     runner drains them through {@link drainTestCleanups} before it settles
+ *     the attempt's result, so a broken restore is not inherited silently by
+ *     the next test
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -78,17 +82,43 @@ export async function withTestContext<T>(body: () => Promise<T>): Promise<T> {
 	try {
 		return await storage.run(frame, body);
 	} finally {
-		for (const cleanup of [...frame.cleanups].reverse()) {
+		// Only reached with cleanups left when `body` did not drain them — it
+		// threw before settling a result. There is no result to fail then, so
+		// what a cleanup throws is reported where it can still be seen.
+		for (const err of await runCleanups(frame)) {
+			console.error("[helix] test cleanup failed:", err);
+		}
+	}
+}
+
+/**
+ * Run the frame's cleanups, last registered first, and return what they
+ * threw. Each runs once: a cleanup registered while another runs is drained
+ * too, and the list is empty afterwards.
+ */
+async function runCleanups(frame: TestFrame): Promise<unknown[]> {
+	const errors: unknown[] = [];
+	while (frame.cleanups.length > 0) {
+		for (const cleanup of frame.cleanups.splice(0).reverse()) {
 			try {
 				await cleanup(frame.hadError, frame.test);
 			} catch (err) {
-				// One cleanup failing must not block the others — but log it
-				// so silent leaks become noisy. `console.error` matches what
-				// Vitest does for `afterEach` failures observed at runtime.
-				console.error("[helix] test cleanup failed:", err);
+				errors.push(err);
 			}
 		}
 	}
+	return errors;
+}
+
+/**
+ * Run the current test's cleanups (`ctx.cleanup`, a hook's returned cleanup,
+ * the container and clock restores helix registers) and return what they
+ * threw, for the runner to fail the test with. Empty outside a test frame.
+ */
+export async function drainTestCleanups(): Promise<unknown[]> {
+	const frame = storage.getStore();
+	if (!frame) return [];
+	return runCleanups(frame);
 }
 
 /**
@@ -214,19 +244,30 @@ export function setFrameContext(context: unknown): void {
 	if (frame) frame.context = context;
 }
 
+/** What {@link drainTestOutcomeHooks} collected. */
+export interface OutcomeHookErrors {
+	/** What `onTestFailed` / `onTestFinished` callbacks threw, in run order. */
+	callbacks: unknown[];
+	/** The first thing a run-wide `Test.executed` hook threw, if any. */
+	verdict: unknown;
+}
+
 /**
  * Drain the `onTestFinished`/`onTestFailed` callbacks for the current frame,
  * then the run-wide `Test.executed` hooks.
  *
- * Returns what an `executed` hook threw, if one did. That hook IS a verdict —
- * `helix's assert` validates `assert.plan(n)` there and throws when the count is
- * wrong — so swallowing it would let a plugin's whole reason for existing pass
- * green. The frame's own callbacks keep being logged rather than thrown: they
- * are teardown, and a broken one must not invent a failure.
+ * Returns what both threw. An `executed` hook IS a verdict — `helix's assert`
+ * validates `assert.plan(n)` there and throws when the count is wrong — so
+ * swallowing it would let a plugin's whole reason for existing pass green. A
+ * throwing `onTestFinished` / `onTestFailed` callback fails the test too: it
+ * is a teardown that did not happen, and every callback still runs.
  */
-export async function drainTestOutcomeHooks(failed: boolean): Promise<unknown> {
+export async function drainTestOutcomeHooks(
+	failed: boolean,
+): Promise<OutcomeHookErrors> {
+	const callbacks: unknown[] = [];
 	const frame = storage.getStore();
-	if (!frame) return undefined;
+	if (!frame) return { callbacks, verdict: undefined };
 	// `onTestFailed` first (diagnostics), then `onTestFinished` — both in
 	// reverse insertion order to mirror Vitest teardown semantics.
 	if (failed) {
@@ -234,7 +275,7 @@ export async function drainTestOutcomeHooks(failed: boolean): Promise<unknown> {
 			try {
 				await onFailed(failed, frame.test);
 			} catch (err) {
-				console.error("[helix] onTestFailed callback threw:", err);
+				callbacks.push(err);
 			}
 		}
 	}
@@ -242,7 +283,7 @@ export async function drainTestOutcomeHooks(failed: boolean): Promise<unknown> {
 		try {
 			await onFinished(failed, frame.test);
 		} catch (err) {
-			console.error("[helix] onTestFinished callback threw:", err);
+			callbacks.push(err);
 		}
 	}
 	// Run-wide hooks last, so a plugin checking an invariant sees the state the
@@ -259,7 +300,7 @@ export async function drainTestOutcomeHooks(failed: boolean): Promise<unknown> {
 			}
 		}
 	}
-	return verdict;
+	return { callbacks, verdict };
 }
 
 /** Increment the assertion counter for the active test (no-op outside a test). */

@@ -129,7 +129,10 @@ An error nobody handled — a floating rejection, a timer that throws, even
 after the file reported — is a file error beside the file's results, on both
 pools. So is a worker exiting with a status its results do not explain, and a
 runner teardown (`api.cleanup`) that throws. An un-awaited `.resolves` /
-`.rejects` fails the test that started it.
+`.rejects` fails the test that started it, and so does a test cleanup
+(`ctx.cleanup`, a hook's returned cleanup, `onTestFinished`, `onTestFailed`)
+that throws: the test fails with the `test:cleanup` phase, after the other
+cleanups have run.
 
 What a test prints is forwarded once its file finishes, under a
 `stdout | <file>` / `stderr | <file>` header; `--silent` drops it, and with

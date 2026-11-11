@@ -305,3 +305,86 @@ describe("test.each with a function source", () => {
 		vExpect(result.totals.pass).toBe(3);
 	});
 });
+
+describe("a throwing test cleanup fails its test", () => {
+	// A cleanup that throws is a teardown that did not happen: a rollback that
+	// broke, a container override left in place. It fails the test with the
+	// `test:cleanup` phase, as a throwing teardown hook fails it, and the other
+	// cleanups still run.
+	vIt("ctx.cleanup", async () => {
+		const root = resetRoot();
+		const log: string[] = [];
+		test("x", ({ cleanup }) => {
+			cleanup(() => {
+				log.push("first registered");
+			});
+			cleanup(() => {
+				throw new Error("rollback failed");
+			});
+		});
+		const result = await executeRoot(root, "inline");
+		const [only] = result.tests;
+		vExpect(only?.status).toBe("fail");
+		vExpect(only?.errorPhase).toBe("test:cleanup");
+		vExpect(only?.error?.message).toBe("rollback failed");
+		vExpect(result.totals).toMatchObject({ pass: 0, fail: 1 });
+		vExpect(log).toEqual(["first registered"]);
+	});
+
+	vIt("onTestFinished", async () => {
+		const root = resetRoot();
+		test("x", () => {
+			onTestFinished(() => {
+				throw new Error("finished broke");
+			});
+		});
+		const result = await executeRoot(root, "inline");
+		vExpect(result.tests[0]).toMatchObject({
+			status: "fail",
+			errorPhase: "test:cleanup",
+			error: { message: "finished broke" },
+		});
+	});
+
+	vIt("onTestFailed, alongside the failure it reacted to", async () => {
+		const root = resetRoot();
+		test("x", () => {
+			onTestFailed(() => {
+				throw new Error("diagnostics broke");
+			});
+			throw new Error("body failed");
+		});
+		const result = await executeRoot(root, "inline");
+		const [only] = result.tests;
+		vExpect(only?.status).toBe("fail");
+		// The body's failure stays the primary one and keeps its phase.
+		vExpect(only?.errorPhase).toBe("test");
+		vExpect(only?.error?.message).toMatch(/^body failed\n/);
+		vExpect(only?.error?.message).toContain("diagnostics broke");
+	});
+
+	vIt("a cleanup that fails once is retried with the test", async () => {
+		const root = resetRoot();
+		let attempts = 0;
+		test("x", ({ cleanup }) => {
+			attempts += 1;
+			const attempt = attempts;
+			cleanup(() => {
+				if (attempt === 1) throw new Error("first cleanup broke");
+			});
+		}).retry(1);
+		const result = await executeRoot(root, "inline");
+		vExpect(attempts).toBe(2);
+		vExpect(result.tests[0]?.status).toBe("pass");
+	});
+
+	vIt("a cleanup that runs clean leaves the test green", async () => {
+		const root = resetRoot();
+		test("x", ({ cleanup }) => {
+			cleanup(() => {});
+		});
+		const result = await executeRoot(root, "inline");
+		vExpect(result.tests[0]?.status).toBe("pass");
+		vExpect(result.tests[0]?.errorPhase).toBeUndefined();
+	});
+});
