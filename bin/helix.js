@@ -46,7 +46,13 @@ const FLAG_SPEC = {
 		kind: "string",
 		help: "Only run tests whose full name matches (regex or substring)",
 	},
-	retries: { kind: "number", help: "Extra attempts on failure (default 0)" },
+	retries: {
+		kind: "number",
+		// 0 is a count, not an absent value: `--retries=0` must be able to beat
+		// a suite that declares retries.
+		allowZero: true,
+		help: "Extra attempts on failure (default 0)",
+	},
 	tags: {
 		kind: "string",
 		help: "Comma-separated tag filter (@fast, ~@slow to exclude); OR by default",
@@ -192,9 +198,10 @@ function parseArgv(argv) {
 		}
 		if (spec.kind === "number") {
 			const n = Number(inline);
-			if (!Number.isFinite(n) || n <= 0) {
+			const tooSmall = spec.allowZero === true ? n < 0 : n <= 0;
+			if (!Number.isFinite(n) || tooSmall) {
 				throw new Error(
-					`flag --${name} expects a positive finite number, got "${inline}"`,
+					`flag --${name} expects a ${spec.allowZero === true ? "non-negative" : "positive"} finite number, got "${inline}"`,
 				);
 			}
 			flags[name] = n;
@@ -685,10 +692,12 @@ async function main() {
 				if (parsed.positional.length > 0) namedSuiteEmpty = true;
 				continue;
 			}
-			// A suite's `retries` overrides `--retries` for that suite only. Set
-			// on EVERY step (empty = unset, see `envCount`) so a suite that
-			// declares none doesn't inherit the previous suite's value.
-			const retries = suite.retries ?? parsed.flags.retries;
+			// `--retries` beats the suite's own count, as `--timeout` beats its
+			// timeout and as the ream bridge orders them; the suite's count
+			// applies only when no flag is given. Set on EVERY step (empty =
+			// unset, see `envCount`) so a suite that declares none doesn't
+			// inherit the previous suite's value.
+			const retries = parsed.flags.retries ?? suite.retries;
 			const env = {
 				HELIX_SUITE: suite.name,
 				HELIX_RETRIES: retries === undefined ? "" : String(retries),
