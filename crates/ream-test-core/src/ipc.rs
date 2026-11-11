@@ -1,6 +1,8 @@
-//! IPC contract with `src/runtime/worker.ts main()`. The TypeScript worker
-//! sends two message shapes: a `result` with a `FileResult` payload, or an
-//! `error` when loading or running the file fails unrecoverably.
+//! IPC contract with `src/runtime/cli-worker.ts`. The worker frames its
+//! messages on stderr: a `result` with a `FileResult` payload, an `error`
+//! when loading or running the file fails unrecoverably, or an `unhandled`
+//! error raised beside the result. The run instruction it reads on stdin is
+//! built by the pool as JSON and has no type here.
 //!
 //! These types are the Rust mirror of the TS definitions in
 //! `packages/helix/src/runtime/run.ts`.
@@ -129,18 +131,6 @@ pub struct WorkerError {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack: Option<String>,
-}
-
-/// Messages sent FROM the parent TO the worker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum WorkerIncoming {
-    #[serde(rename = "run")]
-    Run {
-        file: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        timeout_ms: Option<u64>,
-    },
 }
 
 #[cfg(test)]

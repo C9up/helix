@@ -50,9 +50,10 @@ pub struct RunConfig {
     pub reporters: Option<Vec<String>>,
     /// Stop the run at the first failing file (helix `--bail`).
     pub bail: Option<bool>,
-    /// Path to the compiled worker entry (points at the JS shim that calls
-    /// `runtime/worker.ts#main()`). Required — there's no sensible default
-    /// from Rust's perspective.
+    /// Path to the worker entry the pool spawns per file (`runtime/cli-worker`,
+    /// which reads the run instruction on stdin and frames its result on
+    /// stderr). Required — there's no sensible default from Rust's
+    /// perspective.
     pub worker_entry: String,
     /// Optional `node` executable path. Defaults to `"node"` on `PATH`.
     pub node_bin: Option<String>,

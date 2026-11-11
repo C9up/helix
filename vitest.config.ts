@@ -24,10 +24,9 @@ export default defineConfig({
 				// Pure re-export barrels (no executable code).
 				"src/**/index.ts",
 				"src/runtime/lifecycle.ts",
-				// Worker entry points — they only run in a real child process
-				// (the integration tests spawn them: worker-errors, timeouts,
+				// The worker entry — it only runs in a real child process (the
+				// integration tests spawn it: worker-errors, timeouts,
 				// orchestrator), which this in-process v8 coverage cannot see.
-				"src/runtime/worker.ts",
 				"src/runtime/cli-worker.ts",
 				"src/vendor/**",
 			],

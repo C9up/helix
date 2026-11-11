@@ -2,12 +2,9 @@
  * Worker entry — loads a single test file, collects its `describe`/`test`
  * declarations, executes them, and emits a `FileResult`.
  *
- * Usage modes:
- *   1. Direct (unit tests): `runTestFile("/abs/path.test.ts")` → `FileResult`
- *   2. Child process (orchestrator): `main()` reads file paths from IPC
- *      messages and replies on `process.send`. Exactly one `main()` runs
- *      per worker process (guarded); IPC runs are serialized so concurrent
- *      messages cannot race on internal state.
+ * `runTestFile("/abs/path.test.ts")` → `FileResult`. It runs in-process
+ * here; the child process both pools spawn is `cli-worker.ts`, which reads
+ * the run instruction on stdin and calls `runTestFile`.
  *
  * File collection is scoped per invocation via AsyncLocalStorage (see
  * `suite.ts#withCollection`) — no shared mutable state across concurrent
@@ -19,7 +16,6 @@ import { pathToFileURL } from "node:url";
 import { loadBootstrap } from "./bootstrap.js";
 import { cliArgs, runningInCI } from "./cli-args.js";
 import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
-import { FRAME_PREFIX } from "./ipc-protocol.js";
 import {
 	type ExecuteOptions,
 	executeRoot,
@@ -238,105 +234,4 @@ function asBailLayer(
 ): "group" | "suite" | "runner" | undefined {
 	if (raw === "group" || raw === "suite" || raw === "runner") return raw;
 	return undefined;
-}
-
-interface WorkerIncoming {
-	type: "run";
-	file: string;
-	timeoutMs?: number;
-}
-
-interface WorkerOutgoing {
-	type: "result";
-	result: FileResult;
-}
-
-interface WorkerError {
-	type: "error";
-	file: string | undefined;
-	message: string;
-	stack?: string;
-}
-
-type WorkerMessage = WorkerOutgoing | WorkerError;
-
-function send(msg: WorkerMessage): void {
-	if (typeof process.send === "function") {
-		process.send(msg);
-		return;
-	}
-	// Fallback: framed line on stderr so it doesn't collide with test
-	// console.log output on stdout. Parent parses lines starting with the
-	// `FRAME_PREFIX` magic.
-	process.stderr.write(`${FRAME_PREFIX}${JSON.stringify(msg)}\n`);
-}
-
-function isWorkerIncoming(v: unknown): v is WorkerIncoming {
-	if (!v || typeof v !== "object") return false;
-	return (
-		Reflect.get(v, "type") === "run" &&
-		typeof Reflect.get(v, "file") === "string"
-	);
-}
-
-let mainStarted = false;
-
-export async function main(): Promise<void> {
-	if (mainStarted) return;
-	mainStarted = true;
-
-	// Unhandled rejections from test code (e.g. a dangling Promise.reject)
-	// would crash the worker on Node 15+ or leak silently. Log them and keep
-	// the process alive so currently-running tests can complete.
-	process.on("unhandledRejection", (reason) => {
-		process.stderr.write(
-			`${FRAME_PREFIX}${JSON.stringify({
-				type: "error",
-				file: undefined,
-				message: `unhandledRejection: ${reason instanceof Error ? reason.message : String(reason)}`,
-				stack: reason instanceof Error ? reason.stack : undefined,
-			})}\n`,
-		);
-	});
-
-	// IPC mode: parent drives us via `{ type: "run", file }` messages.
-	if (typeof process.send === "function") {
-		let pending: Promise<unknown> = Promise.resolve();
-		process.on("message", (raw: unknown) => {
-			if (!isWorkerIncoming(raw)) return;
-			const msg = raw;
-			// Serialize IPC runs: a second message waits for the first to
-			// finish so module-scoped watchers / handlers don't race.
-			pending = pending
-				.then(() => runTestFile(msg.file, { timeoutMs: msg.timeoutMs }))
-				.then((result) => send({ type: "result", result }))
-				.catch((err: unknown) => {
-					const e = err instanceof Error ? err : new Error(String(err));
-					send({
-						type: "error",
-						file: msg.file,
-						message: e.message,
-						stack: e.stack,
-					});
-				});
-		});
-		return;
-	}
-
-	// CLI fallback: `node worker.js <file>`.
-	const file = process.argv[2];
-	if (!file) {
-		process.stderr.write("helix worker: missing file arg\n");
-		process.exit(2);
-	}
-	try {
-		const abs = path.resolve(file);
-		const result = await runTestFile(abs);
-		send({ type: "result", result });
-		process.exit(result.totals.fail > 0 ? 1 : 0);
-	} catch (err) {
-		const e = err instanceof Error ? err : new Error(String(err));
-		send({ type: "error", file, message: e.message, stack: e.stack });
-		process.exit(2);
-	}
 }

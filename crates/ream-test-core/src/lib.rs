@@ -3,7 +3,7 @@
 //! Contains:
 //!   * `discover` — file-system walk honouring .gitignore / .ignore semantics
 //!     via the `ignore` crate, filtering by include/exclude glob lists.
-//!   * Serde types for the IPC contract with `src/runtime/worker.ts main()`.
+//!   * Serde types for the IPC contract with `src/runtime/cli-worker.ts`.
 //!   * The `Reporter` trait and the aggregator `Summary` type.
 //!
 //! The `WorkerPool` lives here as a trait definition; the concrete spawning
