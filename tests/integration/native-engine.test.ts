@@ -45,4 +45,37 @@ describe("native engine (ream-test-napi) — plain-path cutover", () => {
 		expect(outcome.summary.totals.fail).toBeGreaterThan(0);
 		expect(outcome.exitCode).toBe(1);
 	}, 30_000);
+
+	it("keeps a nested describe's children and hook errors in the summary", async () => {
+		// The engine re-reads each worker result and re-serialises it into
+		// `payload.json` (and the json reporter): a nested describe must come
+		// back as a suite, not flattened into a test that lost its tree.
+		const outcome = await run({
+			root: fixturesDir,
+			files: [path.join(fixturesDir, "nested.test.ts")],
+			threads: 1,
+			timeoutMs: 15_000,
+			reporter: "dot",
+			nodeArgs,
+			workerEntry,
+		});
+		const [file] = outcome.summary.files;
+		const [outer] = file?.suites ?? [];
+		const inner = outer?.children[0];
+		expect(inner).toMatchObject({
+			name: "inner",
+			fullName: "outer > inner",
+			children: [
+				{ name: "leaf", status: "pass" },
+				// The runner's own record of the failed afterAll.
+				{ name: "afterAll", status: "fail" },
+			],
+			hookErrors: [{ message: "inner afterAll broke" }],
+		});
+		expect(outer?.children[1]).toMatchObject({
+			name: "sibling",
+			status: "pass",
+		});
+		expect(outer?.children[1]).not.toHaveProperty("children");
+	}, 30_000);
 });
