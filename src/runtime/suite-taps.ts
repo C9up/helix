@@ -19,7 +19,7 @@
  */
 
 import type { Runner } from "./runner.js";
-import type { SuiteNode, TestNode } from "./suite.js";
+import { pinTest, type SuiteNode, type TestNode } from "./suite.js";
 
 /** A hook body, as `test.setup()` / `group.setup()` take it. */
 type Handler = () => void | Promise<void>;
@@ -111,7 +111,7 @@ export function testHandle(node: TestNode): TestHandle {
 			return handle;
 		},
 		pin() {
-			node.pinned = true;
+			pinTest(node);
 			return handle;
 		},
 		setup(fn) {

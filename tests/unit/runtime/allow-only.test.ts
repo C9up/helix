@@ -2,6 +2,11 @@ import { describe as vDescribe, expect as vExpect, it as vIt } from "vitest";
 import { expect } from "../../../src/runtime/expect.js";
 import { executeRoot } from "../../../src/runtime/run.js";
 import { describe, resetRoot, test } from "../../../src/runtime/suite.js";
+import {
+	applyTaps,
+	registerTestTap,
+	resetTaps,
+} from "../../../src/runtime/suite-taps.js";
 import { defined } from "../../__helpers__/defined.js";
 
 vDescribe("allowOnly: false", () => {
@@ -61,5 +66,54 @@ vDescribe("allowOnly: false", () => {
 		test("other", () => {});
 		const result = await executeRoot(root, "inline");
 		vExpect(result.totals).toMatchObject({ pass: 1, skip: 1 });
+	});
+});
+
+vDescribe("pin() through a suite tap", () => {
+	// `configureSuite`'s `suite.onTest((t) => t.pin())` is the same `.pin()` as
+	// the test handle's: it narrows the run, and fails under CI.
+	function pinA(): void {
+		registerTestTap((t) => {
+			if (t.title === "a") t.pin();
+		});
+	}
+
+	vIt("narrows the run to the tapped test", async () => {
+		const root = resetRoot();
+		test("a", () => {});
+		test("b", () => {});
+		pinA();
+		applyTaps(root);
+		resetTaps();
+		const result = await executeRoot(root, "inline", {});
+		vExpect(result.tests.map((t) => `${t.name}:${t.status}`)).toEqual([
+			"a:pass",
+			"b:skip",
+		]);
+	});
+
+	vIt("fails the tapped test when .pin() is not allowed", async () => {
+		const root = resetRoot();
+		test("a", () => {});
+		test("b", () => {});
+		pinA();
+		applyTaps(root);
+		resetTaps();
+		const result = await executeRoot(root, "inline", { allowOnly: false });
+		vExpect(result.totals).toMatchObject({ pass: 0, fail: 1, skip: 1 });
+		vExpect(defined(result.tests[0]).error?.message).toMatch(
+			/^Unexpected \.pin\(\) modifier/,
+		);
+	});
+
+	vIt("leaves a skipped test skipped", async () => {
+		const root = resetRoot();
+		test.skip("a", () => {});
+		test("b", () => {});
+		pinA();
+		applyTaps(root);
+		resetTaps();
+		const result = await executeRoot(root, "inline", {});
+		vExpect(result.totals).toMatchObject({ pass: 1, fail: 0, skip: 1 });
 	});
 });

@@ -406,6 +406,18 @@ const handleMacros = new Map<
 	(this: TestHandle, ...args: unknown[]) => unknown
 >();
 
+/**
+ * Pin a test, from its handle or from a suite tap: one rule for both, so a
+ * pin narrows the run, and fails it where `.only` is not allowed, whichever
+ * surface set it. A pinned test runs like `.only` — the runner restricts the
+ * tree to `only` nodes when any exist and refuses them under `allowOnly:
+ * false`. A skipped test stays skipped.
+ */
+export function pinTest(node: TestNode): void {
+	node.pinned = true;
+	if (node.mode === "run") node.mode = "only";
+}
+
 /** Wrap a registered node in the chainable helix-style handle. */
 function makeHandle(node: TestNode): TestHandle {
 	const handle: TestHandle = {
@@ -448,10 +460,7 @@ function makeHandle(node: TestNode): TestHandle {
 			return handle;
 		},
 		pin() {
-			node.pinned = true;
-			// A pinned test runs like `.only` — the runner already restricts the
-			// tree to `only` nodes when any exist.
-			if (node.mode === "run") node.mode = "only";
+			pinTest(node);
 			return handle;
 		},
 		skip(
