@@ -62,6 +62,19 @@ describe("coverage filter > root confinement", () => {
 		]);
 	});
 
+	it("names a kept file under the root as given, when that root is a symlink", async () => {
+		const linkedRoot = path.join(elsewhere, "project");
+		await symlink(root, linkedRoot, "dir");
+		const kept = filter([entry(path.join(root, "src", "a.ts"))], {
+			root: linkedRoot,
+			include: ["**/*"],
+			exclude: [],
+		});
+		expect(kept.map((e) => path.relative(linkedRoot, e.file))).toEqual([
+			path.join("src", "a.ts"),
+		]);
+	});
+
 	it("drops the root itself, which is no source file", () => {
 		expect(
 			filter([entry(root)], { root, include: ["**"], exclude: [] }),

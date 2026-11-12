@@ -52,7 +52,8 @@ export function filter(
 ): RawFileCoverage[] {
 	const include = compileGlobs(config.include ?? DEFAULT_INCLUDE);
 	const exclude = compileGlobs(config.exclude ?? DEFAULT_EXCLUDE);
-	const root = tryRealpath(path.resolve(config.root));
+	const given = path.resolve(config.root);
+	const root = tryRealpath(given);
 	const out: RawFileCoverage[] = [];
 	for (const entry of raw) {
 		const real = tryRealpath(entry.file);
@@ -62,7 +63,11 @@ export function filter(
 		}
 		if (!matchesAnyGlob(include, rel)) continue;
 		if (matchesAnyGlob(exclude, rel)) continue;
-		out.push({ ...entry, file: real });
+		// Named under the root as the caller gave it, which is what the
+		// reporters relativise against: the real path would read as
+		// `../../private/var/...` when the root is reached through a symlink
+		// (macOS's /var, a linked checkout).
+		out.push({ ...entry, file: path.join(given, ...rel.split("/")) });
 	}
 	return out;
 }
