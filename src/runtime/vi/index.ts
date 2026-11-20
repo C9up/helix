@@ -59,7 +59,7 @@ interface ViState {
 
 function createViState(): ViState {
 	const clock = createSystemClock();
-	const unregisterClock = registerSystemClockContext(() => clock);
+	const unregisterClock = registerSystemClockContext(clock);
 	return {
 		spies: new Set(),
 		timers: createFakeTimerController(),
