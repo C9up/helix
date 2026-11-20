@@ -14,6 +14,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -343,6 +344,16 @@ export async function runPool(
 	return { results, errors };
 }
 
+/**
+ * The per-file result nonce: the pool's pid, then 128 bits from the OS CSPRNG,
+ * hex-encoded — the same shape as the native pool's. A fixture cannot guess
+ * it, so it cannot spoof `__HELIX_RESULT__` frames. There is no weaker
+ * fallback: `randomBytes` throws when the OS has no randomness to give.
+ */
+export function resultNonce(): string {
+	return `${process.pid}-${randomBytes(16).toString("hex")}`;
+}
+
 function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 	return new Promise((resolve) => {
 		const nodeBin = cfg.nodeBin ?? process.execPath;
@@ -360,7 +371,23 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		const exitGraceMs = positiveMs(cfg.exitGraceMs, DEFAULT_EXIT_GRACE_MS);
 		// Per-invocation nonce — the worker echoes it inside every frame so
 		// malicious or confused test code can't spoof a `__HELIX_RESULT__` line.
-		const nonce = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		// Drawn before the worker is spawned: without OS randomness the file
+		// fails here, with nothing to kill.
+		let nonce: string;
+		try {
+			nonce = resultNonce();
+		} catch (error) {
+			resolve({
+				errors: [
+					{
+						file,
+						message: `cannot draw the result nonce from the OS random source: ${error instanceof Error ? error.message : String(error)}`,
+					},
+				],
+				output: { stdout: "", stderr: "" },
+			});
+			return;
+		}
 
 		const child = spawn(nodeBin, [...nodeArgs, cfg.workerEntry], {
 			stdio: ["pipe", "pipe", "pipe"],

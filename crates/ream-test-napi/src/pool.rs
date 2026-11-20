@@ -15,11 +15,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-// Only the `#[cfg(unix)]` `fill_os_random` uses `Read::read_exact` (on
-// `/dev/urandom`); gating the import keeps the Windows build warning-clean
-// under `-D warnings`.
-#[cfg(unix)]
-use std::io::Read as _;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
@@ -227,6 +222,13 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
         stdout: String::new(),
         stderr: String::new(),
     };
+    // Per-invocation nonce — the worker echoes it so malicious `console.error`
+    // lines in a fixture cannot spoof the frame. Drawn before the worker is
+    // spawned: without OS randomness the file fails here, with nothing to kill.
+    let nonce = match rand_suffix() {
+        Ok(suffix) => format!("{}-{}", std::process::id(), suffix),
+        Err(e) => return fail(e),
+    };
     let mut cmd = Command::new(&cfg.node_bin);
     for a in &cfg.node_args {
         cmd.arg(a);
@@ -275,10 +277,6 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
             }
         }
     }));
-
-    // Per-invocation nonce — the worker echoes it so malicious `console.error`
-    // lines in a fixture cannot spoof the frame.
-    let nonce = format!("{}-{}", std::process::id(), rand_suffix());
 
     let mut instr = serde_json::json!({
         "type": "run",
@@ -611,48 +609,21 @@ const PRE_HANDSHAKE_NONCE: &str = "__helix_pre_handshake__";
 /// pool.
 const MAX_STDERR_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 
-/// Cryptographically-unpredictable nonce suffix. A fixture running under
-/// the worker cannot read `/dev/urandom` (or `BCryptGenRandom`) and guess
-/// this in a reasonable window, so it cannot spoof `__HELIX_RESULT__`
-/// frames — the whole point of the nonce. Falls back to `SystemTime`
-/// nanos only if the OS RNG is unavailable (flagged visibly via the
-/// `unsafe-time-` prefix).
-fn rand_suffix() -> String {
+/// Cryptographically-unpredictable nonce suffix: 128 bits from the OS CSPRNG
+/// (`getrandom`: ProcessPrng/BCryptGenRandom on Windows, getrandom(2) or
+/// `/dev/urandom` on unix), hex-encoded. A fixture running under the worker
+/// cannot guess it, so it cannot spoof `__HELIX_RESULT__` frames — the whole
+/// point of the nonce. There is no weaker fallback: a clock value is guessable,
+/// so without OS randomness the file fails instead of running unprotected.
+fn rand_suffix() -> std::result::Result<String, String> {
     let mut bytes = [0u8; 16];
-    if fill_os_random(&mut bytes) {
-        let mut out = String::with_capacity(32);
-        for b in bytes {
-            out.push_str(&format!("{:02x}", b));
-        }
-        return out;
-    }
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("unsafe-time-{:x}", nanos)
-}
-
-#[cfg(unix)]
-fn fill_os_random(buf: &mut [u8]) -> bool {
-    match std::fs::File::open("/dev/urandom") {
-        Ok(mut f) => f.read_exact(buf).is_ok(),
-        Err(_) => false,
-    }
-}
-
-#[cfg(windows)]
-fn fill_os_random(_buf: &mut [u8]) -> bool {
-    // Without the `rand` crate we can't call BCryptGenRandom here.
-    // Fall through to the time-based fallback; Windows CI users should
-    // expect an advisory in logs. (Long-term: depend on `getrandom`.)
-    false
-}
-
-#[cfg(not(any(unix, windows)))]
-fn fill_os_random(_buf: &mut [u8]) -> bool {
-    false
+    getrandom::fill(&mut bytes).map_err(|e| {
+        format!(
+            "cannot draw the result nonce from the OS random source: {}",
+            e
+        )
+    })?;
+    Ok(bytes.iter().map(|b| format!("{:02x}", b)).collect())
 }
 
 #[cfg(test)]
@@ -660,6 +631,17 @@ mod tests {
     use super::*;
     use ream_test_core::summary::Summary;
     use std::io::Write as _;
+
+    /// The nonce suffix is 128 random bits from the OS, hex-encoded, on every
+    /// platform — never a clock value.
+    #[test]
+    fn nonce_suffix_is_os_random_hex() {
+        let a = rand_suffix().unwrap();
+        let b = rand_suffix().unwrap();
+        assert_eq!(a.len(), 32);
+        assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
 
     /// A stand-in worker: reads the instruction, echoes the nonce, and reports
     /// a failure for any file whose name contains "red". Written to disk so the
