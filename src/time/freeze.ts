@@ -56,7 +56,8 @@ const JS_DATE_MAX = 8_640_000_000_000_000;
 /**
  * Pin `Date.now()` / `new Date()` (and anything that reads through
  * them — e.g. `DateTime.now()`) to the given moment. Auto-restored
- * at end-of-test via the helix test frame, so a forgotten
+ * at end-of-test via the helix test frame to the clock in place
+ * before the call (a file-level pin, or real time), so a forgotten
  * `unfreeze()` does not leak into the next test.
  *
  * Throws when called outside a test frame — a queued cleanup would
@@ -65,9 +66,22 @@ const JS_DATE_MAX = 8_640_000_000_000_000;
 export function freeze(input: TimeInput): void {
 	requireTestContext("freeze");
 	const ms = inputToMs(input);
+	queueClockRestore();
 	vi.setSystemTime(ms);
+}
+
+/**
+ * Queue, for the end of the test, a restore of the clock as it is now: the
+ * pin in place (a file-level `vi.setSystemTime` / `useFakeTimers`), or real
+ * time when there is none. Cleanups drain last-first, so after a `freeze`
+ * then a `travel` the last restore to run is the first one's — the clock the
+ * test started with.
+ */
+function queueClockRestore(): void {
+	const previous = vi.getMockedSystemTime();
 	registerTestCleanup(() => {
-		vi.useRealSystemTime();
+		if (previous === null) vi.useRealSystemTime();
+		else vi.setSystemTime(previous);
 	});
 }
 
@@ -77,10 +91,8 @@ export function freeze(input: TimeInput): void {
  * applies the delta — so a one-shot `time.travel(7, 'day')` works
  * without an explicit `freeze()`.
  *
- * Always queues a cleanup so the auto-restore path is uniform —
- * cleanups are idempotent (each calls `vi.useRealSystemTime`),
- * accumulating closures across many `travel` calls in one test is
- * intentional and cheap.
+ * Always queues a cleanup that puts back the clock found at the call,
+ * so the end-of-test drain returns to the clock the test started with.
  *
  * Throws when called outside a test frame, same reason as `freeze`.
  */
@@ -97,14 +109,11 @@ export function travel(amount: number, unit: TimeUnit = "ms"): void {
 	const base = vi.getMockedSystemTime() ?? Date.now();
 	const next = applyDelta(base, amount, unit);
 	requireInDateRange(next, "travel");
+	// Always queue, even when already frozen: each restore puts back the
+	// clock it found, so a `travel` after a raw `vi.setSystemTime` gives
+	// that pin back instead of skipping.
+	queueClockRestore();
 	vi.setSystemTime(next);
-	// Always queue — `vi.useRealSystemTime` is idempotent so duplicate
-	// cleanups across `freeze + travel` are harmless. Always-queue
-	// guards against the "user pinned via raw `vi.setSystemTime`,
-	// then called `travel`" trap where the heuristic would skip.
-	registerTestCleanup(() => {
-		vi.useRealSystemTime();
-	});
 }
 
 /**

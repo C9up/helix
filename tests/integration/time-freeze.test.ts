@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import { withTestContext } from "../../src/runtime/test-context.js";
-import { vi } from "../../src/runtime/vi/index.js";
+import { vi, withViContext } from "../../src/runtime/vi/index.js";
 import {
 	freeze,
 	frozenAt,
@@ -330,29 +330,46 @@ describe("time — auto-restore via per-test frame", () => {
 		expect(frozenAt()).toBeNull();
 	});
 
-	it("freeze + travel queues two cleanups, both idempotent (always-queue policy)", async () => {
-		// Spy on `vi.useRealSystemTime` to count cleanup invocations.
-		const real = vi.useRealSystemTime;
-		let calls = 0;
-		// biome-ignore lint/suspicious/noExplicitAny: test spy
-		(vi as any).useRealSystemTime = (...args: unknown[]) => {
-			calls++;
-			// biome-ignore lint/suspicious/noExplicitAny: rebind to original
-			return (real as any).apply(vi, args);
-		};
-		try {
+	it("freeze + travel restore the clock the test started with, not the frozen one", async () => {
+		await withTestContext(async () => {
+			freeze(FROZEN_EPOCH);
+			travel(1, "hour");
+			expect(frozenAt()).toBe(FROZEN_EPOCH + 3_600_000);
+		});
+		// Cleanups drain last-first: travel's puts back the freeze, then
+		// freeze's puts back real time.
+		expect(frozenAt()).toBeNull();
+	});
+
+	it("a file-level pin set before the test is back after a test froze", async () => {
+		await withViContext(async () => {
+			const filePin = Date.parse("2020-01-01T00:00:00Z");
+			vi.setSystemTime(filePin); // a beforeAll
 			await withTestContext(async () => {
-				freeze(FROZEN_EPOCH);
-				travel(1, "hour");
+				freeze("2030-06-01T00:00:00Z");
+				travel(2, "day");
 			});
-			// freeze queued one, travel always queues another → 2 cleanups.
-			// (Always-queue policy makes the contract uniform — see
-			// freeze.ts header note on the `wasFrozen` heuristic trap.)
-			expect(calls).toBe(2);
-		} finally {
-			// biome-ignore lint/suspicious/noExplicitAny: restore
-			(vi as any).useRealSystemTime = real;
-		}
+			await withTestContext(async () => {
+				expect(frozenAt()).toBe(filePin);
+				expect(new Date().toISOString()).toBe("2020-01-01T00:00:00.000Z");
+			});
+		});
+	});
+
+	it("useFakeTimers in the file keeps Date and the timer clock together after a freeze", async () => {
+		await withViContext(async () => {
+			const filePin = Date.parse("2020-01-01T00:00:00Z");
+			vi.useFakeTimers({ now: filePin });
+			await withTestContext(async () => {
+				travelTo("2030-06-01T00:00:00Z");
+			});
+			await withTestContext(async () => {
+				expect(Date.now()).toBe(filePin);
+				vi.advanceTimersByTime(1_000);
+				expect(Date.now()).toBe(filePin + 1_000);
+			});
+			vi.useRealTimers();
+		});
 	});
 
 	it("travel after raw vi.setSystemTime still queues a cleanup (no wasFrozen trap)", async () => {
@@ -361,8 +378,9 @@ describe("time — auto-restore via per-test frame", () => {
 			travel(1, "hour");
 			expect(frozenAt()).toBe(FROZEN_EPOCH + 3_600_000);
 		});
-		// The raw setSystemTime didn't queue anything, but travel did —
-		// so the frame's drain restores real time.
-		expect(frozenAt()).toBeNull();
+		// The raw setSystemTime queued nothing; travel's cleanup puts back
+		// the clock it found — the raw pin, which is the caller's to clear.
+		expect(frozenAt()).toBe(FROZEN_EPOCH);
+		vi.useRealSystemTime();
 	});
 });
