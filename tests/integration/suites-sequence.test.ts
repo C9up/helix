@@ -108,6 +108,20 @@ describe("runSuites", () => {
 		expect(outcome.exitCode).toBe(1);
 	}, 60_000);
 
+	it("leaves process.env as it found it once the suites ran", async () => {
+		// A later run in the same process (no suites) must not inherit the
+		// last suite's `HELIX_SUITE`, nor a key a suite added.
+		delete process.env.HELIX_SUITE;
+		process.env.HELIX_RETRIES = "3";
+		try {
+			await runSuites(steps(), baseConfig());
+			expect(Object.hasOwn(process.env, "HELIX_SUITE")).toBe(false);
+			expect(process.env.HELIX_RETRIES).toBe("3");
+		} finally {
+			delete process.env.HELIX_RETRIES;
+		}
+	}, 60_000);
+
 	it("caches the failures of every suite, not just the last", async () => {
 		await runSuites(steps(), baseConfig());
 

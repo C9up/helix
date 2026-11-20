@@ -306,7 +306,8 @@ async function watching(
 export interface SuiteRun {
 	/**
 	 * Applied to `process.env` right before this suite runs — how the suite's
-	 * name and retry count reach the workers, which inherit this process's env.
+	 * name and retry count reach the workers, which inherit this process's env —
+	 * and undone once it has run.
 	 */
 	env?: Readonly<Record<string, string>>;
 	config: RunConfig;
@@ -332,13 +333,13 @@ export async function runSuites(
 	const pass = async (): Promise<RunOutcome> => {
 		const outcomes: RunOutcome[] = [];
 		for (const suite of suites) {
-			for (const [key, value] of Object.entries(suite.env ?? {})) {
-				process.env[key] = value;
+			const restoreEnv = applyEnv(suite.env ?? {});
+			let outcome: RunOutcome;
+			try {
+				outcome = await runOnce({ ...suite.config, watch: undefined }, false);
+			} finally {
+				restoreEnv();
 			}
-			const outcome = await runOnce(
-				{ ...suite.config, watch: undefined },
-				false,
-			);
 			outcomes.push(outcome);
 			if (base.bail === true && outcome.exitCode !== 0) break;
 		}
@@ -349,6 +350,31 @@ export async function runSuites(
 
 	if (!base.watch?.enabled) return pass();
 	return watching({ ...base, watch: base.watch }, pass);
+}
+
+/**
+ * Write `env` into `process.env` and return the undo: each key gets back the
+ * value it had, and a key that was absent is deleted again — so a suite's env
+ * exists only while that suite runs, and a later run in the same process does
+ * not inherit the last suite's `HELIX_SUITE`.
+ */
+function applyEnv(env: Readonly<Record<string, string>>): () => void {
+	const previous = new Map<string, string | undefined>();
+	for (const [key, value] of Object.entries(env)) {
+		if (!previous.has(key)) {
+			previous.set(
+				key,
+				Object.hasOwn(process.env, key) ? process.env[key] : undefined,
+			);
+		}
+		process.env[key] = value;
+	}
+	return () => {
+		for (const [key, value] of previous) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	};
 }
 
 /** Fold a sequence of suite outcomes into the one the CLI returns. */
