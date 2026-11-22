@@ -54,7 +54,7 @@
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.12",
+    "@biomejs/biome": "^2.6.8",
     "@types/node": "^22.20.1",
     "@vitest/coverage-v8": "4.1.11",
     "tsx": "^4.23.13",
