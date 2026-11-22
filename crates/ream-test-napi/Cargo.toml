@@ -20,7 +20,7 @@ futures = "0.3"
 num_cpus = "1"
 # The result nonce comes from the OS CSPRNG on every platform
 # (BCryptGenRandom/ProcessPrng on Windows, getrandom(2) or /dev/urandom on unix).
-getrandom = "0.3"
+getrandom = "0.4"
 
 # Signalling a worker's whole process group without `unsafe`.
 [target.'cfg(unix)'.dependencies]
