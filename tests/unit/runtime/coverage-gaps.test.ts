@@ -229,14 +229,22 @@ describe("suite.interpolateEach — object row paths", () => {
 		expect(defined(result.tests[0]).name).toBe('obj={"n":1} done %');
 	});
 
-	it("array row with circular object uses String() fallback", async () => {
+	it("writes a cycle as [Circular] and a BigInt as <n>n, a shared value twice", async () => {
 		const root = resetRoot();
 		type Cyc = { self?: Cyc };
 		const cyc: Cyc = {};
 		cyc.self = cyc;
-		test.each([[cyc]])("cyc=%o", () => {});
+		const shared = { id: 1 };
+		test.each([[cyc], [{ size: 10n }], [{ a: shared, b: shared, cyc }]])(
+			"row=%o",
+			() => {},
+		);
 		const result = await executeRoot(root, "inline");
-		expect(defined(result.tests[0]).name).toContain("[object Object]");
+		expect(defined(result.tests[0]).name).toBe('row={"self":"[Circular]"}');
+		expect(defined(result.tests[1]).name).toBe('row={"size":"10n"}');
+		expect(defined(result.tests[2]).name).toBe(
+			'row={"a":{"id":1},"b":{"id":1},"cyc":{"self":"[Circular]"}}',
+		);
 	});
 });
 
@@ -251,7 +259,7 @@ const unserialisableFixture = path.resolve(
 describe("worker.safeValue — sanitize unserialisable AssertionError values", () => {
 	it("every branch (BigInt, symbol, function, circular, Map, Set, Date, RegExp, Error) survives JSON.stringify", async () => {
 		const result = await runTestFile(unserialisableFixture);
-		expect(result.totals.fail).toBe(9);
+		expect(result.totals.fail).toBe(10);
 		// The whole result must round-trip through JSON without exceptions.
 		const serialised = JSON.stringify(result);
 		expect(serialised).toBeTypeOf("string");
@@ -264,6 +272,9 @@ describe("worker.safeValue — sanitize unserialisable AssertionError values", (
 		expect(serialised).toContain("[Circular]");
 		// BigInt normalised to `<n>n` string form.
 		expect(serialised).toMatch(/"1n"|"2n"/);
+		// A value reached twice is not a cycle: it is written both times.
+		const shared = result.tests.find((t) => t.name === "shared reference");
+		expect(shared?.error?.actual).toEqual({ a: { x: 1 }, b: { x: 1 } });
 	});
 
 	it("plain FileResult also survives (smoke)", async () => {

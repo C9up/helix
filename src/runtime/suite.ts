@@ -711,12 +711,30 @@ type TestApi = {
 	): (...args: Args) => R;
 };
 
+/**
+ * A value as it reads in a test title: JSON, with a BigInt as `<digits>n` and
+ * a cycle as `"[Circular]"`, where `String()` gave `[object Object]`.
+ *
+ * `path` holds the objects from the root to the value being written, so only a
+ * cycle is cut and a value reached through two keys is written under both.
+ */
 function safeStringify(v: unknown): string {
+	const path: object[] = [];
 	try {
-		const s = JSON.stringify(v);
+		const s: string | undefined = JSON.stringify(
+			v,
+			function replace(this: unknown, _key: string, value: unknown) {
+				if (typeof value === "bigint") return `${value}n`;
+				if (typeof value !== "object" || value === null) return value;
+				while (path.length > 0 && path[path.length - 1] !== this) path.pop();
+				if (path.includes(value)) return "[Circular]";
+				path.push(value);
+				return value;
+			},
+		);
 		return s === undefined ? String(v) : s;
 	} catch {
-		// Circular / BigInt / etc.
+		// A toJSON that throws, or a getter that does.
 		return String(v);
 	}
 }

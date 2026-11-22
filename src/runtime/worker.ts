@@ -47,24 +47,40 @@ function assertAbsolute(p: string): void {
 	}
 }
 
-/** Turn values that `JSON.stringify` rejects into readable fallbacks. */
-function safeValue(v: unknown, seen = new WeakSet<object>()): unknown {
+/**
+ * Turn values that `JSON.stringify` rejects into readable fallbacks.
+ *
+ * `path` holds the objects from the root to `v`, so only a cycle becomes
+ * `"[Circular]"`: a value reached through two keys is written under both. The
+ * previous version remembered every object it had seen, and a diff then showed
+ * `"[Circular]"` where the actual value held a shared object.
+ */
+function safeValue(v: unknown, path = new Set<object>()): unknown {
 	if (v === null || v === undefined) return v;
 	if (typeof v === "bigint") return `${v}n`;
 	if (typeof v === "function") return `[Function ${v.name || "anonymous"}]`;
 	if (typeof v === "symbol") return v.toString();
 	if (typeof v !== "object") return v;
-	if (seen.has(v)) return "[Circular]";
-	seen.add(v);
-	if (Array.isArray(v)) return v.map((item) => safeValue(item, seen));
+	if (path.has(v)) return "[Circular]";
+	path.add(v);
+	try {
+		return safeObject(v, path);
+	} finally {
+		path.delete(v);
+	}
+}
+
+/** {@link safeValue} for an object already on `path`. */
+function safeObject(v: object, path: Set<object>): unknown {
+	if (Array.isArray(v)) return v.map((item) => safeValue(item, path));
 	if (v instanceof Map) {
 		const out: Array<[unknown, unknown]> = [];
 		for (const [k, val] of v)
-			out.push([safeValue(k, seen), safeValue(val, seen)]);
+			out.push([safeValue(k, path), safeValue(val, path)]);
 		return { __type: "Map", entries: out };
 	}
 	if (v instanceof Set) {
-		return { __type: "Set", values: [...v].map((x) => safeValue(x, seen)) };
+		return { __type: "Set", values: [...v].map((x) => safeValue(x, path)) };
 	}
 	if (v instanceof Date) return { __type: "Date", iso: v.toISOString() };
 	if (v instanceof RegExp)
@@ -79,7 +95,7 @@ function safeValue(v: unknown, seen = new WeakSet<object>()): unknown {
 	}
 	const rec: Record<string, unknown> = {};
 	for (const key of Object.keys(v)) {
-		rec[key] = safeValue(Reflect.get(v, key), seen);
+		rec[key] = safeValue(Reflect.get(v, key), path);
 	}
 	return rec;
 }

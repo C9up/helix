@@ -45,3 +45,8 @@ test("RegExp", () => {
 test("Error instance", () => {
 	expect(new Error("a")).toEqual(new Error("b"));
 });
+
+test("shared reference", () => {
+	const shared = { x: 1 };
+	expect({ a: shared, b: shared }).toEqual({ a: { x: 1 }, b: { x: 2 } });
+});
