@@ -16,6 +16,7 @@
  */
 
 export * from "./container/index.js";
+export * as errors from "./errors.js";
 export type {
 	Assert,
 	Assertion,
@@ -66,7 +67,6 @@ export type {
 	Vi,
 } from "./runtime/index.js";
 export {
-	AssertionError,
 	afterAll,
 	afterEach,
 	beforeAll,

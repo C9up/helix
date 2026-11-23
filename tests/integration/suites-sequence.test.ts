@@ -39,6 +39,9 @@ beforeEach(async () => {
 	root = await mkdtemp(path.join(os.tmpdir(), "helix-suites-"));
 	await mkdir(path.join(root, "unit"), { recursive: true });
 	await mkdir(path.join(root, "func"), { recursive: true });
+	// An ES module project, as every helix consumer is: loaded as CommonJS,
+	// the runtime's own package imports (import-only exports) do not resolve.
+	await writeFile(path.join(root, "package.json"), '{"type":"module"}\n');
 	// Each file asserts the suite name IT should have been run under, so a
 	// leaked or missing `HELIX_SUITE` shows up as a failing test, not silence.
 	await writeFile(

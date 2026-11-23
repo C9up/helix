@@ -19,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { StringDecoder } from "node:string_decoder";
+import { E_HELIX_INVALID_THREADS } from "../errors.js";
 import { FRAME_PREFIX, PRE_HANDSHAKE_NONCE } from "../runtime/ipc-protocol.js";
 import type { FileResult } from "../runtime/run.js";
 import type { Reporter } from "./reporter.js";
@@ -217,9 +218,7 @@ class Semaphore {
 	readonly #waiters: Array<() => void> = [];
 	constructor(initial: number) {
 		if (!Number.isFinite(initial) || initial < 1) {
-			throw new Error(
-				`Semaphore: initial permits must be a finite number >= 1, got ${initial}`,
-			);
+			throw new E_HELIX_INVALID_THREADS([String(initial)]);
 		}
 		this.#permits = Math.floor(initial);
 	}

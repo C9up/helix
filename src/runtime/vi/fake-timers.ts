@@ -8,6 +8,11 @@
  * Zero dependency on `@sinonjs/fake-timers` — we re-implement the queue.
  */
 
+import {
+	E_HELIX_FAKE_TIMERS_NOT_INSTALLED,
+	E_HELIX_INVALID_TIME,
+	E_HELIX_TIMER_LOOP,
+} from "../../errors.js";
 import { getRealNow } from "./system-time.js";
 
 type TimerCallback = (...args: unknown[]) => void;
@@ -297,9 +302,7 @@ export function createFakeTimerController(): FakeTimerController {
 
 	function requireState(): FakeTimerState {
 		if (!state) {
-			throw new Error(
-				"vi: fake timers not installed. Call vi.useFakeTimers() first.",
-			);
+			throw new E_HELIX_FAKE_TIMERS_NOT_INSTALLED();
 		}
 		return state;
 	}
@@ -312,9 +315,9 @@ export function createFakeTimerController(): FakeTimerController {
 		const MAX = 10_000;
 		while (true) {
 			if (++iterations > MAX) {
-				throw new Error(
+				throw new E_HELIX_TIMER_LOOP([
 					`vi: fake-timer drain exceeded ${MAX} iterations — likely a self-rescheduling immediate / interval. Use runOnlyPendingTimers or clearAllTimers.`,
-				);
+				]);
 			}
 			// The winner is kept as the timer itself, not just its index: read
 			// back out of the queue afterwards it was "a timer, or nothing", and
@@ -357,9 +360,9 @@ export function createFakeTimerController(): FakeTimerController {
 		now: () => state?.now ?? getRealNow(),
 		advanceBy(ms: number) {
 			if (ms < 0) {
-				throw new Error(
+				throw new E_HELIX_INVALID_TIME([
 					`vi.advanceTimersByTime: negative delta (${ms}) is not supported`,
-				);
+				]);
 			}
 			const s = requireState();
 			drainUntil(s.now + ms);
@@ -370,9 +373,9 @@ export function createFakeTimerController(): FakeTimerController {
 			while (s.queue.length > 0) {
 				iterations += 1;
 				if (iterations > 10_000) {
-					throw new Error(
+					throw new E_HELIX_TIMER_LOOP([
 						"vi.runAllTimers: exceeded 10 000 iterations — likely a self-rescheduling interval or immediate. Use runOnlyPendingTimers or advanceTimersByTime instead.",
-					);
+					]);
 				}
 				let earliest = Number.POSITIVE_INFINITY;
 				for (const t of s.queue) {

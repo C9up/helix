@@ -23,6 +23,7 @@
  * inside a single file must serialise their freezes themselves.
  */
 
+import { E_HELIX_INVALID_TIME, E_HELIX_NO_ACTIVE_TEST } from "../errors.js";
 import { inTestContext, registerTestCleanup } from "../runtime/test-context.js";
 import { vi } from "../runtime/vi/index.js";
 
@@ -99,12 +100,14 @@ function queueClockRestore(): void {
 export function travel(amount: number, unit: TimeUnit = "ms"): void {
 	requireTestContext("travel");
 	if (!Number.isFinite(amount)) {
-		throw new Error(`helix.time.travel: amount must be finite, got ${amount}.`);
+		throw new E_HELIX_INVALID_TIME([
+			`helix.time.travel: amount must be finite, got ${amount}.`,
+		]);
 	}
 	if ((unit === "month" || unit === "year") && !Number.isInteger(amount)) {
-		throw new Error(
+		throw new E_HELIX_INVALID_TIME([
 			`helix.time.travel: '${unit}' requires an integer amount, got ${amount}. Calendar units don't compose cleanly with fractions.`,
-		);
+		]);
 	}
 	const base = vi.getMockedSystemTime() ?? Date.now();
 	const next = applyDelta(base, amount, unit);
@@ -146,9 +149,9 @@ export function frozenAt(): number | null {
 
 function requireTestContext(verb: string): void {
 	if (!inTestContext()) {
-		throw new Error(
+		throw new E_HELIX_NO_ACTIVE_TEST([
 			`helix.time.${verb}: must be called inside a test (no active test frame). Calls from top-level setup leak across tests — use vi.setSystemTime directly with manual cleanup if that is what you want.`,
-		);
+		]);
 	}
 }
 
@@ -161,9 +164,9 @@ function inputToMs(input: TimeInput): number {
 	} else if (typeof input === "string") {
 		ms = Date.parse(input);
 		if (Number.isNaN(ms)) {
-			throw new Error(
+			throw new E_HELIX_INVALID_TIME([
 				`helix.time: cannot parse '${input}' as a date — pass an ISO 8601 string, Date, number (epoch ms), or an object with toMillis().`,
-			);
+			]);
 		}
 	} else if (
 		typeof input === "object" &&
@@ -173,15 +176,15 @@ function inputToMs(input: TimeInput): number {
 	) {
 		const result: unknown = input.toMillis();
 		if (typeof result !== "number") {
-			throw new Error(
+			throw new E_HELIX_INVALID_TIME([
 				`helix.time: input.toMillis() must return a number, got ${typeof result}.`,
-			);
+			]);
 		}
 		ms = result;
 	} else {
-		throw new Error(
+		throw new E_HELIX_INVALID_TIME([
 			`helix.time: unsupported input type ${typeof input}. Use string / Date / number / { toMillis() }.`,
-		);
+		]);
 	}
 	requireInDateRange(ms, "freeze");
 	return ms;
@@ -189,14 +192,14 @@ function inputToMs(input: TimeInput): number {
 
 function requireInDateRange(ms: number, verb: string): void {
 	if (!Number.isFinite(ms)) {
-		throw new Error(
+		throw new E_HELIX_INVALID_TIME([
 			`helix.time.${verb}: epoch must be finite, got ${ms}. (Did you pass an Invalid Date or a NaN?)`,
-		);
+		]);
 	}
 	if (Math.abs(ms) > JS_DATE_MAX) {
-		throw new Error(
+		throw new E_HELIX_INVALID_TIME([
 			`helix.time.${verb}: epoch ${ms} exceeds the JS Date range (±8.64e15 ms). The resulting clock would be 'Invalid Date'.`,
-		);
+		]);
 	}
 }
 
@@ -231,9 +234,9 @@ function applyDelta(base: number, amount: number, unit: TimeUnit): number {
 			// Defensive — TS narrows this branch to `never`, but a
 			// runtime cast (`unit as TimeUnit`) could land here.
 			const exhaustive: never = unit;
-			throw new Error(
+			throw new E_HELIX_INVALID_TIME([
 				`helix.time.travel: unknown unit '${String(exhaustive)}'.`,
-			);
+			]);
 		}
 	}
 }

@@ -1,35 +1,10 @@
-/**
- * Assertion error thrown by `expect` — carries structured fields so runners
- * (Vitest-compatible reporters, IDE integrations) can render diffs.
- */
-export interface AssertionErrorInit {
-	message: string;
-	actual?: unknown;
-	expected?: unknown;
-	operator?: string;
-	showDiff?: boolean;
-}
+import { E_HELIX_ASSERTION_FAILED } from "../errors.js";
 
-export class AssertionError extends Error {
-	readonly actual: unknown;
-	readonly expected: unknown;
-	readonly operator: string | undefined;
-	readonly showDiff: boolean;
+export type { AssertionErrorInit } from "../errors.js";
 
-	constructor(init: AssertionErrorInit) {
-		super(init.message);
-		this.name = "AssertionError";
-		this.actual = init.actual;
-		this.expected = init.expected;
-		this.operator = init.operator;
-		this.showDiff = init.showDiff ?? true;
-		// V8 only: strip framework frames so the stack points at user code.
-		if (typeof Error.captureStackTrace === "function") {
-			Error.captureStackTrace(this, AssertionError);
-		}
-	}
-}
-
-export function isAssertionError(value: unknown): value is AssertionError {
-	return value instanceof AssertionError;
+/** Whether `value` is the error a failed `expect` or `assert` throws. */
+export function isAssertionError(
+	value: unknown,
+): value is E_HELIX_ASSERTION_FAILED {
+	return value instanceof E_HELIX_ASSERTION_FAILED;
 }

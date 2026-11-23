@@ -18,6 +18,12 @@
  * incremented by pass-through from the outer one.
  */
 
+import {
+	E_HELIX_ALREADY_SPIED,
+	E_HELIX_SPY_NO_ACCESSOR,
+	E_HELIX_SPY_NO_PROPERTY,
+	E_HELIX_SPY_NOT_FUNCTION,
+} from "../../errors.js";
 import { createSpy, isSpy, type Spy } from "./spy.js";
 
 type AccessorKind = "get" | "set";
@@ -39,9 +45,7 @@ function findDescriptor(
 		}
 		cursor = Object.getPrototypeOf(cursor);
 	}
-	throw new Error(
-		`vi.spyOn: property "${String(key)}" does not exist on the target`,
-	);
+	throw new E_HELIX_SPY_NO_PROPERTY([String(key)]);
 }
 
 function buildRestore(
@@ -72,9 +76,7 @@ export function spyOn<Obj extends object, Key extends keyof Obj>(
 
 	// Double-spy guard: refuse to spy on an already-spied value.
 	if (descriptor.value !== undefined && isSpy(descriptor.value)) {
-		throw new Error(
-			`vi.spyOn: "${label}" is already a spy. Call mockRestore() before spying again.`,
-		);
+		throw new E_HELIX_ALREADY_SPIED([label]);
 	}
 
 	const restore = buildRestore(obj, key, ownDescBefore, onPrototype);
@@ -85,9 +87,9 @@ export function spyOn<Obj extends object, Key extends keyof Obj>(
 		const originalSet = descriptor.set;
 		if (kind === "get") {
 			if (!originalGet) {
-				throw new Error(
+				throw new E_HELIX_SPY_NO_ACCESSOR([
 					`vi.spyOn: "${label}" has no getter (pass { accessor: "set" } to spy on the setter)`,
-				);
+				]);
 			}
 			// Use `function` so the shim + spy forward the caller's `this`.
 			const spy = createSpy({
@@ -108,7 +110,7 @@ export function spyOn<Obj extends object, Key extends keyof Obj>(
 			return spy;
 		}
 		if (!originalSet) {
-			throw new Error(`vi.spyOn: "${label}" has no setter`);
+			throw new E_HELIX_SPY_NO_ACCESSOR([`vi.spyOn: "${label}" has no setter`]);
 		}
 		const spy = createSpy<(v: unknown) => void>({
 			name: label,
@@ -130,9 +132,7 @@ export function spyOn<Obj extends object, Key extends keyof Obj>(
 
 	const originalValue = descriptor.value;
 	if (typeof originalValue !== "function") {
-		throw new Error(
-			`vi.spyOn: "${label}" is not a function (got ${typeof originalValue}). Pass { accessor } for accessors.`,
-		);
+		throw new E_HELIX_SPY_NOT_FUNCTION([label, typeof originalValue]);
 	}
 	const originalFn = originalValue;
 	const spy = createSpy({

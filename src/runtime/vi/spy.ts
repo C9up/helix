@@ -4,6 +4,8 @@
  * matchers in `matchers.ts` (`toHaveBeenCalled*`) recognise it.
  */
 
+import { E_HELIX_INTERNAL } from "../../errors.js";
+
 /**
  * One call's outcome. `"incomplete"` is pushed synchronously at call entry and
  * replaced once the call returns or throws — as in Vitest, so
@@ -228,7 +230,7 @@ export function createSpy<Fn extends AnyFunction = AnyFn>(
 		},
 	});
 	if (!hasLiveAccessors(withMethods)) {
-		throw new Error("helix: spy accessors were not installed");
+		throw new E_HELIX_INTERNAL(["helix: spy accessors were not installed"]);
 	}
 	const spy = withMethods;
 	Object.defineProperty(spy, "name", {

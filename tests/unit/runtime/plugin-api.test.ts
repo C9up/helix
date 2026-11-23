@@ -5,6 +5,7 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
+import { errors } from "../../../src/index.js";
 import { cliArgs, resetCLIArgs } from "../../../src/runtime/cli-args.js";
 import {
 	configure,
@@ -13,7 +14,6 @@ import {
 	type PluginApi,
 } from "../../../src/runtime/configure.js";
 import { executeRoot } from "../../../src/runtime/run.js";
-import { RunnerNotDrivableError } from "../../../src/runtime/runner.js";
 import { resetRoot, test } from "../../../src/runtime/suite.js";
 import { resetTaps, tappedBail } from "../../../src/runtime/suite-taps.js";
 
@@ -423,8 +423,13 @@ describe("plugin API — the runner surface", () => {
 		const api = await capture();
 
 		for (const method of ["add", "start", "exec", "end"] as const) {
-			expect(() => api.runner[method]()).toThrow(RunnerNotDrivableError);
+			expect(() => api.runner[method]()).toThrow(
+				errors.E_HELIX_RUNNER_NOT_DRIVABLE,
+			);
 			expect(() => api.runner[method]()).toThrow(/one process per test file/);
+			expect(() => api.runner[method]()).toThrow(
+				expect.objectContaining({ code: "E_HELIX_RUNNER_NOT_DRIVABLE" }),
+			);
 		}
 	});
 });

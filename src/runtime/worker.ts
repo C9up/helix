@@ -13,6 +13,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { E_HELIX_RELATIVE_PATH } from "../errors.js";
 import { loadBootstrap } from "./bootstrap.js";
 import { cliArgs, runningInCI } from "./cli-args.js";
 import { drainRunnerTeardowns, getConfiguredDefaults } from "./configure.js";
@@ -41,9 +42,7 @@ export interface RunFileOptions extends ExecuteOptions {
 
 function assertAbsolute(p: string): void {
 	if (!path.isAbsolute(p)) {
-		throw new Error(
-			`runTestFile: expected absolute path, got "${p}". Resolve against cwd or __dirname before calling.`,
-		);
+		throw new E_HELIX_RELATIVE_PATH([p]);
 	}
 }
 

@@ -13,6 +13,10 @@
  * app, callers can pass the container explicitly to `overrideOn`.
  */
 
+import {
+	E_HELIX_NO_ACTIVE_CONTAINER,
+	E_HELIX_NO_ACTIVE_TEST,
+} from "../errors.js";
 import { inTestContext, registerTestCleanup } from "../runtime/test-context.js";
 import type { ContainerLike, ContainerToken } from "../runtime/vi/index.js";
 
@@ -58,14 +62,12 @@ export function clearActiveContainer(): void {
  */
 export function override(token: ContainerToken, value: unknown): void {
 	if (!inTestContext()) {
-		throw new Error(
+		throw new E_HELIX_NO_ACTIVE_TEST([
 			"helix.override: must be called inside a test (no active test frame). Calls from top-level setup leak across tests — use container.override() directly with manual restore() if that is what you want.",
-		);
+		]);
 	}
 	if (!activeContainer) {
-		throw new Error(
-			"helix.override: no active container. Call helix.useContainer(container) before invoking override(), or use overrideOn(container, token, value).",
-		);
+		throw new E_HELIX_NO_ACTIVE_CONTAINER();
 	}
 	overrideOn(activeContainer, token, value);
 }

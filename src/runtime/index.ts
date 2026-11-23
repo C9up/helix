@@ -6,10 +6,11 @@
  * process, a Bun worker, or a Rust-spawned worker all load the same module.
  */
 
+export * as errors from "../errors.js";
 export type { Assert } from "./assert.js";
 export { createAssert } from "./assert.js";
 export type { AssertionErrorInit } from "./assertion-error.js";
-export { AssertionError, isAssertionError } from "./assertion-error.js";
+export { isAssertionError } from "./assertion-error.js";
 export type { AsymmetricMatcher, Constructor } from "./asymmetric.js";
 export type { CLIArgs } from "./cli-args.js";
 export type {

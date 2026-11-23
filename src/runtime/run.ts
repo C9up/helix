@@ -7,7 +7,12 @@
  * tree, non-`only` paths are downgraded to `skip` before execution.
  */
 
-import { AssertionError } from "./assertion-error.js";
+import {
+	E_HELIX_ASSERTION_FAILED,
+	E_HELIX_INTERNAL,
+	E_HELIX_TEST_ABORTED,
+	E_HELIX_TIMEOUT,
+} from "../errors.js";
 import { buildTestContext } from "./context.js";
 import {
 	type EmittedDataset,
@@ -256,7 +261,7 @@ function withThrown(
 const BAIL_SKIP_REASON = "Skipped due to bail mode";
 
 export function serializeError(err: unknown): SerializedError {
-	if (err instanceof AssertionError) {
+	if (err instanceof E_HELIX_ASSERTION_FAILED) {
 		return withThrown(
 			{
 				name: err.name,
@@ -418,7 +423,7 @@ function makeTimeoutController(ms: number, label: string): TimeoutController {
 	const arm = () => {
 		if (current <= 0) return;
 		timer = setTimeout(() => {
-			rejectTimeout?.(new Error(`${label} exceeded ${current}ms timeout`));
+			rejectTimeout?.(new E_HELIX_TIMEOUT([label, current]));
 		}, current);
 		timer.unref?.();
 	};
@@ -521,7 +526,7 @@ function testMeta(node: TestNode, ctx: RunCtx): Record<string, unknown> {
 		fileName: ctx.file,
 		// helix's escape hatch: fail the running test with a given message.
 		abort: (message: string): never => {
-			throw new Error(message);
+			throw new E_HELIX_TEST_ABORTED([message]);
 		},
 	};
 }
@@ -841,7 +846,7 @@ async function runOneTest(
 	}
 	// `attempts` is at least 1, so the loop ran.
 	if (last === undefined) {
-		throw new Error(`internal: test "${fullName}" ran no attempt`);
+		throw new E_HELIX_INTERNAL([`internal: test "${fullName}" ran no attempt`]);
 	}
 	ctx.flatTests.push(last);
 	if (ctx.bail && last.status === "fail") ctx.bailed = true;

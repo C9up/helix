@@ -316,6 +316,9 @@ describe("diff coverage — end-to-end with synthetic git repo", () => {
 		// for diff-cov resolution).
 		const runtimeIndex = path.resolve(here, "../../src/runtime/index.ts");
 		mkdirSync(path.join(tmp, "tests"));
+		// An ES module project, as every helix consumer is: loaded as
+		// CommonJS, the runtime's own package imports do not resolve.
+		writeFileSync(path.join(tmp, "package.json"), '{"type":"module"}\n');
 		writeFileSync(
 			path.join(tmp, "tests/empty.test.ts"),
 			`import { test } from "${runtimeIndex}";\ntest("noop", () => {});\n`,

@@ -10,6 +10,7 @@ import type {
 	Thresholds,
 	ThresholdViolation,
 } from "./types.js";
+import { E_HELIX_INVALID_COVERAGE_THRESHOLD } from "../../errors.js";
 
 const METRICS: Array<keyof Thresholds> = [
 	"lines",
@@ -28,12 +29,12 @@ function validate(thresholds: Thresholds): void {
 		const v = thresholds[metric];
 		if (v === undefined) continue;
 		if (typeof v !== "number" || !Number.isFinite(v)) {
-			throw new Error(
+			throw new E_HELIX_INVALID_COVERAGE_THRESHOLD([
 				`coverage threshold ${metric}: expected a finite number, got ${v}`,
-			);
+			]);
 		}
 		if (v < 0 || v > 100) {
-			throw new Error(`coverage threshold ${metric}: expected 0–100, got ${v}`);
+			throw new E_HELIX_INVALID_COVERAGE_THRESHOLD([`coverage threshold ${metric}: expected 0–100, got ${v}`]);
 		}
 	}
 }

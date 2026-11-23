@@ -8,7 +8,7 @@
  *   - All four combinations: `.resolves.not`, `.rejects.not`, `.not.resolves`, `.not.rejects`
  */
 
-import { AssertionError } from "./assertion-error.js";
+import { E_HELIX_ASSERTION_FAILED, E_HELIX_INTERNAL } from "../errors.js";
 import {
 	type AsymmetricMatcher,
 	any,
@@ -108,7 +108,7 @@ function evaluate(ctx: EvalContext, name: MatcherName, args: unknown[]): void {
 		// a throwing `Symbol.hasInstance`). Surface it as a normal assertion
 		// failure so reporters can render it uniformly.
 		const why = err instanceof Error ? err.message : String(err);
-		throw new AssertionError({
+		throw new E_HELIX_ASSERTION_FAILED({
 			message: labelled(ctx.label, `matcher ${name} threw: ${why}`),
 			actual: ctx.received,
 			expected: args.length === 1 ? args[0] : args,
@@ -118,7 +118,7 @@ function evaluate(ctx: EvalContext, name: MatcherName, args: unknown[]): void {
 	const pass = ctx.negate ? !result.pass : result.pass;
 	if (pass) return;
 	const prefix = ctx.negate ? "expected NOT: " : "";
-	throw new AssertionError({
+	throw new E_HELIX_ASSERTION_FAILED({
 		message: labelled(ctx.label, `${prefix}${result.message()}`),
 		actual: ctx.received,
 		expected: args,
@@ -146,7 +146,9 @@ function hasEveryMatcher<Chain extends object>(api: object): api is Chain {
 
 function complete<Chain extends object>(api: object): Chain {
 	if (!hasEveryMatcher<Chain>(api)) {
-		throw new Error("helix: an expect() chain is missing a matcher");
+		throw new E_HELIX_INTERNAL([
+			"helix: an expect() chain is missing a matcher",
+		]);
 	}
 	return api;
 }
@@ -177,7 +179,7 @@ function buildAsync(
 	for (const name of matcherNames) {
 		const settle = async (args: unknown[]): Promise<void> => {
 			if (!isThenable(received)) {
-				throw new AssertionError({
+				throw new E_HELIX_ASSERTION_FAILED({
 					message: labelled(
 						label,
 						`expected a Promise (for .${mode}), got ${typeof received}`,
@@ -196,7 +198,7 @@ function buildAsync(
 			}
 			if (mode === "resolves") {
 				if (didReject) {
-					throw new AssertionError({
+					throw new E_HELIX_ASSERTION_FAILED({
 						message: labelled(
 							label,
 							`expected promise to resolve, but it rejected with ${String(rejected)}`,
@@ -208,7 +210,7 @@ function buildAsync(
 				return;
 			}
 			if (!didReject) {
-				throw new AssertionError({
+				throw new E_HELIX_ASSERTION_FAILED({
 					message: labelled(
 						label,
 						`expected promise to reject, but it resolved with ${String(resolved)}`,

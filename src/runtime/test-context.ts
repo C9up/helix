@@ -18,6 +18,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { E_HELIX_NO_ACTIVE_TEST } from "../errors.js";
 import type { TestInstance } from "./suite.js";
 
 /**
@@ -164,9 +165,9 @@ export function getActiveTest(): TestInstance | undefined {
 export function getActiveTestOrFail(): TestInstance {
 	const test = getFrameTest();
 	if (test === undefined) {
-		throw new Error(
+		throw new E_HELIX_NO_ACTIVE_TEST([
 			"getActiveTestOrFail(): no test is running. Call it from inside a test body, a hook, or a resource macro.",
-		);
+		]);
 	}
 	return test;
 }

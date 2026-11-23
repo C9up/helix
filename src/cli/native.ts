@@ -12,6 +12,7 @@
  * fields automatically (`timeout_ms` → `timeoutMs`, etc.).
  */
 
+import { E_HELIX_NATIVE_REQUIRED } from "../errors.js";
 import {
 	hasFunctions,
 	loadNativeBinary,
@@ -58,16 +59,18 @@ export function getNative(): NativeExports {
 	}
 	const { suffix, cause } = attempt;
 	if (suffix === undefined) {
-		throw new Error(
+		throw new E_HELIX_NATIVE_REQUIRED([
 			`No native binary for this platform for @c9up/helix native binary. Supported: ${supportedTargets().join(", ")}.`,
-		);
+		]);
 	}
 	const causeMessage = cause instanceof Error ? cause.message : String(cause);
 	const muslHint = suffix.endsWith("-gnu")
 		? " If you are on Alpine/musl, note the prebuilt binaries target glibc (musl is not a supported target)."
 		: "";
-	throw new Error(
-		`@c9up/helix native binary 'index.${suffix}.node' not found, failed to load, or is stale — run 'pnpm --filter @c9up/helix build:napi' to build it.${muslHint} Cause: ${causeMessage}`,
+	throw new E_HELIX_NATIVE_REQUIRED(
+		[
+			`@c9up/helix native binary 'index.${suffix}.node' not found, failed to load, or is stale — run 'pnpm --filter @c9up/helix build:napi' to build it.${muslHint} Cause: ${causeMessage}`,
+		],
 		{ cause },
 	);
 }

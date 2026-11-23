@@ -18,6 +18,10 @@ import {
 	statSync,
 } from "node:fs";
 import path from "node:path";
+import {
+	E_HELIX_INVALID_WATCH_OPTIONS,
+	E_HELIX_WATCH_FAILED,
+} from "../../errors.js";
 import { compileGlobs, matchesAnyGlob } from "../coverage/glob.js";
 
 export interface CreateWatcherOptions {
@@ -62,14 +66,14 @@ export function createWatcher(opts: CreateWatcherOptions): WatcherHandle {
 		opts.debounceMs > DEBOUNCE_MAX ||
 		!Number.isFinite(opts.debounceMs)
 	) {
-		throw new Error(
+		throw new E_HELIX_INVALID_WATCH_OPTIONS([
 			`createWatcher: debounceMs must be in [${DEBOUNCE_MIN}, ${DEBOUNCE_MAX}], got ${opts.debounceMs}`,
-		);
+		]);
 	}
 	if (opts.include.length === 0) {
-		throw new Error(
+		throw new E_HELIX_INVALID_WATCH_OPTIONS([
 			"createWatcher: include must be non-empty (an empty include matches nothing — silent watcher).",
-		);
+		]);
 	}
 
 	const include = compileGlobs(opts.include);
@@ -140,10 +144,9 @@ export function createWatcher(opts: CreateWatcherOptions): WatcherHandle {
 			arm();
 		});
 	} catch (err) {
-		throw new Error(
-			`createWatcher: fs.watch failed on ${root}: ${
-				err instanceof Error ? err.message : String(err)
-			}`,
+		throw new E_HELIX_WATCH_FAILED(
+			[root, err instanceof Error ? err.message : String(err)],
+			{ cause: err },
 		);
 	}
 

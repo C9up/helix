@@ -16,6 +16,8 @@
  * still `instanceof Date`.
  */
 
+import { E_HELIX_INVALID_TIME } from "../../errors.js";
+
 const OriginalDate = globalThis.Date;
 const originalNow = OriginalDate.now.bind(OriginalDate);
 
@@ -65,12 +67,14 @@ export function setFakeEpoch(clock: SystemClock, time: Date | number): void {
 	} else if (typeof time === "number") {
 		epoch = time;
 	} else {
-		throw new Error(
+		throw new E_HELIX_INVALID_TIME([
 			`vi.setSystemTime: expected Date or number, got ${typeof time}`,
-		);
+		]);
 	}
 	if (!Number.isFinite(epoch)) {
-		throw new Error(`vi.setSystemTime: expected a finite epoch, got ${epoch}`);
+		throw new E_HELIX_INVALID_TIME([
+			`vi.setSystemTime: expected a finite epoch, got ${epoch}`,
+		]);
 	}
 	clock.fakeEpoch = epoch;
 	sync();

@@ -16,6 +16,8 @@
  * select the wrong files — the one thing a file selector must not do.
  */
 
+import { E_HELIX_INVALID_GLOB } from "../errors.js";
+
 const GLOB_CHARS = /[*?{}()[\]]/;
 
 /** Whether an entry is a pattern rather than a plain path. */
@@ -152,10 +154,7 @@ export function globToRegExp(entry: string): RegExp {
 		// An unbalanced `{`, `(` or `[` compiles to an unbalanced regex. Raw, the
 		// failure reads as an internal regex the author never wrote — name their
 		// pattern instead, since that is what they have to fix.
-		throw new Error(
-			`Cannot read "${entry}" as a glob pattern — check that every {, ( and [ is closed.`,
-			{ cause },
-		);
+		throw new E_HELIX_INVALID_GLOB([entry], { cause });
 	}
 }
 

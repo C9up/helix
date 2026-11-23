@@ -327,11 +327,11 @@ describe("run.executeRoot — root-level hook failures", () => {
 });
 
 describe("barrels re-export the expected surface", () => {
-	it("main barrel exposes vi + describe + expect + AssertionError", () => {
+	it("main barrel exposes vi + describe + expect + errors", () => {
 		expect(typeof helixMain.describe).toBe("function");
 		expect(typeof helixMain.expect).toBe("function");
 		expect(typeof helixMain.vi).toBe("object");
-		expect(helixMain.AssertionError).toBeDefined();
+		expect(helixMain.errors.E_HELIX_ASSERTION_FAILED).toBeDefined();
 	});
 
 	it("runtime barrel re-exports the full runtime surface", () => {

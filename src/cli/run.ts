@@ -18,6 +18,7 @@ import { rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { E_HELIX_INVALID_DIFF_COVERAGE } from "../errors.js";
 import type { FileResult } from "../runtime/run.js";
 import {
 	type DiffOptions,
@@ -499,9 +500,9 @@ function assertDiffCoverageConfig(config: RunConfig, root: string): void {
 	// Diff-cov requires the full-tree coverage to be enabled — it has nothing
 	// to overlay otherwise.
 	if (config.coverage?.enabled !== true) {
-		throw new Error(
+		throw new E_HELIX_INVALID_DIFF_COVERAGE([
 			"diffCoverage.enabled requires coverage.enabled — diff-cov has nothing to overlay otherwise.",
-		);
+		]);
 	}
 
 	// Diff-cov spawns git in `diffCoverage.cwd` (defaulting to `coverage.root`).
@@ -526,9 +527,9 @@ function assertDiffCoverageConfig(config: RunConfig, root: string): void {
 		!path.isAbsolute(diffUnderCov);
 	const equal = covUnderDiff === "";
 	if (!equal && !covDescendantOfDiff && !diffDescendantOfCov) {
-		throw new Error(
+		throw new E_HELIX_INVALID_DIFF_COVERAGE([
 			`diffCoverage.cwd (${diffCwd}) and coverage.root (${covRoot}) are disjoint paths; diff entries would never overlay coverage.`,
-		);
+		]);
 	}
 }
 

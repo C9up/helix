@@ -17,6 +17,7 @@ import { overlay } from "./overlay.js";
 import { parseDiff } from "./parse.js";
 import { diffJson, diffTextSummary } from "./reporters.js";
 import type { DiffOptions, DiffSummary } from "./types.js";
+import { E_HELIX_INVALID_COVERAGE_THRESHOLD } from "../../../errors.js";
 
 export type { DiffOptions, DiffSummary } from "./types.js";
 
@@ -82,9 +83,9 @@ function validateDiffThresholds(t: Thresholds | undefined): void {
 	if (typeof t.branches === "number" && t.branches > 0)
 		unsupported.push("branches");
 	if (unsupported.length > 0) {
-		throw new Error(
+		throw new E_HELIX_INVALID_COVERAGE_THRESHOLD([
 			`diff-cov thresholds: ${unsupported.join(", ")} are not supported (line-only). Drop those keys.`,
-		);
+		]);
 	}
 }
 

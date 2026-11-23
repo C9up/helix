@@ -5,12 +5,12 @@
  * assertion so `assert.plan(n)` / `expect.assertions(n)` stay accurate.
  */
 
-import { AssertionError } from "./assertion-error.js";
+import { E_HELIX_ASSERTION_FAILED } from "../errors.js";
 import { equals } from "./equals.js";
 import { recordAssertion, setExpectedAssertions } from "./test-context.js";
 
 function raise(message: string, actual?: unknown, expected?: unknown): never {
-	throw new AssertionError({ message, actual, expected });
+	throw new E_HELIX_ASSERTION_FAILED({ message, actual, expected });
 }
 
 function ok(
@@ -1308,7 +1308,7 @@ export function createAssert(): Assert {
 			) {
 				raise(actualOrMessage ?? "assert.fail()");
 			}
-			throw new AssertionError({
+			throw new E_HELIX_ASSERTION_FAILED({
 				message: message ?? "assert.fail()",
 				actual: actualOrMessage,
 				expected,

@@ -8,6 +8,12 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import {
+	E_HELIX_ASYNC_DESCRIBE,
+	E_HELIX_INTERNAL,
+	E_HELIX_NESTED_GROUP,
+	E_HELIX_NO_ACTIVE_TEST,
+} from "../errors.js";
 import type { TestContext } from "./context.js";
 import { getFrameTest, type TestCleanup } from "./test-context.js";
 import { isThenable } from "./thenable.js";
@@ -374,7 +380,7 @@ export async function withCollection(
 function current(): SuiteNode {
 	const { stack } = currentContext();
 	const top = stack[stack.length - 1];
-	if (!top) throw new Error("internal: suite stack empty");
+	if (!top) throw new E_HELIX_INTERNAL(["internal: suite stack empty"]);
 	return top;
 }
 
@@ -583,9 +589,7 @@ function registerSuite(name: string, mode: RunMode, body: SuiteFn): void {
 	// wrong parent after the first `await` (because we've already popped).
 	// Fail loudly rather than silently mis-collect.
 	if (isThenable(result)) {
-		throw new Error(
-			`describe(${JSON.stringify(name)}): body returned a Promise. Async describe is not supported — await the setup in a \`beforeAll\` hook instead.`,
-		);
+		throw new E_HELIX_ASYNC_DESCRIBE([JSON.stringify(name)]);
 	}
 }
 
@@ -923,9 +927,7 @@ const testGroup: TestApi["group"] = (
 		ancestor = ancestor.parent
 	) {
 		if (ancestor.isGroup) {
-			throw new Error(
-				`test.group("${name}") cannot be nested inside group "${ancestor.name}" — helix does not allow nested groups.`,
-			);
+			throw new E_HELIX_NESTED_GROUP([name, ancestor.name]);
 		}
 	}
 	// A group IS a suite. Build ONE instance that is the body handle, the value
@@ -978,7 +980,9 @@ const testGroup: TestApi["group"] = (
 	});
 	// `registerSuite` ran the body synchronously, so `instance` is set.
 	if (instance === undefined) {
-		throw new Error(`internal: group("${name}") instance was not built`);
+		throw new E_HELIX_INTERNAL([
+			`internal: group("${name}") instance was not built`,
+		]);
 	}
 	return instance;
 };
@@ -989,9 +993,9 @@ const testMacro: TestApi["macro"] = <Args extends unknown[], R>(
 	return (...args: Args): R => {
 		const t = getFrameTest();
 		if (t === undefined) {
-			throw new Error(
+			throw new E_HELIX_NO_ACTIVE_TEST([
 				"test.macro(...): the returned function must be invoked inside a running test.",
-			);
+			]);
 		}
 		return callback(t, ...args);
 	};

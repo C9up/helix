@@ -1,16 +1,16 @@
 import { describe, it, expect as vExpect } from "vitest";
-import { AssertionError } from "../../../src/runtime/assertion-error.js";
+import { E_HELIX_ASSERTION_FAILED } from "../../../src/errors.js";
 import { expect } from "../../../src/runtime/expect.js";
 
 describe("expect — sync chain", () => {
 	it("passes on success, throws AssertionError on failure", () => {
 		expect(1).toBe(1);
-		vExpect(() => expect(1).toBe(2)).toThrow(AssertionError);
+		vExpect(() => expect(1).toBe(2)).toThrow(E_HELIX_ASSERTION_FAILED);
 	});
 
 	it(".not inverts pass/fail", () => {
 		expect(1).not.toBe(2);
-		vExpect(() => expect(1).not.toBe(1)).toThrow(AssertionError);
+		vExpect(() => expect(1).not.toBe(1)).toThrow(E_HELIX_ASSERTION_FAILED);
 	});
 
 	it("captures actual/expected on the thrown error", () => {
@@ -18,8 +18,8 @@ describe("expect — sync chain", () => {
 			expect({ a: 1 }).toEqual({ a: 2 });
 			throw new Error("should have thrown");
 		} catch (err) {
-			vExpect(err).toBeInstanceOf(AssertionError);
-			const e = err as AssertionError;
+			vExpect(err).toBeInstanceOf(E_HELIX_ASSERTION_FAILED);
+			const e = err as E_HELIX_ASSERTION_FAILED;
 			vExpect(e.actual).toEqual({ a: 1 });
 			// `expected` is always an array of matcher args — stable shape for reporters.
 			vExpect(e.expected).toEqual([{ a: 2 }]);
@@ -36,7 +36,7 @@ describe("expect — async chains", () => {
 	it(".resolves fails when promise rejects", async () => {
 		await vExpect(
 			expect(Promise.reject(new Error("boom"))).resolves.toBe(1),
-		).rejects.toThrow(AssertionError);
+		).rejects.toThrow(E_HELIX_ASSERTION_FAILED);
 	});
 
 	it(".rejects runs matcher on rejection", async () => {
@@ -45,7 +45,7 @@ describe("expect — async chains", () => {
 
 	it(".rejects fails when promise resolves", async () => {
 		await vExpect(expect(Promise.resolve(1)).rejects.toThrow()).rejects.toThrow(
-			AssertionError,
+			E_HELIX_ASSERTION_FAILED,
 		);
 	});
 
@@ -54,7 +54,9 @@ describe("expect — async chains", () => {
 	});
 
 	it("throws when .resolves used on non-promise", async () => {
-		await vExpect(expect(42).resolves.toBe(42)).rejects.toThrow(AssertionError);
+		await vExpect(expect(42).resolves.toBe(42)).rejects.toThrow(
+			E_HELIX_ASSERTION_FAILED,
+		);
 	});
 
 	it(".not.resolves is supported (symmetric to .resolves.not)", async () => {
@@ -63,7 +65,7 @@ describe("expect — async chains", () => {
 
 	it("matcher exceptions are wrapped in AssertionError", () => {
 		// A constructor whose `Symbol.hasInstance` throws — `instanceof` will
-		// propagate that error. The engine must wrap it as AssertionError.
+		// propagate that error. The engine must wrap it as E_HELIX_ASSERTION_FAILED.
 		function Trap(): void {
 			/* no-op, just needs a .prototype */
 		}
@@ -72,7 +74,9 @@ describe("expect — async chains", () => {
 				throw new Error("trap");
 			},
 		});
-		vExpect(() => expect({}).toBeInstanceOf(Trap)).toThrow(AssertionError);
+		vExpect(() => expect({}).toBeInstanceOf(Trap)).toThrow(
+			E_HELIX_ASSERTION_FAILED,
+		);
 	});
 });
 
@@ -87,8 +91,8 @@ describe("expect — the message argument", () => {
 			thrown = err;
 		}
 
-		vExpect(thrown).toBeInstanceOf(AssertionError);
-		if (!(thrown instanceof AssertionError)) return;
+		vExpect(thrown).toBeInstanceOf(E_HELIX_ASSERTION_FAILED);
+		if (!(thrown instanceof E_HELIX_ASSERTION_FAILED)) return;
 		vExpect(thrown.message.startsWith("expected")).toBe(true);
 	});
 
@@ -100,7 +104,7 @@ describe("expect — the message argument", () => {
 			thrown = err;
 		}
 
-		vExpect(thrown).toBeInstanceOf(AssertionError);
+		vExpect(thrown).toBeInstanceOf(E_HELIX_ASSERTION_FAILED);
 		vExpect(String(thrown)).toContain("the total after tax");
 		// The diagnosis survives the label rather than being replaced by it.
 		vExpect(String(thrown)).toContain("4");
@@ -114,9 +118,10 @@ describe("expect — the message argument", () => {
 			thrown = err;
 		}
 
-		vExpect(thrown).toBeInstanceOf(AssertionError);
+		vExpect(thrown).toBeInstanceOf(E_HELIX_ASSERTION_FAILED);
 		// No label means no prefix: the message opens on the diagnosis itself.
-		if (!(thrown instanceof AssertionError)) throw new Error("not thrown");
+		if (!(thrown instanceof E_HELIX_ASSERTION_FAILED))
+			throw new Error("not thrown");
 		vExpect(thrown.message.startsWith("expected")).toBe(true);
 	});
 

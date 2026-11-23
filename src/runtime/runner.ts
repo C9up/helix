@@ -18,6 +18,7 @@
  * them deserves a sentence rather than a missing-property crash.
  */
 
+import { E_HELIX_RUNNER_NOT_DRIVABLE } from "../errors.js";
 import { type Emitter, emitter } from "./emitter.js";
 import { currentSuite, type SuiteHandle, setBail } from "./suite-taps.js";
 
@@ -27,23 +28,6 @@ export type ReporterHandler = (runner: Runner, emitter: Emitter) => unknown;
 export type ReporterContract =
 	| ReporterHandler
 	| { readonly name: string; handler: ReporterHandler };
-
-/**
- * Raised when a plugin drives the runner. The CLI owns discovery and execution;
- * a worker is handed one file and told to run it. Thrown rather than left
- * absent so the plugin gets a sentence instead of a missing-property crash.
- */
-export class RunnerNotDrivableError extends Error {
-	constructor(method: string) {
-		super(
-			`runner.${method}() is not available: helix runs one process per test ` +
-				"file, so the CLI owns discovery and execution and a worker only runs " +
-				"the file it was given. Reporting is the CLI's too — use `--reporters` " +
-				"or `run({ reporterInstance })`.",
-		);
-		this.name = "RunnerNotDrivableError";
-	}
-}
 
 /** Test counts for a run (`summary.aggregates`). */
 export interface SummaryAggregates {
@@ -171,24 +155,24 @@ export class Runner {
 		return suite === undefined ? [] : [suite];
 	}
 
-	/** Not available — see {@link RunnerNotDrivableError}. */
+	/** Not available — see {@link E_HELIX_RUNNER_NOT_DRIVABLE}. */
 	add(): never {
-		throw new RunnerNotDrivableError("add");
+		throw new E_HELIX_RUNNER_NOT_DRIVABLE(["add"]);
 	}
 
-	/** Not available — see {@link RunnerNotDrivableError}. */
+	/** Not available — see {@link E_HELIX_RUNNER_NOT_DRIVABLE}. */
 	start(): never {
-		throw new RunnerNotDrivableError("start");
+		throw new E_HELIX_RUNNER_NOT_DRIVABLE(["start"]);
 	}
 
-	/** Not available — see {@link RunnerNotDrivableError}. */
+	/** Not available — see {@link E_HELIX_RUNNER_NOT_DRIVABLE}. */
 	exec(): never {
-		throw new RunnerNotDrivableError("exec");
+		throw new E_HELIX_RUNNER_NOT_DRIVABLE(["exec"]);
 	}
 
-	/** Not available — see {@link RunnerNotDrivableError}. */
+	/** Not available — see {@link E_HELIX_RUNNER_NOT_DRIVABLE}. */
 	end(): never {
-		throw new RunnerNotDrivableError("end");
+		throw new E_HELIX_RUNNER_NOT_DRIVABLE(["end"]);
 	}
 
 	/**
