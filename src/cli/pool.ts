@@ -19,7 +19,11 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { StringDecoder } from "node:string_decoder";
-import { E_HELIX_INVALID_THREADS } from "../errors.js";
+import {
+	E_HELIX_INVALID_THREADS,
+	E_HELIX_TIMEOUT,
+	E_HELIX_WORKER_FAILED,
+} from "../errors.js";
 import { FRAME_PREFIX, PRE_HANDSHAKE_NONCE } from "../runtime/ipc-protocol.js";
 import type { FileResult } from "../runtime/run.js";
 import type { Reporter } from "./reporter.js";
@@ -95,6 +99,12 @@ export interface PoolConfig {
 export interface WorkerErrorMessage {
 	file: string | undefined;
 	message: string;
+	/**
+	 * The error's code: the thrown error's own when the worker sent it,
+	 * `E_HELIX_TIMEOUT` or `E_HELIX_WORKER_FAILED` when the pool diagnosed the
+	 * file itself.
+	 */
+	code?: string;
 	stack?: string;
 }
 
@@ -381,6 +391,7 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 					{
 						file,
 						message: `cannot draw the result nonce from the OS random source: ${error instanceof Error ? error.message : String(error)}`,
+						code: E_HELIX_WORKER_FAILED.code,
 					},
 				],
 				output: { stdout: "", stderr: "" },
@@ -431,6 +442,7 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 				errors.push({
 					file,
 					message: "worker exited without emitting a framed result",
+					code: E_HELIX_WORKER_FAILED.code,
 				});
 			}
 			const output = { stdout: stdout.toString(), stderr: stderr.toString() };
@@ -439,9 +451,12 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 			);
 		};
 		/** A failure the pool itself diagnosed: record it, kill, and stop. */
-		const abort = (message: string): void => {
+		const abort = (
+			message: string,
+			code = E_HELIX_WORKER_FAILED.code,
+		): void => {
 			if (settled) return;
-			errors.push({ file, message });
+			errors.push({ file, message, code });
 			kill();
 			settle();
 		};
@@ -479,6 +494,7 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 		const watchdog = setTimeout(() => {
 			abort(
 				`worker timed out after ${fileTimeoutMs}ms — the file did not finish within its deadline (fileTimeoutMs)`,
+				E_HELIX_TIMEOUT.code,
 			);
 		}, fileTimeoutMs);
 		watchdog.unref?.();
@@ -514,6 +530,7 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 			errors.push({
 				file: frame.file ?? file,
 				message: frame.message ?? "unknown worker error",
+				code: frame.code,
 				stack: frame.stack,
 			});
 			// An `unhandled` frame is not the end: the worker carries on with the
@@ -578,11 +595,13 @@ function runOne(file: string, cfg: PoolConfig): Promise<FileOutcome> {
 					errors.push({
 						file,
 						message: `worker was killed by ${signal} after the file reported its result`,
+						code: E_HELIX_WORKER_FAILED.code,
 					});
 				} else if (code !== null && code !== 0 && code !== expected) {
 					errors.push({
 						file,
 						message: `worker exited with code ${code} after the file reported its result`,
+						code: E_HELIX_WORKER_FAILED.code,
 					});
 				}
 			}
@@ -627,6 +646,7 @@ interface Frame {
 	result?: FileResult;
 	file?: string;
 	message?: string;
+	code?: string;
 	stack?: string;
 }
 
@@ -646,6 +666,7 @@ function parseFrame(payload: string): Frame | undefined {
 	const result = Reflect.get(msg, "result");
 	const file = Reflect.get(msg, "file");
 	const message = Reflect.get(msg, "message");
+	const code = Reflect.get(msg, "code");
 	const stack = Reflect.get(msg, "stack");
 	return {
 		type,
@@ -653,6 +674,7 @@ function parseFrame(payload: string): Frame | undefined {
 		result: isFileResult(result) ? result : undefined,
 		file: typeof file === "string" ? file : undefined,
 		message: typeof message === "string" ? message : undefined,
+		code: typeof code === "string" ? code : undefined,
 		stack: typeof stack === "string" ? stack : undefined,
 	};
 }

@@ -60,6 +60,7 @@ describe("resultNonce", () => {
 				file: path.resolve("a.test.ts"),
 				message:
 					"cannot draw the result nonce from the OS random source: entropy source unavailable",
+				code: "E_HELIX_WORKER_FAILED",
 			},
 		]);
 	});

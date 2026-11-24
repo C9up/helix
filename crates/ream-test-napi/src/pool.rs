@@ -7,7 +7,7 @@
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use napi::bindgen_prelude::*;
-use ream_test_core::ipc::{FileResult, WorkerError, WorkerOutgoing};
+use ream_test_core::ipc::{codes, FileResult, WorkerError, WorkerOutgoing};
 use ream_test_core::reporter::Reporter;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -66,8 +66,7 @@ pub async fn run_pool(
                 Err(_) => {
                     return Err(WorkerError {
                         file: Some(file.to_string_lossy().into_owned()),
-                        message: "pool semaphore was closed".into(),
-                        stack: None,
+                        ..WorkerError::coded(codes::INTERNAL, "pool semaphore was closed")
                     });
                 }
             };
@@ -105,8 +104,9 @@ pub async fn run_pool(
     let mut results = Vec::new();
     let mut errors = Vec::new();
     while let Some(join) = tasks.next().await {
-        let outcome =
-            join.map_err(|e| Error::from_reason(format!("worker task join failed: {}", e)))?;
+        let outcome = join.map_err(|e| {
+            crate::coded_error(codes::INTERNAL, format!("worker task join failed: {}", e))
+        })?;
         match outcome {
             // `None` = the file was never started because the bail gate closed.
             Ok(Some(file)) => {
@@ -216,8 +216,7 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
         result: None,
         errors: vec![WorkerError {
             file: Some(path_str.clone()),
-            message,
-            stack: None,
+            ..WorkerError::coded(codes::WORKER_FAILED, message)
         }],
         stdout: String::new(),
         stderr: String::new(),
@@ -354,7 +353,7 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
                 }
                 Some(Frame::Unhandled(e)) => errors.push(e),
                 Some(Frame::Broken(message)) => {
-                    errors.push(WorkerError { file: None, message, stack: None });
+                    errors.push(WorkerError::coded(codes::WORKER_FAILED, message));
                     kill_worker(&mut child).await;
                     killed = true;
                     break;
@@ -377,14 +376,13 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
                     break;
                 }
                 if !reported {
-                    errors.push(WorkerError {
-                        file: None,
-                        message: format!(
+                    errors.push(WorkerError::coded(
+                        codes::TIMEOUT,
+                        format!(
                             "worker timed out after {}ms — the file did not finish within its deadline (fileTimeoutMs)",
                             cfg.file_timeout.as_millis()
                         ),
-                        stack: None,
-                    });
+                    ));
                 } else if result.is_some() {
                     // Wording is the TS pool's, verbatim, so the two paths are
                     // indistinguishable.
@@ -413,32 +411,29 @@ async fn run_one_file(file: &std::path::Path, cfg: &PoolConfig) -> FileOutcome {
             0
         };
         match status.code() {
-            Some(code) if code != 0 && code != expected => errors.push(WorkerError {
-                file: None,
-                message: format!(
+            Some(code) if code != 0 && code != expected => errors.push(WorkerError::coded(
+                codes::WORKER_FAILED,
+                format!(
                     "worker exited with code {} after the file reported its result",
                     code
                 ),
-                stack: None,
-            }),
+            )),
             Some(_) => {}
-            None => errors.push(WorkerError {
-                file: None,
-                message: format!(
+            None => errors.push(WorkerError::coded(
+                codes::WORKER_FAILED,
+                format!(
                     "worker was killed by {} after the file reported its result",
                     exit_signal(&status)
                 ),
-                stack: None,
-            }),
+            )),
         }
     }
 
     if result.is_none() && errors.is_empty() {
-        errors.push(WorkerError {
-            file: None,
-            message: "worker exited without emitting a framed result".into(),
-            stack: None,
-        });
+        errors.push(WorkerError::coded(
+            codes::WORKER_FAILED,
+            "worker exited without emitting a framed result",
+        ));
     }
     for err in &mut errors {
         if err.file.is_none() {
@@ -830,6 +825,26 @@ process.stdin.once("instruction", () => {
 
         assert_eq!(results.len(), 0);
         assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code.as_deref(), Some(codes::WORKER_FAILED));
+    }
+
+    #[tokio::test]
+    async fn a_file_past_its_deadline_is_a_coded_timeout() {
+        let dir = temp_dir("filetimeout");
+        let entry = dir.join("hanging-worker.mjs");
+        std::fs::write(&entry, b"setInterval(() => {}, 1000)\n").unwrap();
+        let (reporter, _log) = recorder();
+        let mut cfg = config(entry.to_string_lossy().into_owned(), false);
+        cfg.file_timeout = Duration::from_millis(300);
+
+        let (results, errors) = run_pool(vec![dir.join("a.test.ts")], cfg, reporter)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("timed out after 300ms"));
+        assert_eq!(errors[0].code.as_deref(), Some(codes::TIMEOUT));
     }
 
     /// A worker can report a failure and then still refuse to exit — the file
@@ -1008,7 +1023,7 @@ process.stdin.once("instruction", async () => {{
         let entry = reporting_worker(
             &dir,
             "late-unhandled.mjs",
-            r#"setTimeout(() => { frame({ type: "unhandled", message: "uncaughtException: BOOM-late" }); process.exitCode = 1; }, 100);"#,
+            r#"setTimeout(() => { frame({ type: "unhandled", message: "uncaughtException: BOOM-late", code: "E_LATE" }); process.exitCode = 1; }, 100);"#,
         );
         let (results, errors) = run_single(entry, "late-unhandled-run").await;
         assert_eq!(results.len(), 1);
@@ -1016,6 +1031,8 @@ process.stdin.once("instruction", async () => {{
         assert_eq!(errors.len(), 1);
         assert!(errors[0].message.contains("BOOM-late"));
         assert!(errors[0].file.is_some());
+        // The code the worker sent is the one the reporters see.
+        assert_eq!(errors[0].code.as_deref(), Some("E_LATE"));
     }
 
     #[tokio::test]
@@ -1030,6 +1047,7 @@ process.stdin.once("instruction", async () => {{
             "unexpected message: {}",
             errors[0].message
         );
+        assert_eq!(errors[0].code.as_deref(), Some(codes::WORKER_FAILED));
     }
 
     #[tokio::test]

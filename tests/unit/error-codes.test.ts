@@ -236,6 +236,12 @@ describe("helix error codes — test outcomes", () => {
 		const result = await executeRoot(root, "inline", { timeoutMs: 50 });
 		const error = defined(defined(result.tests[0]).error);
 		expect(thrownValue(error)).toMatchObject({ code: "E_HELIX_TIMEOUT" });
+		// On the serialised error itself: what crosses to the CLI and its
+		// reporters, where the thrown value no longer exists.
+		expect(error.code).toBe("E_HELIX_TIMEOUT");
+		expect(JSON.parse(JSON.stringify(error))).toMatchObject({
+			code: "E_HELIX_TIMEOUT",
+		});
 	});
 
 	it("E_HELIX_TEST_ABORTED: meta.abort() fails the running test", async () => {
@@ -249,6 +255,49 @@ describe("helix error codes — test outcomes", () => {
 		const error = defined(defined(result.tests[0]).error);
 		expect(error.message).toBe("stop");
 		expect(thrownValue(error)).toMatchObject({ code: "E_HELIX_TEST_ABORTED" });
+		expect(error.code).toBe("E_HELIX_TEST_ABORTED");
+	});
+
+	it("E_HELIX_ASSERTION_FAILED: on the serialised failure of a test", async () => {
+		const root = resetRoot();
+		helixTest("fails", () => {
+			helixExpect(1).toBe(2);
+		});
+		helixTest("counts", () => {
+			helixExpect.assertions(2);
+			helixExpect(1).toBe(1);
+		});
+		helixTest("none", () => {
+			helixExpect.hasAssertions();
+		});
+		helixTest("passes anyway", () => {}).fails();
+		helixTest("plain", () => {
+			throw new Error("no code here");
+		});
+		const result = await executeRoot(root, "inline", {});
+		const codes = result.tests.map((t) => [t.name, t.error?.code]);
+		expect(codes).toEqual([
+			["fails", "E_HELIX_ASSERTION_FAILED"],
+			["counts", "E_HELIX_ASSERTION_FAILED"],
+			["none", "E_HELIX_ASSERTION_FAILED"],
+			["passes anyway", "E_HELIX_ASSERTION_FAILED"],
+			["plain", undefined],
+		]);
+		// An error without a code does not grow an empty `code` key.
+		expect(defined(result.tests[4]).error).not.toHaveProperty("code");
+	});
+
+	it("a code that is not a string is not carried", async () => {
+		const root = resetRoot();
+		helixTest("numeric", () => {
+			throw Object.assign(new Error("numeric code"), { code: 42 });
+		});
+		helixTest("node", () => {
+			throw Object.assign(new Error("missing"), { code: "ENOENT" });
+		});
+		const result = await executeRoot(root, "inline", {});
+		expect(defined(result.tests[0]).error).not.toHaveProperty("code");
+		expect(defined(result.tests[1]).error?.code).toBe("ENOENT");
 	});
 
 	it("E_HELIX_ASSERTION_FAILED: a failed expect()", () => {

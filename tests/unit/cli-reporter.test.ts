@@ -128,6 +128,41 @@ describe("helix > cli > reporter > SpecReporter", () => {
 		expect(sink.output).toContain("\x1b[32m"); // green
 	});
 
+	it("prints an error's code before its message, on tests and file errors", () => {
+		const sink = makeSink();
+		const r = new SpecReporter(sink, false);
+		const coded = failResult();
+		const [test] = coded.tests;
+		if (test?.error) test.error.code = "E_HELIX_ASSERTION_FAILED";
+		r.onFileResult(coded);
+		r.onFileResult(failResult());
+		r.onFileError({
+			file: "c.test.ts",
+			message: "worker exited without emitting a framed result",
+			code: "E_HELIX_WORKER_FAILED",
+		});
+		expect(sink.output).toContain(
+			"      [E_HELIX_ASSERTION_FAILED] expected 1 to be 2\n",
+		);
+		// Without a code, the message stands alone as before.
+		expect(sink.output).toContain("      expected 1 to be 2\n");
+		expect(sink.output).toContain(
+			"✘ c.test.ts: [E_HELIX_WORKER_FAILED] worker exited without emitting a framed result",
+		);
+	});
+
+	it("dims the code and keeps the message red with colours on", () => {
+		const sink = makeSink();
+		const r = new SpecReporter(sink, true);
+		const coded = failResult();
+		const [test] = coded.tests;
+		if (test?.error) test.error.code = "E_HELIX_TIMEOUT";
+		r.onFileResult(coded);
+		expect(sink.output).toContain(
+			"\x1b[90m[E_HELIX_TIMEOUT]\x1b[0m \x1b[31mexpected 1 to be 2\x1b[0m",
+		);
+	});
+
 	it("falls back to '<unknown>' for file errors with no file field", () => {
 		const sink = makeSink();
 		const r = new SpecReporter(sink, false);
@@ -156,6 +191,24 @@ describe("helix > cli > reporter > JsonReporter", () => {
 			event: "file:error",
 		});
 		expect(JSON.parse(defined(lines[3]))).toMatchObject({ event: "summary" });
+	});
+
+	it("carries the code of a test error and of a file error", () => {
+		const sink = makeSink();
+		const r = new JsonReporter(sink);
+		const coded = failResult();
+		const [test] = coded.tests;
+		if (test?.error) test.error.code = "E_HELIX_TIMEOUT";
+		r.onFileResult(coded);
+		r.onFileError({ file: "b", message: "late", code: "E_LATE" });
+		const [end, error] = sink.output.trim().split("\n");
+		expect(JSON.parse(defined(end))).toMatchObject({
+			result: { tests: [{ error: { code: "E_HELIX_TIMEOUT" } }] },
+		});
+		expect(JSON.parse(defined(error))).toMatchObject({
+			event: "file:error",
+			error: { code: "E_LATE" },
+		});
 	});
 });
 

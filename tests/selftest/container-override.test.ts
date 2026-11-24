@@ -9,7 +9,9 @@
  */
 
 import {
+	afterAll,
 	afterEach,
+	beforeAll,
 	clearActiveContainer,
 	describe,
 	expect,
@@ -151,5 +153,59 @@ describe("helix.overrideOn — specific container instance", () => {
 		overrideOn(c2, "svc", "c2-fake");
 		expect(c1.resolve("svc")).toBe("c1-real");
 		expect(c2.resolve("svc")).toBe("c2-fake");
+	});
+});
+
+// The same seam with the optional `swapped` + `swap` pair: one swap per
+// token, `restore` removes it outright (the AdonisJS shape `@c9up/ream`
+// keeps). A file-level fake installed in `beforeAll` must survive a test that
+// overrides the same token.
+class SwappableContainer {
+	readonly #bindings = new Map<unknown, () => unknown>();
+	readonly #swaps = new Map<unknown, () => unknown>();
+	singleton(token: unknown, factory: () => unknown): void {
+		this.#bindings.set(token, factory);
+	}
+	resolve(token: unknown): unknown {
+		const factory = this.#swaps.get(token) ?? this.#bindings.get(token);
+		if (!factory) throw new Error(`Container: no binding for ${String(token)}`);
+		return factory();
+	}
+	swap(token: unknown, factory: () => unknown): void {
+		this.#swaps.set(token, factory);
+	}
+	override(token: unknown, value: unknown): void {
+		this.#swaps.set(token, () => value);
+	}
+	swapped(token: unknown): (() => unknown) | undefined {
+		return this.#swaps.get(token);
+	}
+	restore(token: unknown): void {
+		this.#swaps.delete(token);
+	}
+}
+
+const mailers = new SwappableContainer();
+mailers.singleton("mailer", () => "REAL smtp mailer");
+
+describe("helix.override — a file-level swap outlives a test's override", () => {
+	beforeAll(() => {
+		mailers.swap("mailer", () => "file-level fake");
+	});
+	afterAll(() => {
+		mailers.restore("mailer");
+	});
+	afterEach(() => {
+		clearActiveContainer();
+	});
+
+	test("test 1 overrides the token the file swapped", () => {
+		useContainer(mailers);
+		override("mailer", "test-1 fake");
+		expect(mailers.resolve("mailer")).toBe("test-1 fake");
+	});
+
+	test("test 2 resolves the file's fake again, not the real mailer", () => {
+		expect(mailers.resolve("mailer")).toBe("file-level fake");
 	});
 });

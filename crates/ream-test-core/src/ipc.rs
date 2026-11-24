@@ -14,6 +14,10 @@ use serde::{Deserialize, Serialize};
 pub struct SerializedError {
     pub name: String,
     pub message: String,
+    /// The error's code (`E_HELIX_TIMEOUT`, `E_HELIX_ASSERTION_FAILED`, a
+    /// library's own), when it carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,8 +133,40 @@ pub struct WorkerError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
     pub message: String,
+    /// The error's code: the thrown error's own when the worker sent it, one
+    /// of [`codes`] when the pool diagnosed the file itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack: Option<String>,
+}
+
+impl WorkerError {
+    /// A file error the pool diagnosed itself, under one of [`codes`]. The
+    /// pool fills `file` in once the file settles.
+    pub fn coded(code: &str, message: impl Into<String>) -> Self {
+        Self {
+            file: None,
+            message: message.into(),
+            code: Some(code.to_string()),
+            stack: None,
+        }
+    }
+}
+
+/// The codes the engine raises, declared on the TypeScript side in
+/// `src/errors.ts` as the classes of helix's `errors` namespace.
+pub mod codes {
+    /// A test, a hook or a whole file ran past its deadline.
+    pub const TIMEOUT: &str = "E_HELIX_TIMEOUT";
+    /// A worker failed outside the tests: it could not start, sent a broken
+    /// frame, exited without a result, or exited in a way its result does not
+    /// explain.
+    pub const WORKER_FAILED: &str = "E_HELIX_WORKER_FAILED";
+    /// An invariant of helix itself broke. The engine's own refusals are this
+    /// too: the TypeScript side resolves `root` and hands over the file list,
+    /// so reaching one is a bug in helix.
+    pub const INTERNAL: &str = "E_HELIX_INTERNAL";
 }
 
 #[cfg(test)]
@@ -217,6 +253,63 @@ mod tests {
         assert_eq!(inner["hookErrors"][0]["message"], "afterAll broke");
         // A test with no phase does not grow a null one.
         assert!(out["suites"][0]["children"][1].get("errorPhase").is_none());
+    }
+
+    #[test]
+    fn an_error_code_survives_the_frame_both_ways() {
+        let frame = json!({
+            "type": "result",
+            "result": {
+                "file": "/t.test.ts",
+                "suites": [],
+                "tests": [{
+                    "name": "slow",
+                    "fullName": "slow",
+                    "status": "fail",
+                    "durationMs": 50,
+                    "error": {
+                        "name": "Exception",
+                        "message": "slow exceeded 50ms timeout",
+                        "code": "E_HELIX_TIMEOUT"
+                    }
+                }, {
+                    "name": "plain",
+                    "fullName": "plain",
+                    "status": "fail",
+                    "durationMs": 1,
+                    "error": { "name": "Error", "message": "boom" }
+                }],
+                "totals": { "pass": 0, "fail": 2, "skip": 0, "todo": 0 },
+                "durationMs": 51
+            }
+        });
+        let result = file_result(frame);
+        let error = result.tests[0].error.as_ref().expect("an error");
+        assert_eq!(error.code.as_deref(), Some("E_HELIX_TIMEOUT"));
+        let out = serde_json::to_value(&result).expect("serialises");
+        assert_eq!(out["tests"][0]["error"]["code"], "E_HELIX_TIMEOUT");
+        // An error without a code does not grow a null one.
+        assert!(out["tests"][1]["error"].get("code").is_none());
+
+        let fatal = serde_json::from_value::<WorkerOutgoing>(json!({
+            "type": "error",
+            "message": "cannot load",
+            "code": "ERR_MODULE_NOT_FOUND"
+        }));
+        let Ok(WorkerOutgoing::Error(error)) = fatal else {
+            panic!("expected an error frame, got {:?}", fatal);
+        };
+        assert_eq!(error.code.as_deref(), Some("ERR_MODULE_NOT_FOUND"));
+    }
+
+    #[test]
+    fn a_pool_diagnosis_carries_its_code() {
+        let error = WorkerError::coded(codes::WORKER_FAILED, "worker exited");
+        assert_eq!(error.code.as_deref(), Some("E_HELIX_WORKER_FAILED"));
+        assert_eq!(error.message, "worker exited");
+        assert!(error.file.is_none());
+        let out = serde_json::to_value(&error).expect("serialises");
+        assert_eq!(out["code"], "E_HELIX_WORKER_FAILED");
     }
 
     /// A describe tree nested `levels` deep, as the worker would frame it.

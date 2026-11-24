@@ -4,7 +4,9 @@
  * Adds two things to the raw container call:
  *   1. The override is registered against the active test context's
  *      auto-restore queue, so it's undone after the test even if the
- *      test body never calls `restore()` itself.
+ *      test body never calls `restore()` itself. Undone means the token
+ *      resolves as it did before the call: through a swap that was
+ *      already in place, or through its binding.
  *   2. A clear error when called outside a test (no AsyncLocalStorage
  *      frame) — the queued cleanup would never fire there.
  *
@@ -20,9 +22,24 @@ import {
 import { inTestContext, registerTestCleanup } from "../runtime/test-context.js";
 import type { ContainerLike, ContainerToken } from "../runtime/vi/index.js";
 
-/** Container surface helix needs: a value-based override + a restore. */
+/**
+ * Container surface helix needs: a value-based override + a restore.
+ *
+ * `swapped` + `swap` are optional. With both, the end-of-test cleanup puts
+ * back whatever swap was in place before the override (a fake the file
+ * installed in `beforeAll`, an outer `override()`); without them it falls
+ * back to `restore(token)`, which removes every swap of the token.
+ */
 export interface HelixContainer extends ContainerLike {
 	override(token: ContainerToken, value: unknown): void;
+	/**
+	 * The swap in place for `token` (`@c9up/ream`: its `ServiceFactory`), read
+	 * without running it; `undefined` when the token is not swapped. Opaque to
+	 * helix: only handed back to `swap`, never called.
+	 */
+	swapped?(token: ContainerToken): unknown;
+	/** Put back a swap read through `swapped`. */
+	swap?(token: ContainerToken, factory: unknown): void;
 }
 
 let activeContainer: HelixContainer | undefined;
@@ -78,11 +95,31 @@ export function overrideOn(
 	token: ContainerToken,
 	value: unknown,
 ): void {
+	const undo = undoFor(container, token);
 	container.override(token, value);
 	// `registerTestCleanup` returns false when called outside a test
 	// frame (e.g. raw vitest tests, REPL, top-level setup). In that
 	// case the caller is responsible for `container.restore(token)` —
 	// we don't queue a fallback that might fire in an unexpected
 	// frame.
-	registerTestCleanup(() => container.restore(token));
+	registerTestCleanup(undo);
+}
+
+/**
+ * The cleanup that returns `token` to how it resolved before this override.
+ *
+ * The container's `restore(token)` is flat: it removes the token's swap
+ * outright, including one installed before this test, so every later test
+ * would resolve the real service. Capturing the swap in place first and
+ * swapping it back undoes only this override; cleanups run last-registered
+ * first, so nested overrides unwind one level each.
+ */
+function undoFor(container: HelixContainer, token: ContainerToken): () => void {
+	const { swapped, swap } = container;
+	if (swapped === undefined || swap === undefined) {
+		return () => container.restore(token);
+	}
+	const previous = swapped.call(container, token);
+	if (previous === undefined) return () => container.restore(token);
+	return () => swap.call(container, token, previous);
 }

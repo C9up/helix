@@ -53,6 +53,25 @@ export const E_HELIX_TEST_ABORTED = createError<[string]>(
 );
 
 /**
+ * A `.only` / `.pin()` reached a run that does not allow them (on CI, or
+ * without `--allow-only`): the test fails instead of running, so a modifier
+ * left in a commit cannot narrow the run to a green subset.
+ */
+export const E_HELIX_UNEXPECTED_ONLY = createError<[string]>(
+	"Unexpected %s modifier. Remove it or pass --allow-only to bypass this error",
+	"E_HELIX_UNEXPECTED_ONLY",
+);
+
+/**
+ * A test file registered no test (often a typo, or tests registered on a
+ * second copy of helix). `--pass-with-no-tests` accepts it.
+ */
+export const E_HELIX_NO_TEST_SUITE = createError<[string]>(
+	"No test suite found in file %s",
+	"E_HELIX_NO_TEST_SUITE",
+);
+
+/**
  * A plugin tried to drive the runner. The CLI owns discovery and execution; a
  * worker is handed one file and told to run it. Thrown rather than left absent
  * so the plugin gets a sentence instead of a missing-property crash.
@@ -170,7 +189,21 @@ export const E_HELIX_WATCH_FAILED = createError<[string, string]>(
 	"E_HELIX_WATCH_FAILED",
 );
 
-/** The native engine is missing, stale or not built for this platform. */
+/**
+ * A worker failed outside the tests: it could not start, sent a broken frame,
+ * exited without a result, or exited in a way its result does not explain.
+ * The pool reports it as a file error under this code.
+ */
+export const E_HELIX_WORKER_FAILED = createError<[string]>(
+	"%s",
+	"E_HELIX_WORKER_FAILED",
+);
+
+/**
+ * The native engine is missing, stale or not built for this platform. The
+ * message names the platform package to install; the load error is its
+ * `cause`.
+ */
 export const E_HELIX_NATIVE_REQUIRED = createError<[string]>(
 	"%s",
 	"E_HELIX_NATIVE_REQUIRED",

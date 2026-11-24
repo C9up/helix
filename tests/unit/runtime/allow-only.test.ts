@@ -28,6 +28,9 @@ vDescribe("allowOnly: false", () => {
 			vExpect(defined(result.tests[0]).error?.message).toBe(
 				"Unexpected .only modifier. Remove it or pass --allow-only to bypass this error",
 			);
+			vExpect(defined(result.tests[0]).error?.code).toBe(
+				"E_HELIX_UNEXPECTED_ONLY",
+			);
 		},
 	);
 
@@ -49,6 +52,9 @@ vDescribe("allowOnly: false", () => {
 		const result = await executeRoot(root, "inline", { allowOnly: false });
 		vExpect(defined(result.tests[0]).error?.message).toMatch(
 			/^Unexpected \.pin\(\) modifier/,
+		);
+		vExpect(defined(result.tests[0]).error?.code).toBe(
+			"E_HELIX_UNEXPECTED_ONLY",
 		);
 	});
 

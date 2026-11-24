@@ -29,8 +29,10 @@
  */
 
 import { writeSync } from "node:fs";
+import { E_HELIX_NO_TEST_SUITE } from "../errors.js";
 import { cliArgs } from "./cli-args.js";
 import { FRAME_PREFIX, PRE_HANDSHAKE_NONCE } from "./ipc-protocol.js";
+import { errorCode } from "./run.js";
 import { runTestFile } from "./worker.js";
 
 interface RunMessage {
@@ -203,6 +205,7 @@ async function main(): Promise<void> {
 			type: "error",
 			file: undefined,
 			message: err instanceof Error ? err.message : String(err),
+			code: errorCode(err),
 			stack: err instanceof Error ? err.stack : undefined,
 			nonce: PRE_HANDSHAKE_NONCE,
 		}).catch(() => {});
@@ -228,6 +231,7 @@ async function main(): Promise<void> {
 			type: "unhandled",
 			file: instr.file,
 			message: `${kind}${when}: ${reason instanceof Error ? reason.message : String(reason)}`,
+			code: errorCode(reason),
 			stack: reason instanceof Error ? reason.stack : undefined,
 			nonce: instr.nonce,
 		});
@@ -253,7 +257,7 @@ async function main(): Promise<void> {
 			flags.passWithNoTests !== true &&
 			flags.listPinned !== true
 		) {
-			throw new Error(`No test suite found in file ${instr.file}`);
+			throw new E_HELIX_NO_TEST_SUITE([instr.file]);
 		}
 		await emit({ type: "result", result, nonce: instr.nonce });
 		reported = true;
@@ -265,6 +269,7 @@ async function main(): Promise<void> {
 				type: "unhandled",
 				file: instr.file,
 				message: `runner teardown failed: ${error.message}`,
+				code: error.code,
 				stack: error.stack,
 				nonce: instr.nonce,
 			});
@@ -277,6 +282,7 @@ async function main(): Promise<void> {
 			type: "error",
 			file: instr.file,
 			message: err instanceof Error ? err.message : String(err),
+			code: errorCode(err),
 			stack: err instanceof Error ? err.stack : undefined,
 			nonce: instr.nonce,
 		}).catch(() => {});

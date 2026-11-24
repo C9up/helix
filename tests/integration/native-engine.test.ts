@@ -1,7 +1,9 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { fromEngine, getNative } from "../../src/cli/native.js";
 import { run } from "../../src/cli/run.js";
+import { errors } from "../../src/index.js";
 import { resolveTsxLoader } from "../__helpers__/tsx-loader.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -78,4 +80,28 @@ describe("native engine (ream-test-napi) — plain-path cutover", () => {
 		});
 		expect(outer?.children[1]).not.toHaveProperty("children");
 	}, 30_000);
+
+	it("brings a refusal of the engine back as errors.E_HELIX_INTERNAL", async () => {
+		// The engine says `E_HELIX_INTERNAL: …`; without the boundary the caller
+		// would get a bare napi GenericFailure.
+		const refused: unknown = await getNative()
+			.run({ root: "relative/dir", workerEntry })
+			.then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+		expect(refused).toBeInstanceOf(Error);
+		const error = fromEngine(refused);
+		expect(error).toBeInstanceOf(errors.E_HELIX_INTERNAL);
+		expect(error.code).toBe("E_HELIX_INTERNAL");
+		expect(error.message).toMatch(/^run: `root` must be absolute, got /);
+		expect(error.cause).toBe(refused);
+	});
+
+	it("keeps a rejection without the code whole, under E_HELIX_INTERNAL", () => {
+		const error = fromEngine(new Error("something else broke"));
+		expect(error).toBeInstanceOf(errors.E_HELIX_INTERNAL);
+		expect(error.message).toBe("something else broke");
+		expect(fromEngine("not even an Error").message).toBe("not even an Error");
+	});
 });

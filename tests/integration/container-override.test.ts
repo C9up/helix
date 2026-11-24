@@ -3,7 +3,7 @@
  * manual + auto restore, and the `withTestContext` cleanup lifecycle.
  *
  * helix's override facade operates on a duck-typed `HelixContainer`
- * (`override` + `restore`), so this suite drives it with a minimal in-test
+ * (`override` + `restore`, optionally `swapped` + `swap`), so this suite drives it with a minimal in-test
  * container — helix stays dependency-free. The real pairing with
  * `@c9up/ream`'s Container lives in the kitchen-sink integration app.
  */
@@ -45,6 +45,133 @@ class StubContainer {
 		else this.#overrides.delete(token);
 	}
 }
+
+/**
+ * Mirrors the swap slice of `@c9up/ream`'s Container: ONE swap per token
+ * (`swap` replaces, `restore` removes it outright, as in AdonisJS), plus the
+ * `swapped` reader the facade uses to put a previous swap back.
+ */
+type Factory = () => unknown;
+class SwappableContainer {
+	readonly #factories = new Map<unknown, () => unknown>();
+	readonly #swaps = new Map<unknown, Factory>();
+	readonly calls: string[] = [];
+	singleton(token: unknown, factory: () => unknown): void {
+		this.#factories.set(token, factory);
+	}
+	async resolve(token: unknown): Promise<unknown> {
+		const swap = this.#swaps.get(token);
+		if (swap) return swap();
+		const factory = this.#factories.get(token);
+		if (!factory) throw new Error(`no binding for ${String(token)}`);
+		return factory();
+	}
+	swap(token: unknown, factory: Factory): void {
+		this.calls.push(`swap:${String(token)}`);
+		this.#swaps.set(token, factory);
+	}
+	override(token: unknown, value: unknown): void {
+		this.#swaps.set(token, () => value);
+	}
+	swapped(token: unknown): Factory | undefined {
+		return this.#swaps.get(token);
+	}
+	restore(token?: unknown): void {
+		this.calls.push(`restore:${String(token)}`);
+		if (token === undefined) this.#swaps.clear();
+		else this.#swaps.delete(token);
+	}
+}
+
+describe("helix.override — puts back the swap that was in place", () => {
+	afterEach(() => {
+		clearActiveContainer();
+	});
+
+	it("a file-level swap is back after a test overrides the same token", async () => {
+		const container = new SwappableContainer();
+		container.singleton("mailer", () => "REAL smtp mailer");
+		container.swap("mailer", () => "file-level fake"); // a beforeAll
+
+		await withTestContext(async () => {
+			overrideOn(container, "mailer", "test-1 fake");
+			await expect(container.resolve("mailer")).resolves.toBe("test-1 fake");
+		});
+
+		await expect(container.resolve("mailer")).resolves.toBe("file-level fake");
+		// The next test sees the file's fake too, not the real binding.
+		await withTestContext(async () => {
+			await expect(container.resolve("mailer")).resolves.toBe(
+				"file-level fake",
+			);
+		});
+	});
+
+	it("two nested overrides unwind one level each, back to the outer swap", async () => {
+		const container = new SwappableContainer();
+		container.singleton("mailer", () => "real");
+		container.swap("mailer", () => "outer fake");
+		useContainer(container);
+
+		await withTestContext(async () => {
+			override("mailer", "first");
+			override("mailer", "second");
+			await expect(container.resolve("mailer")).resolves.toBe("second");
+			container.calls.length = 0;
+		});
+
+		// Last registered first: back to "first", then to "outer fake".
+		expect(container.calls).toEqual(["swap:mailer", "swap:mailer"]);
+		await expect(container.resolve("mailer")).resolves.toBe("outer fake");
+	});
+
+	it("an override in a nested frame is undone when that frame ends", async () => {
+		const container = new SwappableContainer();
+		container.singleton("mailer", () => "real");
+
+		await withTestContext(async () => {
+			overrideOn(container, "mailer", "outer test fake");
+			await withTestContext(async () => {
+				overrideOn(container, "mailer", "inner fake");
+			});
+			await expect(container.resolve("mailer")).resolves.toBe(
+				"outer test fake",
+			);
+		});
+
+		await expect(container.resolve("mailer")).resolves.toBe("real");
+	});
+
+	it("with no swap before it, the real binding is back (restore, not swap)", async () => {
+		const container = new SwappableContainer();
+		container.singleton("mailer", () => "real");
+
+		await withTestContext(async () => {
+			overrideOn(container, "mailer", "fake");
+		});
+
+		expect(container.calls).toEqual(["restore:mailer"]);
+		expect(container.swapped("mailer")).toBeUndefined();
+		await expect(container.resolve("mailer")).resolves.toBe("real");
+	});
+
+	it("falls back to restore(token) on a container that can read swaps but not put one back", async () => {
+		const restored: unknown[] = [];
+		const container = {
+			override(): void {},
+			swapped: (): unknown => () => "outer",
+			restore(token: unknown): void {
+				restored.push(token);
+			},
+		};
+
+		await withTestContext(async () => {
+			overrideOn(container, "mailer", "fake");
+		});
+
+		expect(restored).toEqual(["mailer"]);
+	});
+});
 
 describe("helix.override — facade auto-restore", () => {
 	afterEach(() => {

@@ -8,10 +8,15 @@
  */
 
 import {
+	clearTimeout as clearRealTimeout,
+	setTimeout as setRealTimeout,
+} from "node:timers";
+import {
 	E_HELIX_ASSERTION_FAILED,
 	E_HELIX_INTERNAL,
 	E_HELIX_TEST_ABORTED,
 	E_HELIX_TIMEOUT,
+	E_HELIX_UNEXPECTED_ONLY,
 } from "../errors.js";
 import { buildTestContext } from "./context.js";
 import {
@@ -69,6 +74,11 @@ export interface SuiteResult {
 export interface SerializedError {
 	name: string;
 	message: string;
+	/**
+	 * The error's code (`E_HELIX_TIMEOUT`, `E_HELIX_ASSERTION_FAILED`, a
+	 * library's own), when it carries one as a string.
+	 */
+	code?: string;
 	stack?: string;
 	actual?: unknown;
 	expected?: unknown;
@@ -257,8 +267,32 @@ function withThrown(
 	return serialized;
 }
 
+/**
+ * The code of the assertion failures helix builds itself (an unmet
+ * `expect.assertions(n)`, a `test.fails()` that passed): the same code a
+ * failed `expect()` carries.
+ */
+const ASSERTION_FAILED = E_HELIX_ASSERTION_FAILED.code;
+
 /** The reason helix attaches to a test skipped because the run bailed. */
 const BAIL_SKIP_REASON = "Skipped due to bail mode";
+
+/**
+ * The code a thrown value carries, when it is a string — a flare `Exception`'s
+ * `E_…`, or Node's `ERR_…` / `ENOENT`. Anything else is not a code a reporter
+ * can print or the JSON output can promise.
+ */
+export function errorCode(err: unknown): string | undefined {
+	if (err === null || typeof err !== "object") return undefined;
+	const code: unknown = Reflect.get(err, "code");
+	return typeof code === "string" ? code : undefined;
+}
+
+/** `{ code }` when `err` carries one, `{}` otherwise — no `code: undefined` key. */
+function codeOf(err: unknown): { code?: string } {
+	const code = errorCode(err);
+	return code === undefined ? {} : { code };
+}
 
 export function serializeError(err: unknown): SerializedError {
 	if (err instanceof E_HELIX_ASSERTION_FAILED) {
@@ -266,6 +300,7 @@ export function serializeError(err: unknown): SerializedError {
 			{
 				name: err.name,
 				message: err.message,
+				...codeOf(err),
 				stack: err.stack,
 				actual: err.actual,
 				expected: err.expected,
@@ -276,7 +311,12 @@ export function serializeError(err: unknown): SerializedError {
 	}
 	if (err instanceof Error) {
 		return withThrown(
-			{ name: err.name, message: err.message, stack: err.stack },
+			{
+				name: err.name,
+				message: err.message,
+				...codeOf(err),
+				stack: err.stack,
+			},
 			err,
 		);
 	}
@@ -401,6 +441,7 @@ function combineErrors(
 	return {
 		name: primary.name,
 		message: `${primary.message}\n+ teardown also failed: ${secondary.message}`,
+		...codeOf(primary),
 		stack: primary.stack,
 		actual: primary.actual,
 		expected: primary.expected,
@@ -416,16 +457,38 @@ interface TimeoutController {
 	reset(ms?: number): void;
 }
 
+/**
+ * The deadline timer is a real, REFERENCED timer, armed only while a race is
+ * pending and cleared the moment it settles.
+ *
+ * Referenced, because a test awaiting a promise nothing will ever settle
+ * leaves nothing else in the event loop: an unreferenced deadline let the
+ * worker exit mid-test, and the file failed as a crashed worker instead of
+ * the test failing with `E_HELIX_TIMEOUT`. Cleared on settle (resolve AND
+ * reject) and never armed outside a race, so it cannot hold the process open
+ * once the run is over.
+ *
+ * Taken from `node:timers`, not the globals: `vi.useFakeTimers()` replaces
+ * `globalThis.setTimeout`, and a deadline queued on the fake clock would
+ * never fire (and would show up in `vi.getTimerCount()`).
+ */
 function makeTimeoutController(ms: number, label: string): TimeoutController {
 	let timer: NodeJS.Timeout | undefined;
 	let rejectTimeout: ((err: unknown) => void) | undefined;
 	let current = ms;
+	const disarm = () => {
+		if (timer) clearRealTimeout(timer);
+		timer = undefined;
+	};
 	const arm = () => {
-		if (current <= 0) return;
-		timer = setTimeout(() => {
-			rejectTimeout?.(new E_HELIX_TIMEOUT([label, current]));
-		}, current);
-		timer.unref?.();
+		disarm();
+		const reject = rejectTimeout;
+		if (current <= 0 || reject === undefined) return;
+		const deadline = current;
+		timer = setRealTimeout(() => {
+			timer = undefined;
+			reject(new E_HELIX_TIMEOUT([label, deadline]));
+		}, deadline);
 	};
 	return {
 		race<T>(work: Promise<T> | T): Promise<T> {
@@ -434,16 +497,12 @@ function makeTimeoutController(ms: number, label: string): TimeoutController {
 				rejectTimeout = reject;
 				arm();
 			});
-			return Promise.race([
-				Promise.resolve(work).then((v) => {
-					if (timer) clearTimeout(timer);
-					return v;
-				}),
-				timeout,
-			]);
+			return Promise.race([Promise.resolve(work), timeout]).finally(() => {
+				rejectTimeout = undefined;
+				disarm();
+			});
 		},
 		reset(newMs?: number): void {
-			if (timer) clearTimeout(timer);
 			if (newMs !== undefined) current = newMs;
 			arm();
 		},
@@ -682,15 +741,18 @@ async function runTest(
 		!deferredSkip &&
 		(node.mode === "only" || ancestorHasOnly(node))
 	) {
-		const modifier = node.pinned === true ? ".pin()" : ".only";
+		const refusal = new E_HELIX_UNEXPECTED_ONLY([
+			node.pinned === true ? ".pin()" : ".only",
+		]);
 		const r: TestResult = {
 			name: node.name,
 			fullName: baseFullName,
 			status: "fail",
 			durationMs: 0,
 			error: {
-				name: "Error",
-				message: `Unexpected ${modifier} modifier. Remove it or pass --allow-only to bypass this error`,
+				name: refusal.name,
+				message: refusal.message,
+				...codeOf(refusal),
 			},
 			errorPhase: "setup",
 		};
@@ -1031,6 +1093,7 @@ async function runAttempt(
 				: {
 						name: "AssertionError",
 						message: `test "${fullName}" was expected to fail (test.fails) but passed`,
+						code: ASSERTION_FAILED,
 					};
 			errorPhase = testErr === undefined ? undefined : "test";
 		}
@@ -1111,12 +1174,14 @@ function checkAssertionCount(fullName: string): SerializedError | undefined {
 		return {
 			name: "AssertionError",
 			message: `test "${fullName}" expected ${state.expected} assertion(s) but ran ${state.count}`,
+			code: ASSERTION_FAILED,
 		};
 	}
 	if (state.hasAssertions && state.count === 0) {
 		return {
 			name: "AssertionError",
 			message: `test "${fullName}" expected at least one assertion but ran none`,
+			code: ASSERTION_FAILED,
 		};
 	}
 	return undefined;

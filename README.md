@@ -5,6 +5,34 @@ Vitest-compatible test runner CLI with fluent assertions, container
 overrides, and time-travel. Host-specific fakes (bus / HTTP / DB) live in
 their own integration packages, not here — helix stays dependency-light.
 
+## Installation
+
+```sh
+pnpm add -D @c9up/helix
+```
+
+`helix test` runs through a Rust engine. Each platform's engine is its own npm package, which `@c9up/helix` lists as an optional dependency at its exact version:
+
+| Platform | Package |
+|---|---|
+| Linux x64 (glibc) | `@c9up/helix-linux-x64-gnu` |
+| Linux arm64 (glibc) | `@c9up/helix-linux-arm64-gnu` |
+| macOS x64 | `@c9up/helix-darwin-x64` |
+| macOS arm64 | `@c9up/helix-darwin-arm64` |
+| Windows x64 | `@c9up/helix-win32-x64-msvc` |
+
+Your package manager installs only the one that matches the machine (`os`, `cpu` and `libc` fields), so an install downloads one binary and needs no Rust toolchain. An install run with optional dependencies omitted (`--no-optional`, `--omit=optional`) skips it.
+
+If the engine is missing, a plain `helix test` run throws `E_HELIX_NATIVE_REQUIRED`, naming the package to install:
+
+```text
+The @c9up/helix native engine is not loaded. Install @c9up/helix-linux-x64-gnu at the exact version of @c9up/helix: ...
+```
+
+The load error itself is the exception's `cause`. A run with `--coverage`, `--diff-cov` or `--list-pinned`, or with a `reporterInstance` passed to `run()` from `@c9up/helix/runner`, goes through the TypeScript pool, which does not load the engine.
+
+In a checkout of this repository, `pnpm build:napi` builds `index.<platform>.node` at the package root, and helix loads that file before looking for the platform package. `node scripts/platform-packages.mjs` rewrites the platform packages' manifests (`npm/<platform>/package.json`) and the optional dependencies after a version bump; CI fails when they are stale.
+
 ## Sub-barrels
 
 - `@c9up/helix` — assertions + `expect`, the test entry point

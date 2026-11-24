@@ -37,7 +37,7 @@ import {
 } from "./coverage/index.js";
 import { type DiscoveryOptions, discover } from "./discover.js";
 import { writeFailedCache } from "./failed-cache.js";
-import { getNative } from "./native.js";
+import { fromEngine, getNative } from "./native.js";
 import { runPool } from "./pool.js";
 import { makeReporters, type Reporter } from "./reporter.js";
 import {
@@ -234,6 +234,8 @@ async function runNative(
 		nodeArgs: config.nodeArgs,
 		useColors: config.useColors ?? process.stdout.isTTY === true,
 		silent: config.silent,
+	}).catch((error: unknown) => {
+		throw fromEngine(error);
 	});
 	const totals: Totals = {
 		pass: payload.pass,

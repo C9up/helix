@@ -94,6 +94,19 @@ fn yellow(s: &str, use_colors: bool) -> String {
     }
 }
 
+/// An error's message, after its code in brackets when it carries one — the
+/// code is what a reader searches the docs for.
+fn coded(code: Option<&str>, message: &str, use_colors: bool) -> String {
+    match code {
+        Some(code) => format!(
+            "{} {}",
+            dim(&format!("[{}]", code), use_colors),
+            red(message, use_colors)
+        ),
+        None => red(message, use_colors),
+    }
+}
+
 impl<W: Write> Reporter for SpecReporter<W> {
     fn on_file_start(&mut self, file: &str) {
         let _ = writeln!(
@@ -114,7 +127,11 @@ impl<W: Write> Reporter for SpecReporter<W> {
             };
             let _ = writeln!(self.sink, "  {} {}", marker, name);
             if let Some(err) = &t.error {
-                let _ = writeln!(self.sink, "      {}", red(&err.message, self.use_colors));
+                let _ = writeln!(
+                    self.sink,
+                    "      {}",
+                    coded(err.code.as_deref(), &err.message, self.use_colors)
+                );
                 if let (Some(a), Some(e)) = (&err.actual, &err.expected) {
                     let _ = writeln!(
                         self.sink,
@@ -140,7 +157,10 @@ impl<W: Write> Reporter for SpecReporter<W> {
             "{} {}: {}",
             red("✘", self.use_colors),
             file,
-            error.message
+            match &error.code {
+                Some(code) => format!("[{}] {}", code, error.message),
+                None => error.message.clone(),
+            }
         );
     }
 
@@ -204,4 +224,89 @@ fn print_summary<W: Write>(sink: &mut W, summary: &Summary) {
         t.pass, t.fail, t.skip, t.todo, t.file_errors,
     );
     let _ = writeln!(sink, "  {} ms", summary.duration.as_millis());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ipc::{FileTotals, SerializedError, TestResult};
+
+    fn failing(code: Option<&str>) -> FileResult {
+        FileResult {
+            file: "/t.test.ts".into(),
+            suites: vec![],
+            tests: vec![TestResult {
+                name: "slow".into(),
+                full_name: "slow".into(),
+                status: TestStatus::Fail,
+                duration_ms: 50,
+                error: Some(SerializedError {
+                    name: "Exception".into(),
+                    message: "slow exceeded 50ms timeout".into(),
+                    code: code.map(str::to_string),
+                    stack: None,
+                    actual: None,
+                    expected: None,
+                    operator: None,
+                }),
+                error_phase: None,
+            }],
+            totals: FileTotals {
+                pass: 0,
+                fail: 1,
+                skip: 0,
+                todo: 0,
+            },
+            duration_ms: 50,
+        }
+    }
+
+    fn worker_error() -> WorkerError {
+        WorkerError {
+            file: Some("/t.test.ts".into()),
+            ..WorkerError::coded(crate::ipc::codes::WORKER_FAILED, "worker exited")
+        }
+    }
+
+    #[test]
+    fn spec_prints_the_code_before_the_message() {
+        let mut spec = SpecReporter::new(Vec::new(), false);
+        spec.on_file_result(&failing(Some("E_HELIX_TIMEOUT")));
+        spec.on_file_result(&failing(None));
+        spec.on_file_error(&worker_error());
+        let out = String::from_utf8(spec.sink).expect("utf8");
+        assert!(
+            out.contains("      [E_HELIX_TIMEOUT] slow exceeded 50ms timeout\n"),
+            "{}",
+            out
+        );
+        assert!(
+            out.contains("      slow exceeded 50ms timeout\n"),
+            "{}",
+            out
+        );
+        assert!(
+            out.contains("✘ /t.test.ts: [E_HELIX_WORKER_FAILED] worker exited\n"),
+            "{}",
+            out
+        );
+    }
+
+    #[test]
+    fn json_carries_the_code_of_test_and_file_errors() {
+        let mut json = JsonReporter::new(Vec::new());
+        json.on_file_result(&failing(Some("E_HELIX_TIMEOUT")));
+        json.on_file_error(&worker_error());
+        let out = String::from_utf8(json.sink).expect("utf8");
+        let lines: Vec<serde_json::Value> = out
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("one JSON object per line"))
+            .collect();
+        assert_eq!(
+            lines[0]["result"]["tests"][0]["error"]["code"],
+            "E_HELIX_TIMEOUT"
+        );
+        assert_eq!(lines[1]["event"], "file:error");
+        assert_eq!(lines[1]["error"]["code"], "E_HELIX_WORKER_FAILED");
+    }
 }

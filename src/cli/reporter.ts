@@ -41,6 +41,19 @@ const ANSI = {
 	yellow: (s: string, on: boolean): string => (on ? `\x1b[33m${s}\x1b[0m` : s),
 };
 
+/**
+ * An error's message, after its code in brackets when it carries one — the
+ * code is what a reader searches the docs for.
+ */
+function coded(
+	error: { message: string; code?: string },
+	useColors: boolean,
+): string {
+	const message = ANSI.red(error.message, useColors);
+	if (error.code === undefined) return message;
+	return `${ANSI.dim(`[${error.code}]`, useColors)} ${message}`;
+}
+
 export class DotReporter implements Reporter {
 	readonly #sink: Sink;
 
@@ -97,9 +110,7 @@ export class SpecReporter implements Reporter {
 							: ANSI.dim("☐", this.#useColors);
 			this.#sink.writeLine(`  ${marker} ${t.fullName}`);
 			if (t.error) {
-				this.#sink.writeLine(
-					`      ${ANSI.red(t.error.message, this.#useColors)}`,
-				);
+				this.#sink.writeLine(`      ${coded(t.error, this.#useColors)}`);
 				if (t.error.actual !== undefined && t.error.expected !== undefined) {
 					this.#sink.writeLine(
 						`      ${ANSI.dim("actual:  ", this.#useColors)} ${JSON.stringify(t.error.actual)}`,
@@ -113,8 +124,12 @@ export class SpecReporter implements Reporter {
 	}
 	onFileError(error: WorkerErrorMessage): void {
 		const file = error.file ?? "<unknown>";
+		const message =
+			error.code === undefined
+				? error.message
+				: `[${error.code}] ${error.message}`;
 		this.#sink.writeLine(
-			`${ANSI.red("✘", this.#useColors)} ${file}: ${error.message}`,
+			`${ANSI.red("✘", this.#useColors)} ${file}: ${message}`,
 		);
 	}
 	onSummary(summary: Summary): void {

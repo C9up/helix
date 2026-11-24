@@ -11,7 +11,7 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use ream_test_core::ipc::{FileResult, WorkerError};
+use ream_test_core::ipc::{codes, FileResult, WorkerError};
 use ream_test_core::{
     discover, reporter::Reporter, DiscoveryOptions, DotReporter, JsonReporter, SpecReporter,
     Summary,
@@ -22,6 +22,12 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 mod pool;
+
+/// A refusal of the engine, as `CODE: message`: the TypeScript side reads the
+/// code back and rethrows the matching class of helix's `errors` namespace.
+pub(crate) fn coded_error(code: &str, message: impl std::fmt::Display) -> Error {
+    Error::from_reason(format!("{}: {}", code, message))
+}
 
 #[napi(object)]
 pub struct RunConfig {
@@ -132,10 +138,10 @@ pub async fn run(config: RunConfig) -> Result<SummaryPayload> {
     let started = std::time::Instant::now();
     let root = PathBuf::from(&config.root);
     if !root.is_absolute() {
-        return Err(Error::from_reason(format!(
-            "run: `root` must be absolute, got {:?}",
-            config.root
-        )));
+        return Err(coded_error(
+            codes::INTERNAL,
+            format!("run: `root` must be absolute, got {:?}", config.root),
+        ));
     }
 
     let files: Vec<PathBuf> = match config.files {
@@ -143,7 +149,7 @@ pub async fn run(config: RunConfig) -> Result<SummaryPayload> {
         _ => {
             let opts = DiscoveryOptions::default();
             discover(&root, &opts)
-                .map_err(|e| Error::from_reason(format!("discovery failed: {}", e)))?
+                .map_err(|e| coded_error(codes::INTERNAL, format!("discovery failed: {}", e)))?
         }
     };
 
@@ -202,8 +208,12 @@ pub async fn run(config: RunConfig) -> Result<SummaryPayload> {
         r.on_summary(&summary);
     }
 
-    let json = serde_json::to_string(&summary)
-        .map_err(|e| Error::from_reason(format!("summary serialization failed: {}", e)))?;
+    let json = serde_json::to_string(&summary).map_err(|e| {
+        coded_error(
+            codes::INTERNAL,
+            format!("summary serialization failed: {}", e),
+        )
+    })?;
 
     Ok(SummaryPayload {
         pass: summary.totals.pass as u32,
@@ -289,11 +299,7 @@ mod tests {
 
         multi.on_file_start("a.test.ts");
         multi.on_file_result(&file_result());
-        multi.on_file_error(&WorkerError {
-            file: None,
-            message: "boom".into(),
-            stack: None,
-        });
+        multi.on_file_error(&WorkerError::coded(codes::INTERNAL, "boom"));
         multi.on_summary(&Summary::default());
 
         assert_eq!(
@@ -308,6 +314,39 @@ mod tests {
                 "a:summary",
                 "b:summary",
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_of_the_engine_leads_with_its_code() {
+        // The TypeScript boundary reads the code back off the message: a
+        // refusal without one would reach the caller as a bare GenericFailure.
+        let refused = run(RunConfig {
+            root: "relative/dir".into(),
+            files: None,
+            threads: None,
+            timeout_ms: None,
+            default_timeout_ms: None,
+            file_timeout_ms: None,
+            reporter: None,
+            reporters: None,
+            bail: None,
+            worker_entry: "unused.mjs".into(),
+            node_bin: None,
+            node_args: None,
+            use_colors: None,
+            silent: None,
+        })
+        .await;
+        let Err(error) = refused else {
+            panic!("a relative root must be refused");
+        };
+        assert!(
+            error
+                .reason
+                .starts_with("E_HELIX_INTERNAL: run: `root` must be absolute"),
+            "{}",
+            error.reason
         );
     }
 
